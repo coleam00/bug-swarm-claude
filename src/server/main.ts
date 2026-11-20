@@ -9,7 +9,7 @@ const { port, hostname } = listenConfig(process.env);
 const dataDir = process.env.DATA_DIR ?? "data";
 const db = openDb(join(dataDir, "app.db"));
 const app = createApp(db, {
-  // Behind Railway: the rightmost X-Forwarded-For hop. Locally there is none: the socket address.
+  // Behind Railway: X-Real-IP (or the rightmost X-Forwarded-For hop). Locally neither: the socket address.
   clientIp: (c) => {
     const forwarded = forwardedClientIp(c);
     if (forwarded !== "unknown") return forwarded;

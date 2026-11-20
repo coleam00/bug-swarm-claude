@@ -18,7 +18,8 @@ type Phase = { kind: "name" } | { kind: "playing"; run: number } | { kind: "over
 
 /** Game over ignores input this long, so the finger still steering doesn't restart at once. */
 const RESTART_DELAY_MS = 750;
-const TOP_POLL_MS = 5000;
+// Every 4 s: with the server's 1 s cache, a hidden name leaves this screen within 5 s.
+const TOP_POLL_MS = 4000;
 
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());

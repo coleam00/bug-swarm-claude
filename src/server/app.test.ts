@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { createApp } from "./app";
-import { hideName, openDb } from "./db";
+import { computeStats, hideName, openDb } from "./db";
 
 let dir: string;
 let db: Database;
@@ -76,6 +76,22 @@ describe("run start", () => {
     await startRun(a);
   });
 
+  test("by default the client is X-Real-IP, else the rightmost X-Forwarded-For entry", async () => {
+    const a = createApp(db, { now: () => clock });
+    const start = (headers: Record<string, string>) =>
+      a.request("/api/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({ playerId: "player-0001", name: "Robo" }),
+      });
+    for (let i = 0; i < 30; i++) {
+      expect((await start({ "x-real-ip": "9.9.9.9", "x-forwarded-for": `10.0.0.${i}` })).status).toBe(200);
+    }
+    expect((await start({ "x-real-ip": "9.9.9.9" })).status).toBe(429);
+    expect((await start({ "x-forwarded-for": "9.9.9.9" })).status).toBe(429);
+    expect((await start({ "x-forwarded-for": "9.9.9.9, 8.8.8.8" })).status).toBe(200);
+  });
+
   test("an oversize body is 413, with or without a content-length", async () => {
     const body = JSON.stringify({ playerId: "player-0001", name: "x".repeat(3000) });
     const sized = await app().request("/api/runs", {
@@ -100,6 +116,16 @@ describe("run end", () => {
     clock += 30_000;
     expect((await post(a, `/api/runs/${runId}/end`, endBody(130, 10, 30))).status).toBe(200);
     expect((await post(a, `/api/runs/${runId}/end`, endBody(130, 10, 30))).status).toBe(409);
+  });
+
+  test("records whether the run was played by touch", async () => {
+    const a = app();
+    const touchRun = await startRun(a);
+    const mouseRun = await startRun(a);
+    clock += 30_000;
+    expect((await post(a, `/api/runs/${touchRun}/end`, endBody(30, 0, 30, true))).status).toBe(200);
+    expect((await post(a, `/api/runs/${mouseRun}/end`, endBody(30, 0, 30, false))).status).toBe(200);
+    expect(computeStats(db).touchShare).toBe(50);
   });
 
   test("an unknown run is 404", async () => {

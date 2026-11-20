@@ -31,13 +31,15 @@ export type AppOptions = {
 };
 
 /**
- * Behind Railway the socket address is the proxy, so the client is the rightmost
- * X-Forwarded-For entry: the hop the platform's edge appended (entries to its left are
+ * Behind Railway the socket address is the proxy. Railway documents X-Real-IP as the client's
+ * address (docs.railway.com, networking specs and limits), so that comes first. Otherwise the
+ * rightmost X-Forwarded-For entry: the hop the last proxy appended (entries to its left are
  * whatever the client sent, and can be forged).
  */
 export function forwardedClientIp(c: Context): string {
-  const xff = c.req.header("x-forwarded-for");
-  const last = xff?.split(",").pop()?.trim();
+  const real = c.req.header("x-real-ip")?.trim();
+  if (real) return real;
+  const last = c.req.header("x-forwarded-for")?.split(",").pop()?.trim();
   return last || "unknown";
 }
 
