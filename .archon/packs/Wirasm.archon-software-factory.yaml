@@ -1,0 +1,29 @@
+# Settings for the software factory pack (Wirasm/archon-software-factory).
+# Every setting the pack declares in its .pack/pack.yaml is listed. An empty value means the
+# pack's default applies: the project is held to AGENTS.md and the documents it points to.
+settings:
+  # What the project is for, who uses it, how it should feel, and what is in and out of scope.
+  product_policy: direction.md
+  # Work items are judged against the same scope: "It is" / "It is not" / "Principles".
+  triage_policy: direction.md
+
+  # The engineering conventions every change follows (architecture.md is reached from AGENTS.md).
+  plan_policy: engineering.md
+  build_policy: engineering.md
+  review_policy: engineering.md
+  test_policy: engineering.md
+  # engineering.md also says what a pull request must state (frame cost, why a dependency).
+  propose_policy: engineering.md
+
+  # No project document of its own; the pack's default applies.
+  discoveries_policy: ""
+  # CI (.github/workflows/ci.yml) starts on every pull request by itself; nothing else to start.
+  host_policy: ""
+  # Shadow-only settings in the pack today: recorded, never acted on. The owner merges.
+  admit_policy: ""
+  land_policy: ""
+  # Shadow-only; validate_command below is the check that counts.
+  checks_file: ""
+
+  # The command that proves a change: the same one CI runs, after installing dependencies.
+  validate_command: bun install && bun run check

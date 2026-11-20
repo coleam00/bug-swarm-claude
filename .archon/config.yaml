@@ -1,0 +1,16 @@
+# Archon project settings for Bug Swarm.
+
+# Claude runs every seat. Pack nodes name an alias (`@builder`, `@judge`, ...) that falls
+# back to one of these tiers, so the three tiers below decide every model the factory uses.
+assistant: claude
+tiers:
+  large: { provider: claude, model: claude-opus-5-5 }
+  medium: { provider: claude, model: claude-sonnet-5-5 }
+  small: { provider: claude, model: claude-haiku-5-5 }
+
+worktree:
+  # Base every worktree on main without asking GitHub for the default branch first.
+  baseBranch: main
+  # Each new worktree gets its dependencies, so `bun run check` works in it from the start.
+  postCreate:
+    - bun install
