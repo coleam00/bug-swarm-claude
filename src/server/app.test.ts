@@ -143,9 +143,7 @@ describe("run end", () => {
   test("a score impossible for the server's elapsed time is 422", async () => {
     const a = app();
     const runId = await startRun(a);
-    clock += 10_000; // 10 s: at most 10 * squashes + 12 points, 60 squashes, 12 seconds
-    expect((await post(a, `/api/runs/${runId}/end`, endBody(53, 4, 10))).status).toBe(422);
-    expect((await post(a, `/api/runs/${runId}/end`, endBody(0, 61, 10))).status).toBe(422);
+    clock += 10_000; // 10 s by the server's clock: at most 12 seconds may be claimed (the bounds are in rules.test.ts)
     expect((await post(a, `/api/runs/${runId}/end`, endBody(0, 0, 13))).status).toBe(422);
     expect((await post(a, `/api/runs/${runId}/end`, endBody(52, 4, 10))).status).toBe(200);
   });
@@ -167,7 +165,7 @@ describe("top 10 and best", () => {
     const a = app();
     for (let i = 0; i < 12; i++) await play(a, `player-${1000 + i}`, `P${i}`, 10 * i);
     await play(a, "player-1000", "P0", 500);
-    await play(a, "player-1000", "P0", 20);
+    await play(a, "player-1000", "P0", 105); // a second row for P0 would push P3 off
     expect(await top(a)).toEqual([
       { name: "P0", score: 500 },
       { name: "P11", score: 110 },

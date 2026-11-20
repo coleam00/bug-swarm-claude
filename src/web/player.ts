@@ -8,15 +8,15 @@ export type Player = { id: string; name: string | null };
 const KEY = "bugswarm.player";
 let memory: Player | null = null;
 
+/** The stored player, else the one kept in memory, else a new one. A stored invalid name is dropped. */
 export function loadPlayer(): Player {
-  if (memory) return memory;
   let stored: unknown = null;
   try {
     stored = JSON.parse(localStorage.getItem(KEY) ?? "null");
   } catch {
     stored = null;
   }
-  const s = stored as Partial<Player> | null;
+  const s = (stored ?? memory) as Partial<Player> | null;
   const id = typeof s?.id === "string" && /^[0-9a-f]{32}$/.test(s.id) ? s.id : newId();
   const name = typeof s?.name === "string" && checkName(s.name).ok ? s.name : null;
   return save({ id, name });

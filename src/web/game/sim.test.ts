@@ -137,7 +137,8 @@ describe("hits", () => {
 
   test("stepping a finished run changes nothing", () => {
     const s = createState(5, TALL);
-    while (!s.over) step(s, NONE, DT);
+    while (!s.over && s.time < 120) step(s, NONE, DT); // bounded: a tuning change fails, never hangs
+    expect(s.over).toBe(true);
     const snapshot = structuredClone(s);
     run(s, { kind: "direction", dx: 1, dy: 0 }, 120);
     expect(s).toEqual(snapshot);

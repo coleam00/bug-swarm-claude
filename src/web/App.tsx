@@ -176,40 +176,42 @@ function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) 
     };
   }, []);
 
+  // Layout and sizes live in index.html (.over): on a phone held sideways the score and the
+  // top 10 sit side by side, so all of it fits a 390 px tall screen with nothing to scroll.
   return (
-    <main style={{ ...screen, gap: 12, userSelect: "none" }}>
-      <h1 style={{ fontSize: 40, margin: 0 }}>Game over</h1>
-      <p style={{ fontSize: 56, fontWeight: 800, margin: 0 }}>{over.result.score}</p>
-      {over.best !== "failed" && (
-        <p style={{ fontSize: 24, margin: 0 }}>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>
-      )}
-      {over.saved === "failed" && (
-        <p role="alert" style={{ fontSize: 22, color: "#fda4af", margin: 0 }}>
-          Couldn't save your score
+    <main className="over">
+      <div className="over-summary">
+        <h1>Game over</h1>
+        <p className="over-score">{over.result.score}</p>
+        {over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>}
+        {over.saved === "failed" && (
+          <p role="alert" className="over-alert">
+            Couldn't save your score
+          </p>
+        )}
+        <p className="over-hint" style={{ opacity: ready ? 1 : 0.3 }}>
+          Tap or press any key to play again
         </p>
-      )}
-      <section style={{ width: "min(100%, 420px)" }}>
-        <h2 style={{ fontSize: 26, margin: "8px 0" }}>Top 10</h2>
+      </div>
+      <section className="over-board">
+        <h2>Top 10</h2>
         {top === "loading" ? (
-          <p style={{ fontSize: 20, margin: 0 }}>Loading...</p>
+          <p>Loading...</p>
         ) : top === "failed" ? (
-          <p style={{ fontSize: 20, margin: 0, color: "#fda4af" }}>Couldn't load the top 10</p>
+          <p className="over-alert">Couldn't load the top 10</p>
         ) : top.length === 0 ? (
-          <p style={{ fontSize: 20, margin: 0 }}>No scores yet</p>
+          <p>No scores yet</p>
         ) : (
-          <ol style={{ fontSize: 22, margin: 0, paddingLeft: 36, lineHeight: 1.5 }}>
+          <ol>
             {top.map((row, i) => (
               <li key={i}>
-                <span style={{ display: "inline-flex", justifyContent: "space-between", width: "100%" }}>
-                  <span>{row.name}</span>
-                  <span style={{ fontWeight: 700 }}>{row.score}</span>
-                </span>
+                <span>{row.name}</span>
+                <b>{row.score}</b>
               </li>
             ))}
           </ol>
         )}
       </section>
-      <p style={{ fontSize: 22, margin: "8px 0 0", opacity: ready ? 1 : 0.3 }}>Tap or press any key to play again</p>
     </main>
   );
 }

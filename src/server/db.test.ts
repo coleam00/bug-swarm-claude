@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
@@ -101,6 +101,29 @@ test("bun run hide removes a name from the top 10, whatever its case", () => {
   const r = script(["run", "hide", "a"]);
   db = openDb(join(dir, "app.db"));
   expect(r.code).toBe(0);
-  expect(r.out).toEqual(["hidden: a"]);
+  expect(r.out).toEqual(["hidden: a (1 player)"]);
   expect(topTen(db)).toEqual([{ name: "B", score: 40 }]);
+});
+
+test("bun run hide says when no player has the name", () => {
+  run("tester", "2026-11-28T15:01:00.000Z", { score: 50 });
+  db.close();
+  const r = script(["run", "hide", "Testr"]);
+  db = openDb(join(dir, "app.db"));
+  expect(r.code).toBe(0);
+  expect(r.out).toEqual(["hidden: testr (no player has this name yet; check the spelling)"]);
+  expect(topTen(db)).toEqual([{ name: "TESTER", score: 50 }]);
+});
+
+test("bun run hide refuses, and creates nothing, when there is no database", () => {
+  const missing = join(dir, "missing");
+  const p = Bun.spawnSync(["bun", "scripts/hide.ts", "Nobody"], {
+    env: { ...process.env, DATA_DIR: missing },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(p.exitCode).toBe(1);
+  expect(p.stdout.toString()).toBe("");
+  expect(p.stderr.toString()).toContain(join(missing, "app.db"));
+  expect(existsSync(missing)).toBe(false);
 });

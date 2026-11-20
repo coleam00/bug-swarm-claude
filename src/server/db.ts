@@ -121,7 +121,7 @@ export function recordRunEnded(db: Database, end: RunEnd, at: Date): void {
 
 export type TopRow = { name: string; score: number };
 
-/** Best score per player, one row each, non-hidden names only, highest first (earlier wins ties). */
+/** Best score per player, one row each, non-hidden names only, highest first (ties go to the player who finished a run first). */
 export function topTen(db: Database): TopRow[] {
   return db
     .query(
@@ -143,11 +143,16 @@ export function playerBest(db: Database, playerId: string): number | null {
   return row?.best ?? null;
 }
 
-/** Hides a name (any case) from the top 10. */
-export function hideName(db: Database, name: string, at: Date): string {
+/**
+ * Hides a name (any case) from the top 10, including from players who take it later.
+ * Returns the key and how many players have that name now, so the caller can say when a
+ * hide reached nobody (a typo, say).
+ */
+export function hideName(db: Database, name: string, at: Date): { key: string; players: number } {
   const key = nameKey(name);
   db.query("INSERT OR IGNORE INTO hidden_names (name_key, at) VALUES (?, ?)").run(key, at.toISOString());
-  return key;
+  const row = db.query("SELECT COUNT(*) AS n FROM players WHERE lower(name) = ?").get(key) as { n: number };
+  return { key, players: row.n };
 }
 
 export type Stats = { players: number; finishedRuns: number; medianRunsPerPlayer: number; touchShare: number };
