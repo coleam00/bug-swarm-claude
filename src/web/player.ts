@@ -26,6 +26,11 @@ export function setPlayerName(name: string | null): Player {
   return save({ ...loadPlayer(), name });
 }
 
+/** For tests: forget the player kept in memory, as a fresh page load would. */
+export function forgetPlayerForTests(): void {
+  memory = null;
+}
+
 function save(player: Player): Player {
   memory = player;
   try {

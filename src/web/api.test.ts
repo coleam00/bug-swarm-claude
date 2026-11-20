@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { endRun, fetchBest, fetchTop, startRun } from "./api";
 
 const realFetch = globalThis.fetch;
@@ -9,6 +9,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.fetch = realFetch;
+  mock.restore(); // give console.error back to the test files that run after this one
 });
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
