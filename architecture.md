@@ -9,7 +9,7 @@
 - Install: `bun install`
 - Develop: `bun run dev` (Vite dev server for the game, with the API server beside it)
 - Start (production mode): `bun run start`: one Bun process serves the API, the built game from `dist/`, and `/board`, on `PORT` (default 3000).
-- Container: `Dockerfile` builds the game and runs `bun run start`; `DATA_DIR` must be a persistent volume.
+- Container: `Dockerfile` builds the game and runs `bun run start` with `NODE_ENV=production`, which makes the server listen on all interfaces; everywhere else it listens on localhost only. `DATA_DIR` must be a persistent volume.
 - Health: `GET /health` answers `200 ok` once the app is ready.
 - Test everything: `bun run check` (`tsc --noEmit`, then `bun test`). CI runs exactly this.
 - The bet's command: `bun run stats`. Moderation: `bun run hide "<name>"`. Load test (Phase 3): `bun run load`.
