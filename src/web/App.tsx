@@ -51,7 +51,7 @@ export function App() {
       />
     );
   }
-  return <OverScreen key={phase.run} over={phase.over} playerId={player.id} onRestart={play} />;
+  return <OverScreen key={phase.run} over={phase.over} onRestart={play} />;
 }
 
 function NameScreen({ onName }: { onName: (name: string) => void }) {
@@ -137,22 +137,19 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   return <canvas ref={canvas} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", touchAction: "none", display: "block" }} />;
 }
 
-function OverScreen({ over, playerId, onRestart }: { over: Over; playerId: string; onRestart: () => void }) {
+function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) {
   const [top, setTop] = useState(over.top);
-  const [best, setBest] = useState(over.best);
   const [ready, setReady] = useState(false);
   useEffect(() => setTop(over.top), [over.top]);
-  useEffect(() => setBest(over.best), [over.best]);
 
   // The live top 10: poll while this screen shows.
   useEffect(() => {
     if (over.saved === "saving") return;
     const id = setInterval(() => {
       void fetchTop().then((t) => t !== "failed" && setTop(t));
-      void fetchBest(playerId).then((b) => b !== "failed" && setBest(b));
     }, TOP_POLL_MS);
     return () => clearInterval(id);
-  }, [over.saved, playerId]);
+  }, [over.saved]);
 
   // Any key or a fresh tap starts the next run, after a short pause.
   const restart = useRef(onRestart);
@@ -182,8 +179,8 @@ function OverScreen({ over, playerId, onRestart }: { over: Over; playerId: strin
     <main style={{ ...screen, gap: 12, userSelect: "none" }}>
       <h1 style={{ fontSize: 40, margin: 0 }}>Game over</h1>
       <p style={{ fontSize: 56, fontWeight: 800, margin: 0 }}>{over.result.score}</p>
-      {best !== "failed" && (
-        <p style={{ fontSize: 24, margin: 0 }}>Best: {best === "loading" ? "..." : best === null ? "-" : best}</p>
+      {over.best !== "failed" && (
+        <p style={{ fontSize: 24, margin: 0 }}>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>
       )}
       {over.saved === "failed" && (
         <p role="alert" style={{ fontSize: 22, color: "#fda4af", margin: 0 }}>
