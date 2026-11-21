@@ -15,6 +15,7 @@ import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
 import { STRESS_SECONDS } from "./config";
 import { createRenderer, type Fx, type Stats } from "./render";
+import type { Insets } from "./hud";
 import { createRng } from "./rng";
 import { createStick, stickDown, stickDrive, stickMove, stickReset, stickUp, type StickOut } from "./stick";
 import { createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
@@ -105,6 +106,11 @@ export function startGame(
   let offY = 0;
   // The floating labels merge within a CSS px distance, so they follow the layout too.
   const texts = createTexts();
+  // The safe-area insets (index.html's --safe-*), read as resolved px from a hidden probe's padding.
+  const probe = document.createElement("div");
+  probe.className = "safe-probe";
+  document.body.appendChild(probe);
+  const insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   const resize = () => {
     dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
@@ -114,7 +120,12 @@ export function startGame(
     scale = Math.min(w / arena.w, h / arena.h);
     offX = (w - arena.w * scale) / 2;
     offY = (h - arena.h * scale) / 2;
-    renderer.resize(dpr, scale, offX, offY);
+    const cs = getComputedStyle(probe);
+    insets.top = parseFloat(cs.paddingTop) || 0;
+    insets.right = parseFloat(cs.paddingRight) || 0;
+    insets.bottom = parseFloat(cs.paddingBottom) || 0;
+    insets.left = parseFloat(cs.paddingLeft) || 0;
+    renderer.resize(dpr, scale, offX, offY, insets);
     setTextScale(texts, scale);
   };
   resize();
@@ -345,6 +356,7 @@ export function startGame(
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("blur", onBlur);
     window.removeEventListener("resize", resize);
+    probe.remove();
   }
   return { stop, pick };
 }

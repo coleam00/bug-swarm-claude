@@ -23,6 +23,13 @@
     <meta name="twitter:description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
     <meta name="twitter:image" content="/og.png" />
     <style>
+      /* Safe areas (a notch or a home bar, a phone held sideways): the overlays pad by these and
+         loop.ts reads them through .safe-probe to pull the canvas HUD in. One source, so
+         bun run bench can override them to simulate a notch (headless Chrome reports zero). */
+      :root { --safe-top: env(safe-area-inset-top, 0px); --safe-right: env(safe-area-inset-right, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px); }
+      .safe-probe { position: fixed; top: 0; left: 0; width: 0; height: 0; visibility: hidden; pointer-events: none;
+        padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); }
       html, body { margin: 0; background: #05070d; color: #f8fafc; overscroll-behavior: none; }
       /* No stray phone gestures on game UI: no text selection or long-press menu, no double-tap zoom
          (game over restarts on a tap anywhere). The canvas keeps its own touch-action: none. */
@@ -32,7 +39,8 @@
       .setup input { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
       /* Setup: the name and the team before the first run (or only the team, once, for a player from before teams). */
       .setup { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 24px; padding: 16px; font-family: system-ui, sans-serif; text-align: center; }
+        justify-content: center; gap: 24px; font-family: system-ui, sans-serif; text-align: center;
+        padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left)); }
       .setup h1 { font-size: 44px; margin: 0; }
       .setup form { display: flex; flex-direction: column; gap: 16px; width: min(100%, 360px); }
       .setup label { font-size: 22px; }
@@ -44,9 +52,11 @@
       .setup-teams button { flex: 1 1 0; border: 2px solid; }
       .setup-alert { color: #fda4af; font-size: 20px; margin: 0; }
       .setup-hint { color: #94a3b8; font-size: 17px; line-height: 1.35; margin: 0; }
-      /* Game over. Portrait: one column. A phone held sideways: summary and top 10 side by side. */
+      /* Game over. Portrait: one column. A short landscape screen (a phone held sideways): two columns,
+         score, race, best and Play again on the left; top 10 and upgrades on the right. */
       .over { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 12px; padding: 12px 16px; font-family: system-ui, sans-serif; text-align: center; }
+        justify-content: center; gap: 12px; font-family: system-ui, sans-serif; text-align: center;
+        padding: max(12px, var(--safe-top)) max(16px, var(--safe-right)) max(12px, var(--safe-bottom)) max(16px, var(--safe-left)); }
       .over p, .over h1, .over h2, .over ol, .over ul { margin: 0; }
       .over-summary { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 24px; }
       .over h1 { font-size: 40px; }
@@ -62,6 +72,7 @@
       .over-again button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
       /* How the run was built: one chip per upgrade, with its level. */
       .over-upgrades { font-size: 20px; max-width: 420px; }
+      .over .over-board .over-upgrades { margin: 12px auto 0; }
       ul.over-upgrades { list-style: none; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 8px; }
       ul.over-upgrades li { padding: 2px 10px; border: 1px solid #334155; border-radius: 999px; white-space: nowrap; line-height: 1.3; }
       ul.over-upgrades b { color: #22d3ee; }
@@ -77,7 +88,8 @@
       .over ol > li > b { display: inline-block; width: 3em; text-align: right; }
       /* The upgrade choice, over the paused run. Portrait: cards stacked. Landscape: in a row. */
       .choice { position: fixed; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 16px; padding: 16px; background: rgba(5, 7, 13, 0.72); font-family: system-ui, sans-serif;
+        justify-content: center; gap: 16px; background: rgba(5, 7, 13, 0.72);
+        padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left)); font-family: system-ui, sans-serif;
         text-align: center; touch-action: manipulation; }
       .choice h2 { margin: 0; font-size: 30px; }
       .choice-cards { display: flex; flex-direction: column; gap: 12px; width: min(100%, 360px); animation: choice-in 350ms ease-out both; }
@@ -99,7 +111,8 @@
         .choice button { flex: 1 1 0; justify-content: center; }
       }
       @media (orientation: landscape) and (max-height: 520px) {
-        .over { flex-direction: row; gap: 24px; padding: 8px 24px; }
+        .over { flex-direction: row; gap: 24px;
+          padding: max(8px, var(--safe-top)) max(24px, var(--safe-right)) max(8px, var(--safe-bottom)) max(24px, var(--safe-left)); }
         .over-summary { flex: 1 1 0; gap: 6px; font-size: 20px; }
         .over h1 { font-size: 30px; }
         .over-score { font-size: 44px; }
@@ -107,11 +120,14 @@
         .over-again { gap: 4px; }
         .over-again button { min-height: 44px; padding: 6px 20px; font-size: 18px; }
         .over-board { flex: 1 1 0; max-width: 420px; font-size: 18px; }
+        .over .over-board .over-upgrades { margin-top: 8px; font-size: 16px; }
+        ul.over-upgrades { gap: 4px 6px; }
         .over h2 { font-size: 20px; margin-bottom: 4px; }
-        .over ol { line-height: 1.3; }
+        .over ol { line-height: 1.25; }
         .over .over-race p { font-size: 14px; }
         .over-race-bar { height: 6px; }
-        .setup { gap: 12px; padding: 8px 16px; }
+        .setup { gap: 12px;
+          padding: max(8px, var(--safe-top)) max(16px, var(--safe-right)) max(8px, var(--safe-bottom)) max(16px, var(--safe-left)); }
         .setup h1 { font-size: 30px; }
         .setup form { gap: 10px; }
         .setup label { font-size: 18px; }
