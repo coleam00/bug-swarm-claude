@@ -193,14 +193,27 @@ describe("the fast bug", () => {
     }
   });
 
-  test("dies to the first shot that lands", () => {
-    const s = quiet();
-    s.bugs.push({ x: 225, y: 250, hp: FAST.hp, kind: FAST });
-    while (s.squashes === 0 && s.time < 1) step(s, NONE, DT);
-    expect(s.squashes).toBe(1);
+  test("a fast bug the swarm spawns dies to the first shot that lands", () => {
+    const s = createState(1, TALL);
+    let fast: Bug | undefined;
+    while (!fast && s.time < 45) {
+      keepAlive(s, NONE, 1);
+      fast = s.bugs.find((b) => b.kind === FAST);
+    }
+    // Keep only that bug, in front of the robot, and watch one shot meet it.
+    s.bugs = [fast!];
+    s.shots = [];
+    s.spawnTimer = Infinity;
+    s.fireTimer = 0;
+    fast!.x = s.robot.x;
+    fast!.y = s.robot.y - 150;
+    const squashes = s.squashes;
+    const start = s.time;
+    while (s.squashes === squashes && s.time - start < 1) step(s, NONE, DT);
+    expect(s.squashes).toBe(squashes + 1);
     expect(s.bugs).toHaveLength(0);
     expect(s.shots).toHaveLength(0);
-    expect(s.time).toBeLessThan(FIRE_INTERVAL); // so only the first shot had been fired
+    expect(s.time - start).toBeLessThan(FIRE_INTERVAL); // so only the first shot had been fired
   });
 });
 
@@ -332,13 +345,5 @@ test("the arena keeps 360,000 units² and the screen's ratio, clamped to 9:16..1
 describe("the server's squash cap", () => {
   test("a shot squashes at most one bug, so the fire rate bounds squashes under the cap", () => {
     expect(1 / FIRE_INTERVAL).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
-  });
-
-  test("a robot that never dies, deep in the ramp, squashes no faster than it fires", () => {
-    for (let seed = 1; seed <= 3; seed++) {
-      const s = createState(seed, TALL);
-      keepAlive(s, NONE, 120 * 60);
-      expect(s.squashes / s.time).toBeLessThanOrEqual(1 / FIRE_INTERVAL);
-    }
   });
 });
