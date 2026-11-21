@@ -5,8 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#05070d" />
     <title>Bug Swarm</title>
+    <meta name="description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
+    <!-- Icons and the link preview are drawn in code and served by the app (src/server/art.ts). -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- The server makes the preview image URLs absolute from the request (src/server/share.ts). -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Bug Swarm" />
+    <meta property="og:description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A glowing robot in a dark grid arena, surrounded by bugs, under the words BUG SWARM" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Bug Swarm" />
+    <meta name="twitter:description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
+    <meta name="twitter:image" content="/og.png" />
     <style>
       html, body { margin: 0; background: #05070d; color: #f8fafc; overscroll-behavior: none; }
+      /* No stray phone gestures on game UI: no text selection or long-press menu, no double-tap zoom
+         (game over restarts on a tap anywhere). The canvas keeps its own touch-action: none. */
+      html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+        touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+      /* The name is typed and can be edited, so its input stays selectable. */
+      .setup input { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
       /* Setup: the name and the team before the first run (or only the team, once, for a player from before teams). */
       .setup { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
         justify-content: center; gap: 24px; padding: 16px; font-family: system-ui, sans-serif; text-align: center; }
@@ -22,7 +45,7 @@
       .setup-alert { color: #fda4af; font-size: 20px; margin: 0; }
       /* Game over. Portrait: one column. A phone held sideways: summary and top 10 side by side. */
       .over { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 12px; padding: 12px 16px; font-family: system-ui, sans-serif; text-align: center; user-select: none; }
+        justify-content: center; gap: 12px; padding: 12px 16px; font-family: system-ui, sans-serif; text-align: center; }
       .over p, .over h1, .over h2, .over ol, .over ul { margin: 0; }
       .over-summary { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 24px; }
       .over h1 { font-size: 40px; }
@@ -47,7 +70,7 @@
       /* The upgrade choice, over the paused run. Portrait: cards stacked. Landscape: in a row. */
       .choice { position: fixed; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
         justify-content: center; gap: 16px; padding: 16px; background: rgba(5, 7, 13, 0.72); font-family: system-ui, sans-serif;
-        text-align: center; user-select: none; touch-action: manipulation; }
+        text-align: center; touch-action: manipulation; }
       .choice h2 { margin: 0; font-size: 30px; }
       .choice-cards { display: flex; flex-direction: column; gap: 12px; width: min(100%, 360px); }
       .choice button { min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 16px;

@@ -37,11 +37,13 @@
   - Stress mode (`?stress=150`, or a bare `?stress`): `createState`'s `stress` option holds the swarm at that many bugs after every step, with every upgrade at its top level and a robot that can't lose, and ends the run at 60 s. It steers itself in a circle until the player steers, and records each frame for the bench. The flag is read only in the dev server and the bench build (`src/web/stress.ts`); a production build ignores it. A stress run is never submitted in any build: no run start, no score, no best.
   - The API client starts a run and submits its score without blocking the loop; failures are logged and the game-over screen says the score wasn't saved.
 - `src/web/board/`: the `/board` page for the stream (top 10 and team totals, big type, polls the API).
-- `src/server/app.ts`: `/health`, and routes under `/api`: start a run (returns a run id), finish a run (score, squashes, upgrades, device type), top 10, a player's best, team totals.
+- `src/server/app.ts`: `/health`, the icons and the link preview (`/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png`, `/og.png`, each drawn once on first request and cached for a day), and routes under `/api`: start a run (returns a run id), finish a run (score, squashes, upgrades, device type), top 10, a player's best, team totals.
 - `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`; defined in `rules.ts` so the browser can import it, and re-exported here). Schema changes are additive.
 - `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time), `UPGRADE_IDS` and `TEAMS`, all pure and tested.
 - `src/server/blocked-words.ts`: the blocked-word list.
-- `src/server/main.ts`: production entry; reads `PORT`, `DATA_DIR` (default `data/`) and, for load testing only, `RUN_STARTS_PER_WINDOW` (`src/server/limits.ts`).
+- `src/server/art.ts`: the icons and the 1200x630 link preview, drawn in code from `look.ts` (the robot as an SVG, and a small software rasterizer for the PNGs); `src/server/png.ts` encodes PNG and ICO with `node:zlib`. No image files.
+- `src/server/share.ts`: link previews need an absolute image URL, and the app knows no public URL of its own, so the served page takes its origin from the request (`X-Forwarded-Host` or `Host`, and `X-Forwarded-Proto`); a host that is not a plain host name leaves the URL relative.
+- `src/server/main.ts`: production entry; serves `dist/` and the page (with absolute share-image URLs, `share.ts`) for every other path; reads `PORT`, `DATA_DIR` (default `data/`) and, for load testing only, `RUN_STARTS_PER_WINDOW` (`src/server/limits.ts`).
 - `scripts/stats.ts`, `scripts/hide.ts`, `scripts/reset.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts` (with `scripts/load-lib.ts`, its tested pure half).
 - Tests are `*.test.ts` beside the code.
 
