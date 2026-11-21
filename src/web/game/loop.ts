@@ -14,6 +14,7 @@ import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
 import { STRESS_SECONDS } from "./config";
 import { createRenderer, type Fx, type Stats } from "./render";
 import { createRng } from "./rng";
+import { createStick, stickDown, stickDrive, stickMove, stickReset, stickUp, type StickOut } from "./stick";
 import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
 
 export type { RunResult };
@@ -111,23 +112,46 @@ export function startGame(
   const stats: Stats = { show: showStats, fps: 0, bugs: 0, effects: 0, reading: 0 };
 
   // Input, recomputed on input events only so the frame loop allocates nothing.
-  // Held keys win over the pointer. A touch steers while the finger is down; the mouse steers
-  // while it is over the canvas, until a key is pressed (then it waits for the next move).
+  // Held keys win over the pointer. A touch is a floating joystick (stick.ts) while the first
+  // finger is down; the mouse steers toward the cursor while it is over the canvas, and a pressed
+  // pen toward the pen, until a key is pressed (then it waits for the next move).
   const keys = new Set<string>();
   const target = { kind: "target" as const, x: 0, y: 0 };
+  const stick = createStick();
+  const stickOut: StickOut = { kind: "stick", dx: 0, dy: 0 };
   let pointerSteers = false;
   let touch = false;
   let input: Input = NONE;
   const updateInput = () => {
-    input = keys.size > 0 ? keysToInput(keys) : pointerSteers ? target : NONE;
+    if (keys.size > 0) input = keysToInput(keys);
+    else if (stick.active) input = stickDrive(stick, stickOut) ? stickOut : NONE;
+    else input = pointerSteers ? target : NONE;
   };
   const aimAt = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
     target.x = (e.clientX - rect.left - offX) / scale;
     target.y = (e.clientY - rect.top - offY) / scale;
   };
+  const onTouch = (e: PointerEvent) => {
+    touch = true;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (e.type === "pointerdown") {
+      if (!stickDown(stick, e.pointerId, x, y)) return; // a second finger is ignored
+      pointerSteers = false; // a mouse used earlier doesn't take over when the finger lifts
+      try {
+        canvas.setPointerCapture(e.pointerId); // keep the moves if the thumb slides off the canvas
+      } catch {
+        // capture is a nicety; without it the stick lets go at the canvas edge
+      }
+    } else if (!stickMove(stick, e.pointerId, x, y)) {
+      return;
+    }
+    updateInput();
+  };
   const onPointer = (e: PointerEvent) => {
-    if (e.pointerType === "touch") touch = true;
+    if (e.pointerType === "touch") return onTouch(e);
     if (e.pointerType === "mouse") {
       pointerSteers = true;
     } else if (e.type === "pointerdown") {
@@ -139,14 +163,19 @@ export function startGame(
     updateInput();
   };
   const onPointerEnd = (e: PointerEvent) => {
+    if (e.pointerType === "touch") {
+      if (stickUp(stick, e.pointerId)) updateInput(); // only the holding finger lets go
+      return;
+    }
     if (e.pointerType === "mouse" && e.type !== "pointerleave") return;
     pointerSteers = false;
     updateInput();
   };
   const pick = (index: number): boolean => {
     if (stopped || !choose(state, index)) return false;
-    // The finger or mouse that picked steers again only once it moves or touches down.
+    // The mouse that picked steers again once it moves; a finger, once it touches down again.
     pointerSteers = false;
+    stickReset(stick);
     updateInput();
     shown = null;
     opts.onChoice(null);
@@ -174,6 +203,7 @@ export function startGame(
   };
   const onBlur = () => {
     keys.clear();
+    stickReset(stick);
     updateInput();
   };
 
@@ -268,7 +298,7 @@ export function startGame(
     }
     if (bench) {
       const t0 = performance.now();
-      renderer.draw(state, fx, stats);
+      renderer.draw(state, fx, stats, stick);
       const i = bench.count;
       if (i < BENCH_FRAMES) {
         bench.draws[i] = performance.now() - t0;
@@ -279,7 +309,7 @@ export function startGame(
       }
       if (state.over) bench.done = true;
     } else {
-      renderer.draw(state, fx, stats);
+      renderer.draw(state, fx, stats, stick);
     }
     if (state.over) {
       stop();
