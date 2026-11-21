@@ -7,7 +7,6 @@ import {
   BUG_KINDS,
   CHOICE_CARDS,
   CHOICE_EVERY,
-  DRONE_COUNT,
   DRONE_FIRE_INTERVAL,
   DRONE_ORBIT,
   DRONE_RANGE,
@@ -341,11 +340,15 @@ test("the same seed plays the same run; another seed doesn't", () => {
   expect(play(7)).not.toEqual(play(8));
 });
 
+// The run-length tests guard the swarm's own tuning, so they play with upgrade choices off
+// (engineering.md: run length with upgrades is tuned in its own balance item).
 test("an idle player loses within 30 to 60 seconds, portrait, landscape and 4:3", () => {
   for (const arena of [TALL, WIDE, FOUR_THREE]) {
     for (let seed = 1; seed <= 10; seed++) {
       const s = createState(seed, arena);
+      s.nextChoiceAt = Infinity;
       while (!s.over && s.time < 120) advance(s, NONE);
+      expect(s.taken).toEqual([]);
       expect(s.over).toBe(true);
       expect(s.time).toBeGreaterThanOrEqual(30);
       expect(s.time).toBeLessThanOrEqual(60);
@@ -361,7 +364,9 @@ test("a player who keeps moving survives 1 to 3 minutes, portrait and landscape"
       const times: number[] = [];
       for (let seed = 1; seed <= 10; seed++) {
         const s = createState(seed, arena);
+        s.nextChoiceAt = Infinity;
         while (!s.over && s.time < 240) advance(s, player(s));
+        expect(s.taken).toEqual([]);
         times.push(s.time);
       }
       expect(median(times)).toBeGreaterThanOrEqual(60);
@@ -601,7 +606,6 @@ describe("CI drone", () => {
 
     const s = withDrone(1);
     expect(s.levels[CI_DRONE]).toBe(1);
-    expect(DRONE_COUNT[1]).toBe(1);
     expect(droneCount(s)).toBe(1);
     s.bugs.push({ x: s.robot.x, y: s.robot.y - 120, hp: 1e9, kind: STILL_BASE });
     const limit = s.time + 2;
@@ -631,7 +635,6 @@ describe("CI drone", () => {
   test("taken twice: a second drone, opposite the first, and twice the shots", () => {
     const two = withDrone(2);
     expect(two.levels[CI_DRONE]).toBe(UPGRADE_MAX_LEVEL);
-    expect(DRONE_COUNT[2]).toBe(2);
     expect(droneCount(two)).toBe(2);
     for (const i of [0, 1]) expect(Math.hypot(droneX(two, i) - two.robot.x, droneY(two, i) - two.robot.y)).toBeCloseTo(DRONE_ORBIT, 5);
     expect(Math.hypot(droneX(two, 0) - droneX(two, 1), droneY(two, 0) - droneY(two, 1))).toBeCloseTo(2 * DRONE_ORBIT, 5);

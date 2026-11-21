@@ -87,7 +87,7 @@ export const DRONE_SPIN = 3;
 /** CI drone: the drone's drawn radius. */
 export const DRONE_RADIUS = 5;
 /** CI drone: seconds between a drone's shots. It doesn't reload faster while the robot moves. */
-export const DRONE_FIRE_INTERVAL = 1.5;
+export const DRONE_FIRE_INTERVAL = 0.5;
 /** CI drone: a drone fires only at a bug within this distance of itself. */
 export const DRONE_RANGE = 220;
 /** CI drone: seconds a drone's shot flies, enough to cross its range at SHOT_SPEED. */
