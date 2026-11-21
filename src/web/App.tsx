@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server/rules";
 import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
-import { RESTART_DELAY_MS, inputReady } from "./game/guard";
+import { restartIn } from "./game/guard";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { upgradeLevels } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
@@ -206,7 +206,7 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   return (
     <>
       <canvas ref={canvas} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", touchAction: "none", display: "block" }} />
-      {cards && <ChoiceScreen cards={cards} onPick={(i) => game.current?.pick(i)} />}
+      {cards && <ChoiceScreen cards={cards} onPick={(i, pressedAt) => game.current?.pick(i, pressedAt)} />}
     </>
   );
 }
@@ -214,15 +214,23 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
 /**
  * The upgrade choice, over the paused run: a big card per upgrade, tap one or press 1-3. No
  * countdown. The cards fade in over CHOICE_DELAY_MS (350 ms), the time pick() refuses them in.
+ * A tap is timed from when the finger lands, not when it lifts (when the click comes).
  */
-function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: (index: number) => void }) {
+function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: (index: number, pressedAt: number) => void }) {
   // Layout and sizes live in index.html (.choice). It covers the canvas, so a tap here never steers.
+  const pressedAt = useRef<number | null>(null);
+  const click = (i: number) => {
+    // A click with no press first (Enter or Space on a focused card) is timed now.
+    const at = pressedAt.current ?? performance.now();
+    pressedAt.current = null;
+    onPick(i, at);
+  };
   return (
     <section className="choice" aria-label="Pick an upgrade">
       <h2>Pick an upgrade</h2>
       <div className="choice-cards">
         {cards.map((id, i) => (
-          <button key={id} type="button" onClick={() => onPick(i)}>
+          <button key={id} type="button" onPointerDown={() => (pressedAt.current = performance.now())} onClick={() => click(i)}>
             <kbd>{i + 1}</kbd>
             <b>{UPGRADES[id].name}</b>
             <span>{UPGRADES[id].line}</span>
@@ -257,15 +265,12 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
   // since death. The guard decides; the timer only reveals "Play again" and the hint at that moment.
   const restart = useRef(onRestart);
   restart.current = onRestart;
-  const restarted = useRef(false);
   const diedAt = over.diedAt;
   const tryRestart = useCallback(() => {
-    if (restarted.current || !inputReady(diedAt, performance.now(), RESTART_DELAY_MS)) return;
-    restarted.current = true;
-    restart.current();
+    if (restartIn(diedAt, performance.now()) === 0) restart.current();
   }, [diedAt]);
   useEffect(() => {
-    const timer = setTimeout(() => setReady(true), Math.max(0, diedAt + RESTART_DELAY_MS - performance.now()));
+    const timer = setTimeout(() => setReady(true), restartIn(diedAt, performance.now()));
     const onKey = (e: KeyboardEvent) => {
       if (!e.repeat) tryRestart();
     };

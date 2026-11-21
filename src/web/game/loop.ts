@@ -8,7 +8,7 @@ import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import { createFpsMeter, tickFps } from "./fps";
-import { CHOICE_DELAY_MS, inputReady } from "./guard";
+import { createChoiceGate, pickChoice, showChoice } from "./guard";
 import type { UpgradeId } from "../../server/rules";
 import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
@@ -16,7 +16,7 @@ import { STRESS_SECONDS } from "./config";
 import { createRenderer, type Fx, type Stats } from "./render";
 import { createRng } from "./rng";
 import { createStick, stickDown, stickDrive, stickMove, stickReset, stickUp, type StickOut } from "./stick";
-import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
+import { createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
 
 export type { RunResult };
 
@@ -24,10 +24,11 @@ export type Game = {
   /** Cancels the loop and removes every listener. */
   stop: () => void;
   /**
-   * Takes card `index` of the choice on offer; false if there is no such card, or if the choice
-   * opened less than CHOICE_DELAY_MS ago (guard.ts), so a reflexive re-touch can't pick unseen.
+   * Takes card `index` of the choice on offer for a press at `pressedAt` (performance.now(), the
+   * default). False if there is no such card, or if the press came less than CHOICE_DELAY_MS
+   * after the choice showed (guard.ts), so a reflexive re-touch can't pick unseen.
    */
-  pick: (index: number) => boolean;
+  pick: (index: number, pressedAt?: number) => boolean;
 };
 
 const STEP = 1 / 60;
@@ -176,16 +177,12 @@ export function startGame(
     pointerSteers = false;
     updateInput();
   };
-  const pick = (index: number): boolean => {
-    if (stopped || !state.choice) return false;
-    // Too soon after the choice opened: refused before choose(), so nothing changes.
-    if (!inputReady(choiceAt, performance.now(), CHOICE_DELAY_MS)) return false;
-    if (!choose(state, index)) return false;
+  const pick = (index: number, pressedAt = performance.now()): boolean => {
+    if (stopped || !pickChoice(gate, state, index, pressedAt)) return false;
     // The mouse that picked steers again once it moves; a finger, once it touches down again.
     pointerSteers = false;
     stickReset(stick);
     updateInput();
-    shown = null;
     opts.onChoice(null);
     return true;
   };
@@ -266,10 +263,8 @@ export function startGame(
   let last: number | null = null;
   let acc = 0;
   let stopped = false;
-  /** The choice last reported to `onChoice`, so it is reported once. */
-  let shown: readonly UpgradeId[] | null = null;
-  /** When `shown` was reported (performance.now()), for pick()'s guard. */
-  let choiceAt = -Infinity;
+  /** The choice last reported to `onChoice` (so it is reported once) and when, for pick()'s guard. */
+  const gate = createChoiceGate();
   const frame = (ts: number) => {
     if (stopped) return;
     const real = last === null ? 0 : (ts - last) / 1000;
@@ -292,10 +287,7 @@ export function startGame(
     if (steps === MAX_STEPS_PER_FRAME) acc = 0; // fell behind: drop the rest rather than spiral
     if (state.choice) {
       acc = 0; // the pause isn't owed back as a burst of steps when play resumes
-      if (state.choice !== shown) {
-        choiceAt = performance.now();
-        opts.onChoice((shown = state.choice));
-      }
+      if (showChoice(gate, state.choice, performance.now())) opts.onChoice(state.choice);
     }
     detectChanges(fx.changes, state, onSquash, onHit, onBlock);
     updateTrail(fx.trail, state.robot.x, state.robot.y, delta);
