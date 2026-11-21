@@ -261,8 +261,8 @@ function moveBugs(state: State, dt: number): void {
 
 /**
  * The refactor bomb goes off on its own: once charged, on the first step that starts with a
- * bug in the arena, it clears every bug (each one a squash) and starts recharging. It keeps its charge
- * while the arena is empty. Taking it again shortens the recharge from the last blast.
+ * bug in the arena, it clears every bug (each one a squash) and starts recharging. It keeps
+ * its charge while the arena is empty. Taking it again shortens the recharge from the last blast.
  */
 function refactorBomb(state: State): void {
   const level = state.levels[REFACTOR_BOMB];
