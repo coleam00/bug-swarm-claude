@@ -19,7 +19,7 @@
   - In a second terminal: `bun run load -- --url http://127.0.0.1:3000`.
   - Then `bun run reset -- --yes` with the same `DATA_DIR`, or delete the folder.
   - The script lives in `scripts/load.ts`; its argument parsing, claims and summary math are in `scripts/load-lib.ts`, which `bun run check` tests. The load run itself is not part of `bun run check`. The team totals route and `/board` join the route table in `load-lib.ts` once they exist.
-- Frame-rate benchmark: `bun run bench`. It builds the game in bench mode and plays a 60 s stress run (150 bugs, every upgrade at its top level) in headless Chrome at 1440x900 and at 390x844 @3x. It prints avg fps, the worst 1 s and `draw()` time, and checks that the game-over screen fits at phone portrait, phone landscape and desktop. It needs Chrome (`CHROME_PATH` to point at one), so it is not part of `bun run check`.
+- Frame-rate benchmark: `bun run bench`. It builds the game in bench mode and plays a 60 s stress run (150 bugs, every upgrade at its top level) in headless Chrome at 1440x900 and at 390x844 @3x. It prints avg fps, the worst 1 s and `draw()` time, and checks that the game-over screen fits at phone portrait, phone landscape and desktop. `--shots <dir>` keeps a screenshot of each run and layout. `--look <dir>` measures nothing and takes the screenshots a change to how the swarm looks needs: 1280x720 and 390x844 @3x mid-run, each also shrunk to a quarter (the stream shown small), and two as the refactor bomb goes off at 15 s. It needs Chrome (`CHROME_PATH` to point at one), so it is not part of `bun run check`.
 
 ## Shape
 - Browser game -> HTTP API -> one SQLite file.
