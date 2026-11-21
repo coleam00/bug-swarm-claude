@@ -348,11 +348,21 @@ test("the same seed plays the same run; another seed doesn't", () => {
   expect(play(7)).not.toEqual(play(8));
 });
 
+/**
+ * A run with upgrade choices off. The run-length tests use it: they guard the swarm's own tuning,
+ * and how long runs last with upgrades is a later balance item (engineering.md, owner ruling).
+ */
+function noChoices(seed: number, arena: Arena): State {
+  const s = createState(seed, arena);
+  s.nextChoiceAt = Infinity;
+  return s;
+}
+
 test("an idle player loses within 30 to 60 seconds, portrait, landscape and 4:3", () => {
   for (const arena of [TALL, WIDE, FOUR_THREE]) {
     for (let seed = 1; seed <= 10; seed++) {
-      const s = createState(seed, arena);
-      while (!s.over && s.time < 120) advance(s, NONE);
+      const s = noChoices(seed, arena);
+      while (!s.over && s.time < 120) step(s, NONE, DT);
       expect(s.over).toBe(true);
       expect(s.time).toBeGreaterThanOrEqual(30);
       expect(s.time).toBeLessThanOrEqual(60);
@@ -367,8 +377,8 @@ test("a player who keeps moving survives 1 to 3 minutes, portrait and landscape"
     for (const player of [circle, dodge]) {
       const times: number[] = [];
       for (let seed = 1; seed <= 10; seed++) {
-        const s = createState(seed, arena);
-        while (!s.over && s.time < 240) advance(s, player(s));
+        const s = noChoices(seed, arena);
+        while (!s.over && s.time < 240) step(s, player(s), DT);
         times.push(s.time);
       }
       expect(median(times)).toBeGreaterThanOrEqual(60);
