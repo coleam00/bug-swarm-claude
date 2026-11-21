@@ -1,4 +1,5 @@
-import { RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW } from "./app";
+import type { Context } from "hono";
+import { RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW, clientIpResolver, type AppOptions } from "./app";
 
 /** The env var that raises the run start limits, for `bun run load` only. Never set in production. */
 export const START_LIMIT_VAR = "RUN_STARTS_PER_WINDOW";
@@ -38,4 +39,28 @@ export function proxyHops(env: Record<string, string | undefined>): number {
     throw new Error(`${PROXY_HOPS_VAR} must be a whole number from 0 to ${MAX_PROXY_HOPS} (got "${raw}")`);
   }
   return Number(raw);
+}
+
+/**
+ * The production server's `createApp` options from its environment, plus the lines it prints at
+ * startup. `peer` is the socket address. Throws on a bad value, so the server refuses to start.
+ */
+export function serverOptions(
+  env: Record<string, string | undefined>,
+  peer: (c: Context) => string,
+): { options: AppOptions; startup: string[] } {
+  const limits = startLimits(env);
+  const hops = proxyHops(env);
+  const startup: string[] = [];
+  if (limits.raised) startup.push(`run start limits set to ${limits.perIp} per IP and per player per 10 min (load testing only)`);
+  if (hops > 0) startup.push(`trusting ${hops} proxy hop(s) in X-Forwarded-For`);
+  return {
+    options: {
+      runStartsPerWindow: limits.perIp,
+      runStartsPerPlayer: limits.perPlayer,
+      clientIp: clientIpResolver(hops, peer),
+      log: (line) => console.log(line),
+    },
+    startup,
+  };
 }

@@ -41,7 +41,7 @@
 - `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`; defined in `rules.ts` so the browser can import it, and re-exported here). Schema changes are additive.
 - `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time), `UPGRADE_IDS` and `TEAMS`, all pure and tested.
 - `src/server/blocked-words.ts`: the blocked-word list.
-- `src/server/main.ts`: production entry; reads `PORT`, `DATA_DIR` (default `data/`), `TRUST_PROXY_HOPS` (see "Client IP behind a proxy") and, for load testing only, `RUN_STARTS_PER_WINDOW` (both parsed in `src/server/limits.ts`).
+- `src/server/main.ts`: production entry; reads `PORT`, `DATA_DIR` (default `data/`), `TRUST_PROXY_HOPS` (see "Client IP behind a proxy") and, for load testing only, `RUN_STARTS_PER_WINDOW` (both turned into the app's options by `serverOptions` in `src/server/limits.ts`, which is tested).
 - `scripts/stats.ts`, `scripts/hide.ts`, `scripts/reset.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts` (with `scripts/load-lib.ts`, its tested pure half).
 - Tests are `*.test.ts` beside the code.
 
@@ -58,7 +58,7 @@
 The run start limit counts by client IP, and behind Railway the socket address is Railway's proxy, so the client comes from headers (`pickClientIp` in `src/server/app.ts`):
 - `TRUST_PROXY_HOPS` unset or `0` (the default, the behaviour before the variable existed): `X-Real-IP`, else the rightmost `X-Forwarded-For` entry, else the socket address. It is not "the socket address only".
 - `TRUST_PROXY_HOPS=n`: the n-th `X-Forwarded-For` entry from the right; `X-Real-IP` is ignored. Each trusted proxy appends one entry, so entries a client sends sit further left and can't choose its IP. A missing header, too few entries or an entry that isn't an IP address falls back to the socket address; a bad header never fails the request.
-- On Railway the value is `TRUST_PROXY_HOPS=1` (the entry Railway's proxy appends). Use `2` if another proxy, such as a CDN, sits in front of Railway. Railway documents `X-Real-IP` as the client's address but not how it writes `X-Forwarded-For` (docs.railway.com, networking specs and limits), so check it once after deploying: if every viewer still shares one budget, leave the variable unset, which uses `X-Real-IP`.
+- On Railway the value is `TRUST_PROXY_HOPS=1` (the entry Railway's proxy appends). Use `2` if another proxy, such as a CDN, sits in front of Railway. Railway documents `X-Real-IP` as the client's address but not how it writes `X-Forwarded-For` (docs.railway.com, networking specs and limits), so check it once after deploying. The server logs the client address of the first 20 run starts after boot (`run start 1/20 after boot: client <address>`) and of every refused start, with the cap that refused it. Start a run from a phone on cellular and one from another network, and read Railway's deploy log: the two lines should show two different public addresses. If both show the same address, or a private one (`10.x`, `100.64.x`, `fd..`), the hop count is wrong: unset the variable, which uses `X-Real-IP`, and check again. On stream, `run start refused (per-IP cap)` lines that all show one address mean the same thing.
 - Anything but a whole number from 0 to 10 stops the server from starting.
 
 ## Boundaries

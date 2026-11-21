@@ -30,6 +30,8 @@ export const TOP_CACHE_MS = 1000;
 export const TEAMS_CACHE_MS = TOP_CACHE_MS;
 export const MAX_BODY_BYTES = 2048;
 const PLAYER_ID = /^[A-Za-z0-9-]{8,64}$/;
+/** How many accepted run starts after boot log their client address, so the operator can check the proxy setting. */
+export const LOGGED_STARTS = 20;
 
 export type AppOptions = {
   /** The server's clock, in ms. Tests inject one. */
@@ -40,6 +42,8 @@ export type AppOptions = {
   runStartsPerWindow?: number;
   /** Run starts allowed per player id per window. Defaults to the real limit; only `bun run load` raises it. */
   runStartsPerPlayer?: number;
+  /** Where the client address of early starts and of every refused start is written. Defaults to nowhere. */
+  log?: (line: string) => void;
 };
 
 /**
@@ -82,6 +86,8 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
   const startsPerPlayer = opts.runStartsPerPlayer ?? RUN_STARTS_PER_PLAYER;
   const ipStarts = new Map<string, number[]>();
   const playerStarts = new Map<string, number[]>();
+  const log = opts.log ?? (() => {});
+  let loggedStarts = 0;
   let topCache: { at: number; top: TopRow[] } | null = null;
   let teamsCache: { at: number; teams: Record<Team, number> } | null = null;
 
@@ -117,6 +123,8 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const byPlayer = inWindow(playerStarts, body.playerId, t);
     const waits = [retryAfter(byIp, startsPerIp, t), retryAfter(byPlayer, startsPerPlayer, t)];
     if (waits.some((w) => w > 0)) {
+      const cap = waits[0]! > 0 && waits[1]! > 0 ? "both caps" : waits[0]! > 0 ? "per-IP cap" : "per-player cap";
+      log(`run start refused (${cap}): client ${ip}`);
       c.header("Retry-After", String(Math.max(...waits)));
       return c.json({ error: "rate" }, 429);
     }
@@ -124,6 +132,10 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     playerStarts.set(body.playerId, [...byPlayer, t]);
     pruneStarts(ipStarts, t);
     pruneStarts(playerStarts, t);
+    if (loggedStarts < LOGGED_STARTS) {
+      loggedStarts++;
+      log(`run start ${loggedStarts}/${LOGGED_STARTS} after boot: client ${ip}`);
+    }
 
     const runId = crypto.randomUUID();
     const at = new Date(t);

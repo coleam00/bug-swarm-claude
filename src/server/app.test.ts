@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { RATE_WINDOW_MS, RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW, clientIpResolver, createApp } from "./app";
+import { LOGGED_STARTS, RATE_WINDOW_MS, RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW, clientIpResolver, createApp } from "./app";
 import { RUN_ENDED, computeStats, hideName, openDb, upsertPlayer } from "./db";
 import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, TEAMS, TEST_SHIELD, UPGRADE_IDS, type Team } from "./rules";
 
@@ -146,6 +146,23 @@ describe("run start", () => {
     await startRun(a);
     await startRun(a);
     expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" })).status).toBe(429);
+  });
+
+  test("logs the client address of the first starts after boot and of every refused start, so the proxy setting can be checked", async () => {
+    const lines: string[] = [];
+    const a = createApp(db, { now: () => clock, clientIp: () => ip, runStartsPerWindow: LOGGED_STARTS + 1, log: (l) => lines.push(l) });
+    for (let i = 0; i <= LOGGED_STARTS; i++) await startRun(a, `player-${String(i).padStart(4, "0")}`);
+    expect(lines).toHaveLength(LOGGED_STARTS); // only the first ones: no line per start all stream
+    expect(lines[0]).toBe(`run start 1/${LOGGED_STARTS} after boot: client 1.1.1.1`);
+    lines.length = 0;
+    await post(a, "/api/runs", { playerId: "player-9999", name: "Robo", team: TABS });
+    expect(lines).toEqual(["run start refused (per-IP cap): client 1.1.1.1"]);
+    ip = "2.2.2.2";
+    const b = createApp(db, { now: () => clock, clientIp: () => ip, runStartsPerPlayer: 1, log: (l) => lines.push(l) });
+    await startRun(b, "player-8888");
+    lines.length = 0;
+    await post(b, "/api/runs", { playerId: "player-8888", name: "Robo", team: TABS });
+    expect(lines).toEqual(["run start refused (per-player cap): client 2.2.2.2"]);
   });
 
   /** A start through a proxy that sends `headers`, as player `n`. */
