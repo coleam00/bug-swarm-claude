@@ -23,7 +23,7 @@ import { createArenaRenderer, type Robot } from "./render";
 const MAX_STEPS_PER_FRAME = 3;
 
 const player = loadPlayer();
-if (nextScreen(player, false) !== "play" || player.name === null || player.team === null) {
+if (nextScreen(player, false, false) !== "play" || player.name === null || player.team === null) {
   location.replace("/");
 } else {
   start(player.id, player.name, player.team);

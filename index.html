@@ -37,21 +37,31 @@
         touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
       /* The name is typed and can be edited, so its input stays selectable. */
       .setup input { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
-      /* Setup: the name and the team before the first run (or only the team, once, for a player from before teams). */
-      .setup { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 24px; font-family: system-ui, sans-serif; text-align: center;
+      /* The start screen: the backdrop canvas (backdrop/) behind a dark middle so the title reads,
+         then the title, the tagline and either "Play as <name>" or the name field and the team buttons.
+         No rules or instructions: a name problem shows one short line under the field. */
+      .setup { position: relative; z-index: 1; min-height: 100dvh; box-sizing: border-box; overflow: hidden; display: flex;
+        flex-direction: column; align-items: center; justify-content: center; gap: 20px; font-family: system-ui, sans-serif; text-align: center;
         padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left)); }
-      .setup h1 { font-size: 44px; margin: 0; }
-      .setup form { display: flex; flex-direction: column; gap: 16px; width: min(100%, 360px); }
-      .setup label { font-size: 22px; }
-      .setup input { font-size: 24px; padding: 10px 12px; border-radius: 8px; border: 2px solid #334155; background: #0f172a; color: #f8fafc; }
-      .setup button { min-height: 56px; font: inherit; font-size: 24px; font-weight: 700; border-radius: 8px; cursor: pointer; }
-      .setup button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
-      .setup-play { border: 0; background: #22d3ee; color: #05070d; }
-      .setup-teams { display: flex; gap: 12px; width: min(100%, 360px); }
-      .setup-teams button { flex: 1 1 0; border: 2px solid; }
-      .setup-alert { color: #fda4af; font-size: 20px; margin: 0; }
-      .setup-hint { color: #94a3b8; font-size: 17px; line-height: 1.35; margin: 0; }
+      .setup::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+        background: radial-gradient(ellipse at center, rgba(5, 7, 13, 0.72), rgba(5, 7, 13, 0) 70%); }
+      .start-backdrop { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%; display: block; pointer-events: none; }
+      .start-title { margin: 0; font: 900 clamp(52px, 15vw, 128px)/0.95 system-ui, sans-serif; letter-spacing: 0.02em; color: #ffffff;
+        text-shadow: 0 0 6px rgba(255, 255, 255, 0.55), 0 0 28px rgba(34, 211, 238, 0.67), 0 0 60px rgba(34, 211, 238, 0.33); }
+      .start-tag { margin: 0; font-size: clamp(20px, 5vw, 26px); font-weight: 600; color: #cbd5e1; }
+      .start-actions { display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(100%, 380px); margin-top: 8px; }
+      .setup input { box-sizing: border-box; width: 100%; min-height: 56px; font: inherit; font-size: 24px; padding: 8px 14px; border-radius: 10px;
+        border: 2px solid #334155; background: rgba(15, 23, 42, 0.9); color: #f8fafc; text-align: center; }
+      .setup input::placeholder { color: #64748b; }
+      .setup button { font: inherit; font-weight: 800; border-radius: 10px; cursor: pointer; color: #05070d; border: 0; }
+      .setup button:focus-visible, .setup input:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
+      .start-teams { display: flex; gap: 12px; width: 100%; }
+      .start-teams button { flex: 1 1 0; min-height: 60px; font-size: 24px; }
+      .start-teams button:disabled { opacity: 0.3; cursor: default; }
+      .setup .start-play { width: 100%; min-height: 68px; padding: 8px 16px; font-size: 26px; line-height: 1.15; overflow-wrap: anywhere; }
+      .setup .start-change { min-height: 44px; padding: 4px 16px; background: none; color: #cbd5e1; font-size: 18px; font-weight: 500;
+        text-decoration: underline; text-underline-offset: 3px; }
+      .start-alert { margin: 0; color: #fda4af; font-size: 20px; font-weight: 600; }
       /* Game over. Portrait: one column. A short landscape screen (a phone held sideways): two columns,
          score, race, best and Play again on the left; top 10 and upgrades on the right. */
       .over { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
@@ -132,15 +142,15 @@
         .over ol { line-height: 1.25; }
         .over .over-race p { font-size: 14px; }
         .over-race-bar { height: 6px; }
-        .setup { gap: 12px;
+        .setup { gap: 8px;
           padding: max(8px, var(--safe-top)) max(16px, var(--safe-right)) max(8px, var(--safe-bottom)) max(16px, var(--safe-left)); }
-        .setup h1 { font-size: 30px; }
-        .setup form { gap: 10px; }
-        .setup label { font-size: 18px; }
-        .setup input { font-size: 20px; padding: 6px 12px; }
-        .setup button { min-height: 48px; font-size: 20px; }
-        .setup-alert { font-size: 18px; }
-        .setup-hint { font-size: 15px; line-height: 1.25; }
+        .start-title { font-size: clamp(40px, 15vh, 88px); }
+        .start-tag { font-size: 18px; }
+        .start-actions { gap: 8px; margin-top: 4px; width: min(100%, 440px); }
+        .setup input { min-height: 48px; font-size: 20px; padding: 4px 12px; }
+        .start-teams button { min-height: 48px; font-size: 20px; }
+        .setup .start-play { min-height: 56px; font-size: 22px; }
+        .start-alert { font-size: 17px; }
       }
     </style>
   </head>

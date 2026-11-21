@@ -21,7 +21,7 @@ import {
   TEXT_STROKE,
   VIGNETTE,
 } from "../game/look";
-import { ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, floorTile, glowSprite, robotMarkSprite, robotSprite } from "../game/sprites";
+import { ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildGlow, buildRobot, floorTile, robotMarkSprite } from "../game/sprites";
 import { STICK_RANGE, stickKnob, type Stick } from "../game/stick";
 import { TEAM_LOOK } from "../teams";
 import type { Camera } from "./camera";
@@ -89,10 +89,10 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     if (teams && Math.abs(k - ppu) < 0.01) return;
     ppu = k;
     teams = {
-      tabs: { body: robotSprite(ppu, false, TEAM_LOOK.tabs.color), glow: glowSprite(TEAM_LOOK.tabs.color) },
-      spaces: { body: robotSprite(ppu, false, TEAM_LOOK.spaces.color), glow: glowSprite(TEAM_LOOK.spaces.color) },
+      tabs: { body: buildRobot(ppu, TEAM_LOOK.tabs.color), glow: buildGlow(TEAM_LOOK.tabs.color) },
+      spaces: { body: buildRobot(ppu, TEAM_LOOK.spaces.color), glow: buildGlow(TEAM_LOOK.spaces.color) },
     };
-    white = glowSprite(PALETTE[GLOW_WHITE]);
+    white = buildGlow(PALETTE[GLOW_WHITE]);
     mark = robotMarkSprite(ppu);
     const tile = floorTile(ppu, TILE);
     floor = ctx.createPattern(tile, "repeat");
