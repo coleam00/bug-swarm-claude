@@ -9,7 +9,8 @@
 //   Such a short word is also read glued to the word before it, the word after it and both, so
 //   an uneven split ("f uck", "ni gger", "who re", "shi t") is one word too. A split into two
 //   pieces of three letters or more passes ("ret ard"), unless one piece is blocked on its own
-//   ("nig ger" is refused for "nig"); the owner hides those with `bun run hide`.
+//   ("nig ger" is refused for "nig"); the owner hides those with `bun run hide`. The same goes
+//   for a blocked word glued to the letters of an exception kept for a common name (below).
 // - Each word normalised: lowercased, the digit swaps 0->o, 1->i, 3->e, 4->a, 5->s, 7->t, 8->b
 //   undone. "5h17" is "shit".
 // - Repeated letters: each run of a letter in an entry matches that many OR MORE of it in the
@@ -36,8 +37,18 @@
 // - EXCEPTIONS: real words cut out of each word before BLOCKED_ANYWHERE is checked
 //   ("therapist" would otherwise be refused for "rapist", "Sushi Time" for "shit"). An exception
 //   is replaced by a separator, not deleted, so it can't be used to join two halves of a word.
-//   Keep exceptions specific: one that starts with a blocked word ("nazia") hides it in
-//   "nazi4life", so such a name is left as a false positive instead.
+//   Keep exceptions specific: an exception is cut out wherever it appears, so one that is a
+//   blocked word plus a letter or two hides that word in front of any word starting with those
+//   letters ("gookin" would let "GookInvader" through). Such a rare name is left refused
+//   instead. Where the name is common, the exception stays and the leak is accepted, for the
+//   owner to hide with `bun run hide`:
+//   - "ishita" and "oshita" let "IShitAgain" and "NoShitAsshole" through;
+//   - "ashit" lets "YouAShit" through;
+//   - "nazir" and "nazim" let "NaziRule" and "NaziMaster" through;
+//   - "fagan", "fagen", "fager" and "fagel" let "FagAndy", "FagEric" and "FagElite" through;
+//   - "kuntal" lets "KuntAlways" through, and "coonan" lets "CoonAndy" through;
+//   - the Cooney family lets "CoonEy" and "CoonTs" through.
+//   No exception may contain another: the longer one would never be the one that cuts.
 // Numbers: a name that starts or ends with a number (one digit or more) is also read without it
 // (an age, a year, a "2"), and refused if either reading is: "ass2", "2fag", "1 Admin" and
 // "Cole Medin 2" are refused, and "pen15" and "5hit" still read "penis" and "shit". A word made
@@ -48,7 +59,8 @@
 // "porn" (Pornthep), "Nazia", "Gnazio", "McCoon", "Coonie" and "Kunti", the surnames "Coons",
 // "Fagg", "Fago" and "Faggi" (an exception for them would let "coons", "faggot", "fagot" and
 // "faggit" through), "Japp" (exceptions are not applied to BLOCKED_WHOLE), "Twatt", "Wanke",
-// "Cunto", "Cuntz" and "Pecker", a whole word such as
+// "Cunto", "Cuntz" and "Pecker", the rare names "Chinkin", "Gookin", "Kikel", "Kyker",
+// "Fagin", "Faggin", "Kunta", "Cooner" and "Nazionale" (see "Keep exceptions specific"), a whole word such as
 // "Moby Dick" or "DeHoe", and two names glued into one word ("AnnaZiegler"): only spaces,
 // "-" and "_" separate words for BLOCKED_ANYWHERE, because splitting at capitals would let
 // "CunTface" through. Gluing short words to their neighbours also refuses some initials and
@@ -451,7 +463,6 @@ export const EXCEPTIONS: readonly string[] = [
   "sushi",
   "pushit",
   "mishit",
-  "matsushita",
   "shiitake",
   "shitake",
   "peniston",
@@ -478,13 +489,10 @@ export const EXCEPTIONS: readonly string[] = [
   "fagan",
   "fagen",
   "fager",
-  "fagin",
-  "faggin",
   "faggio",
   "fagio",
   "fagund",
   "ignazio",
-  "nazion",
   "antinazi",
   "coonawarra",
   "coontz",
@@ -492,7 +500,6 @@ export const EXCEPTIONS: readonly string[] = [
   "coonts",
   "coonrod",
   "coonley",
-  "kunta",
   "kuntz",
   "kuntal",
   "coonhound",
@@ -514,7 +521,6 @@ export const EXCEPTIONS: readonly string[] = [
   "spickler",
   "spickermann",
   "chardon",
-  "kyker",
   "spaziani",
   "spazzoli",
   "faggiano",
@@ -522,28 +528,15 @@ export const EXCEPTIONS: readonly string[] = [
   "fagnani",
   "fagner",
   "coonrad",
-  "cooner",
-  "gookin",
-  "chinkin",
-  "kikel",
   "slutsky",
   "slutzky",
   "wankowski",
   "pennison",
-  "kinoshita",
-  "morishita",
   "takeshita",
   "oshita",
-  "kishita",
-  "hishita",
-  "nishita",
   "ishita",
-  "yoshitaka",
-  "yoshitomi",
   "yoshito",
-  "toshitaka",
   "toshitsugu",
-  "hoshitani",
   "shitara",
 ];
 

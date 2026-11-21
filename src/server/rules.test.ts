@@ -107,6 +107,11 @@ describe("name rules", () => {
   test("an exception doesn't hide a blocked word beside it, and cutting it out joins nothing", () => {
     refuses(["Scunthorpefuck", "Therapist rapist", "Sushi shit"]);
     expect(checkName("fuscunthorpeck").ok).toBe(true); // "fu|ck", not "fuck"
+    // No exception is a slur plus a letter or two, which would hide it before ordinary words.
+    refuses(["ChinkInvader", "Chinkins", "GookInvasion", "Gooking", "KikeLover", "KykeRaider", "FagInvader"]);
+    refuses(["KuntAgain", "NaziOnline", "CoonEric"]);
+    // Accepted, documented in blocked-words.ts: "ishita" is kept for the name Ishita.
+    expect(checkName("IShitAgain").ok).toBe(true);
   });
 
   test("a number at the end of a longer name is a number, not letters", () => {
@@ -138,13 +143,13 @@ describe("name rules", () => {
     ...["Pussycat", "Penistone", "Peniston", "Milford", "Carbonara", "Wankhede", "Nazir", "Sextant"],
     ...["Mongoose", "Tardis", "Stardust", "Leotard", "Pedometer", "Speedo", "Homophone", "Spice"],
     ...["Hispanic", "Specific", "Cockpit", "Scumm", "Analog", "Titanic", "Hoedown", "Sambuca"],
-    ...["Fagan", "Fagen", "Fagin", "Faggin", "Fagioli", "Fagundes", "Fagerstrom", "Ignazio", "Nazionale"],
+    ...["Fagan", "Fagen", "Fagioli", "Fagundes", "Fagerstrom", "Ignazio"],
     ...["Nazim", "Benazir", "Antinazi", "Pakize", "Coonan", "Coonawarra", "Coontz", "Cooney", "Coonts"],
-    ...["Coonrod", "Coonley", "Kunta", "Kuntz", "Kuntal", "Racoon", "Faggio", "Pussywillow", "Shittu"],
+    ...["Coonrod", "Coonley", "Kuntz", "Kuntal", "Racoon", "Faggio", "Pussywillow", "Shittu"],
     ...["Pussyfoot", "Carbon"],
     // Surnames an entry runs into through a doubled letter, or sits inside.
     ...["Cook", "Cooks", "Tim Cook", "Pollack", "Bonner", "Bonerjee", "Midgett", "Spickett", "Spickard"],
-    ...["Spickler", "Chardonnay", "Kyker", "Spaziani", "Faggiano", "Fagel", "Gookin", "Slutsky"],
+    ...["Spickler", "Chardonnay", "Spaziani", "Faggiano", "Fagel", "Slutsky"],
     // Japanese and Indian names with "shit" inside.
     ...["Kinoshita", "Morishita", "Takeshita", "Oshita", "Kishita", "Ishita", "Yoshitaka", "Yoshitomi"],
     ...["Toshitsugu", "Hoshitani", "Shitara", "Nishita"],
@@ -182,6 +187,8 @@ describe("name rules", () => {
     const anywhere = BLOCKED_ANYWHERE.map((w) => [w, new RegExp(entryPattern(w))] as const);
     const redundant = [...BLOCKED_ANYWHERE, ...BLOCKED_WHOLE].filter((w) => anywhere.some(([o, re]) => o !== w && re.test(w)));
     expect(redundant).toEqual([]);
+    // No exception contains another: the longer one would never be the one that cuts.
+    expect(EXCEPTIONS.filter((e) => EXCEPTIONS.some((o) => o !== e && e.includes(o)))).toEqual([]);
     // No exception is itself a whole-word block or a reserved name.
     expect(EXCEPTIONS.filter((w) => w.length <= 16 && !checkName(w).ok)).toEqual([]);
   });
