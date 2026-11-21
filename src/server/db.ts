@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { TEAMS, isTeam, nameKey, type Team } from "./rules";
+import { TEAMS, isShownName, isTeam, nameKey, type Team } from "./rules";
 
 // Every event the app records, named once. The server writes them and `bun run stats` reads them,
 // so both import this list instead of typing the strings. A run is a run_started and, if it
@@ -139,35 +139,41 @@ export function recordRunEnded(db: Database, end: RunEnd, at: Date): void {
 
 export type TopRow = { name: string; score: number };
 
-/** Best score per player, one row each, non-hidden names only, highest first (ties go to the player who finished a run first). */
+/**
+ * Best score per player, one row each, highest first (ties go to the player who finished a run
+ * first). Leaves out hidden names, and stored names the word lists now refuse (isShownName):
+ * those rows stay stored, they are only not shown. The list check runs before the cut to 10, so a
+ * refused name that ranks high doesn't shorten the board.
+ */
 export function topTen(db: Database): TopRow[] {
-  return db
+  const rows = db
     .query(
       `SELECT p.name AS name, MAX(e.score) AS score
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY p.id
-       ORDER BY score DESC, MIN(e.at) ASC
-       LIMIT 10`,
+       ORDER BY score DESC, MIN(e.at) ASC`,
     )
     .all(RUN_ENDED) as TopRow[];
+  return rows.filter((r) => isShownName(r.name)).slice(0, 10);
 }
 
 /**
- * Each team's total: the sum of its finished runs' scores, leaving out hidden names. A run
- * counts for the team stamped on it, so runs from before teams count for nobody.
+ * Each team's total: the sum of its finished runs' scores, leaving out hidden names and stored
+ * names the word lists now refuse (isShownName). A run counts for the team stamped on it, so
+ * runs from before teams count for nobody.
  */
 export function teamTotals(db: Database): Record<Team, number> {
   const rows = db
     .query(
-      `SELECT e.team AS team, SUM(e.score) AS total
+      `SELECT e.team AS team, p.name AS name, SUM(e.score) AS total
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND e.team IS NOT NULL AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
-       GROUP BY e.team`,
+       GROUP BY e.team, p.id`,
     )
-    .all(RUN_ENDED) as { team: string; total: number | null }[];
+    .all(RUN_ENDED) as { team: string; name: string; total: number | null }[];
   const totals = Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>;
-  for (const r of rows) if (isTeam(r.team)) totals[r.team] = r.total ?? 0;
+  for (const r of rows) if (isTeam(r.team) && isShownName(r.name)) totals[r.team] += r.total ?? 0;
   return totals;
 }
 

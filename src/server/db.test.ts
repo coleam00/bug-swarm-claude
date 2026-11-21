@@ -14,6 +14,7 @@ import {
   teamTotals,
   topTen,
   upsertPlayer,
+  type Team,
 } from "./db";
 
 let dir: string;
@@ -120,6 +121,34 @@ test("a database file from before teams opens and gains events.team; its old run
   expect(columns).toContain("team");
   expect(topTen(db)).toEqual([{ name: "Old", score: 99 }]); // still on the top 10
   expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
+});
+
+/** A player stored straight into the database, past checkName, as one stored before the lists grew. */
+function stored(id: string, name: string, score: number, team: Team = TEAMS[0]) {
+  const runId = `run-${++runs}`;
+  const at = new Date("2026-11-28T15:00:00.000Z");
+  upsertPlayer(db, id, name, team, at);
+  recordRunStarted(db, runId, id, at, team);
+  recordRunEnded(db, { runId, playerId: id, score, squashes: 0, seconds: 60, touch: false, upgrades: [], team }, new Date(at.getTime() + 60_000));
+}
+
+test("names the word lists now refuse stay stored but leave the top 10 and the team totals", () => {
+  stored("p1", "fuuuck", 90);
+  stored("p2", "admin", 80, TEAMS[1]);
+  stored("p3", "Alice", 50);
+  stored("p3", "Alice", 20);
+  expect(topTen(db)).toEqual([{ name: "Alice", score: 50 }]);
+  expect(teamTotals(db)).toEqual({ tabs: 70, spaces: 0 });
+  expect(db.query("SELECT COUNT(*) AS n FROM players").get()).toEqual({ n: 3 });
+});
+
+test("refused names that outscore everyone don't shorten the top 10", () => {
+  for (let i = 0; i < 3; i++) stored(`bad-${i}`, ["fuuuck", "Cole Medin", "b1tch"][i]!, 1000 + i);
+  for (let i = 0; i < 11; i++) stored(`p-${i}`, `Player ${i}`, 10 * i);
+  const top = topTen(db);
+  expect(top).toHaveLength(10);
+  expect(top[0]).toEqual({ name: "Player 10", score: 100 });
+  expect(top.map((r) => r.name)).not.toContain("fuuuck");
 });
 
 test("bun run hide removes a name from the top 10, whatever its case", () => {

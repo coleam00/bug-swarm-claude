@@ -40,7 +40,7 @@
 - `src/server/app.ts`: `/health`, the icons and the link preview (`/favicon.svg`, `/favicon.ico`, `/apple-touch-icon.png`, `/og.png`, each drawn once on first request and cached for a day), and routes under `/api`: start a run (returns a run id), finish a run (score, squashes, upgrades, device type), top 10, a player's best, team totals.
 - `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`; defined in `rules.ts` so the browser can import it, and re-exported here). Schema changes are additive.
 - `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time), `UPGRADE_IDS` and `TEAMS`, all pure and tested.
-- `src/server/blocked-words.ts`: the blocked-word list.
+- `src/server/blocked-words.ts`: the name lists: words blocked anywhere in a name, words blocked only as a whole word, the real words excepted from the first, and the reserved names. `rules.ts` matches them; the file's header says how.
 - `src/server/art.ts`: the icons and the 1200x630 link preview, drawn in code from `look.ts` (the robot as an SVG, and a small software rasterizer for the PNGs); `src/server/png.ts` encodes PNG and ICO with `node:zlib`. No image files.
 - `src/server/share.ts`: link previews need an absolute image URL, and the app knows no public URL of its own, so the served page takes its origin from the request (`X-Forwarded-Host` or `Host`, and `X-Forwarded-Proto`); a host that is not a plain host name leaves the URL relative.
 - `src/server/main.ts`: production entry; serves `dist/` and the page (with absolute share-image URLs, `share.ts`) for every other path; reads `PORT`, `DATA_DIR` (default `data/`), `TRUST_PROXY_HOPS` (see "Client IP behind a proxy") and, for load testing only, `RUN_STARTS_PER_WINDOW` (both turned into the app's options by `serverOptions` in `src/server/limits.ts`, which is tested).
@@ -50,7 +50,7 @@
 ## Data
 - **Player:** a random id the browser creates on first visit and keeps in local storage, with a name and a team. No account. The server requires a team for a player id it hasn't seen, stores it once and never switches it; a player from before teams still plays with none.
 - **Run:** `run_started` (run id, player id, server time, team) and `run_ended` (run id, score, squashes, seconds, upgrades, touch or not, and the team copied from the start). A run counts for the team its player had when it started; runs with no team (from before teams) count for nobody. A run with no `run_ended` was abandoned.
-- **Hidden names:** a table the top 10 and the board filter on; `bun run hide` adds to it.
+- **Hidden names:** a table the top 10 and the board filter on; `bun run hide` adds to it. Both also leave out, at read time, a stored name that the name lists now refuse (blocked or reserved), so growing a list hides old names without touching stored rows.
 - **Top 10 and team totals:** computed from finished, non-hidden runs (`GET /api/top`, `GET /api/teams`), each cached for 1 second so hundreds of clients polling cost one query a second. The game-over screen polls both every 4 s.
 
 ## Hosting

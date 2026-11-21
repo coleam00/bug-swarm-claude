@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
 import {
   MAX_UPGRADES,
   TEAMS,
@@ -6,6 +7,8 @@ import {
   UPGRADE_MAX_LEVEL,
   checkName,
   checkScore,
+  entryPattern,
+  isShownName,
   isTeam,
   isUpgradeId,
   nameKey,
@@ -55,6 +58,96 @@ describe("name rules", () => {
     expect(checkName("Cassie").ok).toBe(true);
     expect(checkName("peacock").ok).toBe(true);
     expect(checkName("grape").ok).toBe(true);
+  });
+
+  const refused = { ok: false, reason: "blocked" } as const;
+  const refuses = (names: string[]) => expect(names.filter((n) => checkName(n).ok)).toEqual([]);
+
+  test("separators, case, repeated letters and every digit swap (7 for t, 8 for b too) are ignored", () => {
+    refuses(["f u c k", "F-U_C-K", "FUCK", "fuuuck", "fuuuuuck", "fuckkk", "assshole", "pussssy", "niiigga"]);
+    refuses(["bi7ch", "5h17", "sh17", "8oner", "n1gg3r", "f4gg0t", "sh1t", "r4pe", "c0ck"]);
+    expect(checkName("fuuuck")).toEqual(refused);
+  });
+
+  test("short words are refused as a whole name or a whole word of it, plural too", () => {
+    refuses(["ass", "a s s", "Big Ass", "big_ass", "dick", "Dicks", "c0ck", "Spic", "fag", "kkk", "Cum Lord"]);
+  });
+
+  test("one sample from each kind: racial, homophobic, ableist, sexual", () => {
+    refuses(["chink", "wetback", "kike"]); // racial
+    refuses(["dyke", "tranny", "fagot"]); // homophobic and transphobic
+    refuses(["retard", "spastic", "mongoloid"]); // ableist
+    refuses(["blowjob", "dildo", "cumshot"]); // sexual
+  });
+
+  test("an exception doesn't hide a blocked word beside it, and cutting it out joins nothing", () => {
+    refuses(["Scunthorpefuck", "Therapist rapist", "Sushi shit"]);
+    expect(checkName("fuscunthorpeck").ok).toBe(true); // "fu|ck", not "fuck"
+  });
+
+  test("a number at the end of a longer name is a number, not letters", () => {
+    for (const n of ["Josh17", "Ash17", "Cash17", "Fish17", "Tim17", "Alex88", "Bot 4455", "Team-7117"]) expect(checkName(n).ok).toBe(true);
+    refuses(["5h17", "sh17", "fuck17", "ass99", "Big Ass 99"]);
+  });
+
+  // Decides the approach: every entry is checked against these real names and words, each of
+  // which contains a blocked word. An entry that breaks one moves to BLOCKED_WHOLE, or the real
+  // word goes into EXCEPTIONS (src/server/blocked-words.ts).
+  const ALLOWED = [
+    ...["Scunthorpe", "Cassie", "Dickens", "Dickson", "Benedick", "Hancock", "Cockburn", "Peacock", "Essex"],
+    ...["Grape", "Spicy", "Classic", "Analyst", "Assistant", "Therapist", "Bass", "Glass", "Sussex"],
+    ...["Cumberland", "Document", "Cucumber", "Scrape", "Drapery", "Shuttlecock", "Assassin"],
+    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit"],
+    ...["Bob", "Connor", "Helen", "Booboo", "Shelly", "Hello"],
+    ...["Titan", "Raccoon", "Cocoon", "Tycoon", "Pedro", "Homer", "Arsenal", "Butterfly", "Penelope"],
+    ...["Ashley", "Sasha", "Nikita", "Cockatoo", "Hitchcock", "Phoebe", "Saltwater", "Atwater"],
+    ...["Saturday", "Basement", "Amusement", "Torpedo", "Swanky", "Mustard", "Custard", "Button"],
+    ...["Japan", "Pakistan", "Egypt", "Middlesex", "Canal", "Janus", "Uranus", "Enigma", "Nigel"],
+    ...["Vandyke", "Wang", "Dong", "Fanny", "Willy", "Clitheroe", "Literal", "Nightwatch", "Phuket"],
+    ...["Pussycat", "Penistone", "Peniston", "Milford", "Carbonara", "Wankhede", "Nazir", "Sextant"],
+    ...["Mongoose", "Tardis", "Stardust", "Leotard", "Pedometer", "Speedo", "Homophone", "Spice"],
+    ...["Hispanic", "Specific", "Cockpit", "Scumm", "Analog", "Titanic", "Hoedown", "Sambuca"],
+    ...["Ali Butt", "Sambo", "Day Spas", "Mong Kok"],
+  ];
+
+  test("real names and words that contain a blocked word pass", () => {
+    expect(ALLOWED.filter((n) => !checkName(n).ok)).toEqual([]);
+  });
+
+  test("reserved names are refused as reserved, whatever the spelling; names that only contain one pass", () => {
+    const reserved = { ok: false, reason: "reserved" } as const;
+    for (const n of ["colemedin", "Cole Medin", "cole_medin", "c0le-medin", "Dynamous", "ARCHON", "admin", "Addmin", "moderator", "admin99"]) {
+      expect(checkName(n)).toEqual(reserved);
+    }
+    for (const n of ["Archonaut", "admins team", "Cole", "Medina", "Moderato", "Admiral"]) expect(checkName(n).ok).toBe(true);
+  });
+
+  test("the boards show a stored name only if the lists allow it, whatever its length", () => {
+    expect(isShownName("Alice")).toBe(true);
+    expect(isShownName("A")).toBe(true); // too short to pick now, but the lists don't refuse it
+    expect(isShownName("fuuuck")).toBe(false);
+    expect(isShownName("admin")).toBe(false);
+    expect(isShownName("  Cole   Medin ")).toBe(false);
+  });
+
+  test("an entry's repeated letters mean that many or more", () => {
+    expect(entryPattern("fuck")).toBe("f+u+c+k+");
+    expect(entryPattern("pussy")).toBe("p+u+s{2,}y+");
+    expect(new RegExp(entryPattern("boob")).test("bob")).toBe(false);
+  });
+
+  test("the lists: lowercase a to z, no duplicates, a few hundred blocked words, nothing redundant", () => {
+    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES]) {
+      expect(list.filter((w) => !/^[a-z]+$/.test(w))).toEqual([]);
+      expect(new Set(list).size).toBe(list.length);
+    }
+    expect(BLOCKED_ANYWHERE.length + BLOCKED_WHOLE.length).toBeGreaterThanOrEqual(250);
+    // No entry is already caught by another, so the count is real words, not padding.
+    const anywhere = BLOCKED_ANYWHERE.map((w) => [w, new RegExp(entryPattern(w))] as const);
+    const redundant = [...BLOCKED_ANYWHERE, ...BLOCKED_WHOLE].filter((w) => anywhere.some(([o, re]) => o !== w && re.test(w)));
+    expect(redundant).toEqual([]);
+    // Every exception is a word a player may use.
+    expect(EXCEPTIONS.filter((w) => w.length <= 16 && !checkName(w).ok)).toEqual([]);
   });
 });
 

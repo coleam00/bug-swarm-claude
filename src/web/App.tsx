@@ -92,9 +92,11 @@ function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string
       return setMessage(
         checked.reason === "blocked"
           ? "That name isn't allowed. Try another."
-          : checked.reason === "length"
-            ? `Use 2 to ${NAME_MAX} characters.`
-            : "Use letters, numbers, spaces, - and _ only.",
+          : checked.reason === "reserved"
+            ? "That name is reserved. Try another."
+            : checked.reason === "length"
+              ? `Use 2 to ${NAME_MAX} characters.`
+              : "Use letters, numbers, spaces, - and _ only.",
       );
     }
     if (!team) return setMessage("Pick a team.");
