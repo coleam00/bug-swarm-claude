@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { arenaForViewport, type Arena } from "./arena";
-import { MAX_SQUASHES_PER_SECOND, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { MAX_SQUASHES_PER_SECOND, REFACTOR_BOMB, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import {
   ARENA_AREA,
   BASE_BUG,
+  BOMB_RECHARGE,
+  BOMB_RING_SECONDS,
   BUG_KINDS,
   CHOICE_CARDS,
   CHOICE_EVERY,
@@ -16,7 +18,7 @@ import {
   SPAWN_START,
   spawnInterval,
 } from "./config";
-import { choose, createState, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
+import { bombCharge, bombRing, choose, createState, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
 
 const DT = 1 / 60;
 const TALL = { w: 450, h: 800 };
@@ -88,6 +90,15 @@ function dodge(s: State): Input {
     }
   }
   return { kind: "direction", dx, dy };
+}
+
+/**
+ * Takes every upgrade but `id` to its top level, so the next choice offers `id` alone. A test
+ * steps through a real choice that way, whatever other upgrades join the pool.
+ */
+function onlyOffer(s: State, id: UpgradeId) {
+  for (const other of UPGRADE_IDS) if (other !== id) s.levels[other] = UPGRADE_MAX_LEVEL;
+  if (id !== REFACTOR_BOMB) s.bombAt = s.time; // a bomb maxed this way has just gone off, so it stays quiet
 }
 
 /** A state with spawning switched off, for tests that place their own bugs. */
@@ -499,6 +510,7 @@ describe("review laser", () => {
   test("a shot in flight at the pick keeps its pierce; shots fired after it get the new level", () => {
     const s = quiet();
     s.bugs.push({ x: 225, y: 50, hp: 1000, kind: BASE_BUG }); // far enough that a shot is still in flight
+    onlyOffer(s, REVIEW_LASER);
     s.nextChoiceAt = 0.1;
     while (!s.choice && s.time < 1) step(s, NONE, DT);
     expect(s.choice).toEqual([REVIEW_LASER]);
@@ -515,25 +527,135 @@ describe("review laser", () => {
   });
 });
 
+describe("refactor bomb", () => {
+  /** Bugs that hold still away from the robot, which can't fire, so only a bomb clears them. */
+  function place(s: State, count: number) {
+    for (let i = 0; i < count; i++) s.bugs.push({ x: 40 + 30 * i, y: 60, hp: 1000, kind: { ...BASE_BUG, speed: 0 } });
+  }
+
+  /** Steps a quiet run to a choice that offers the bomb alone, and takes it. */
+  function pickBomb(s: State) {
+    onlyOffer(s, REFACTOR_BOMB);
+    s.nextChoiceAt = s.time + 0.1;
+    while (!s.choice && s.time < s.nextChoiceAt + 1) step(s, NONE, DT);
+    expect(s.choice).toEqual([REFACTOR_BOMB]);
+    choose(s, 0);
+    s.nextChoiceAt = Infinity;
+  }
+
+  /** Steps until `until` seconds of run time, without choices or fire. */
+  function stepTo(s: State, until: number) {
+    while (s.time < until) step(s, NONE, DT);
+  }
+
+  function armed() {
+    const s = quiet();
+    s.fireTimer = Infinity;
+    s.levels[REFACTOR_BOMB] = 0;
+    return s;
+  }
+
+  test("a choice of it clears the screen on the next step, each bug a squash", () => {
+    const s = armed();
+    pickBomb(s);
+    expect(s.levels[REFACTOR_BOMB]).toBe(1);
+    place(s, 5);
+    const at = s.time;
+    const before = score(s);
+    step(s, NONE, DT);
+    expect(s.bugs).toHaveLength(0);
+    expect(s.squashes).toBe(5);
+    expect(score(s)).toBe(before + 50);
+    expect(s.bombAt).toBe(at);
+    expect(bombCharge(s)).toBeCloseTo(DT / BOMB_RECHARGE[1], 9);
+  });
+
+  test("then it recharges, and clears the screen again after 30 s", () => {
+    expect(BOMB_RECHARGE[1]).toBe(30);
+    const s = armed();
+    pickBomb(s);
+    place(s, 1);
+    step(s, NONE, DT);
+    const first = s.bombAt;
+    place(s, 3);
+    stepTo(s, first + BOMB_RECHARGE[1] - 0.1);
+    expect(s.bugs).toHaveLength(3);
+    expect(bombCharge(s)).toBeGreaterThan(0.99);
+    expect(bombCharge(s)).toBeLessThan(1);
+    stepTo(s, first + BOMB_RECHARGE[1] + 0.1);
+    expect(s.bugs).toHaveLength(0);
+    expect(s.bombAt).toBeCloseTo(first + BOMB_RECHARGE[1], 1);
+    expect(s.squashes).toBe(4);
+  });
+
+  test("picked twice it recharges faster, counted from the last blast", () => {
+    expect(BOMB_RECHARGE[2]).toBeLessThan(BOMB_RECHARGE[1]);
+    const s = armed();
+    pickBomb(s);
+    place(s, 1);
+    step(s, NONE, DT);
+    const first = s.bombAt;
+    stepTo(s, first + 5);
+    pickBomb(s); // the second pick, 5 s after the blast: no blast of its own
+    expect(s.levels[REFACTOR_BOMB]).toBe(2);
+    place(s, 3);
+    step(s, NONE, DT);
+    expect(s.bugs).toHaveLength(3);
+    stepTo(s, first + BOMB_RECHARGE[2] - 0.1);
+    expect(s.bugs).toHaveLength(3);
+    stepTo(s, first + BOMB_RECHARGE[2] + 0.1);
+    expect(s.bugs).toHaveLength(0);
+    expect(s.bombAt).toBeCloseTo(first + BOMB_RECHARGE[2], 1);
+  });
+
+  test("it holds its charge while the arena is empty", () => {
+    const s = armed();
+    pickBomb(s);
+    stepTo(s, 40);
+    expect(s.bombAt).toBe(-Infinity);
+    expect(bombCharge(s)).toBe(1);
+    place(s, 1);
+    step(s, NONE, DT);
+    expect(s.bugs).toHaveLength(0);
+  });
+
+  test("its charge and ring, as render reads them", () => {
+    const s = armed();
+    expect(bombCharge(s)).toBe(0); // not taken
+    expect(bombRing(s)).toBe(-1);
+    pickBomb(s);
+    expect(bombCharge(s)).toBe(1);
+    expect(bombRing(s)).toBe(-1); // charged, but no blast yet
+    place(s, 1);
+    step(s, NONE, DT);
+    const at = s.bombAt;
+    stepTo(s, at + BOMB_RING_SECONDS / 2);
+    expect(bombRing(s)).toBeCloseTo(0.5, 1);
+    stepTo(s, at + BOMB_RING_SECONDS + DT);
+    expect(bombRing(s)).toBe(-1);
+  });
+});
+
 test("the run's finish carries the upgrades taken, in pick order", () => {
   const s = createState(2, TALL);
   keepAlive(s, NONE, 45 * 60); // through the choices at 20 s and 40 s, taking card 0
-  expect(s.taken).toEqual([REVIEW_LASER, REVIEW_LASER]);
-  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: [REVIEW_LASER, REVIEW_LASER] });
+  expect(s.taken).toHaveLength(2);
+  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: s.taken });
   expect(runResult(s, false).upgrades).not.toBe(s.taken); // a copy: the finish can't change with the state
 });
 
 describe("the server's squash cap", () => {
   test("squashes never outrun spawns, and spawns come no faster than the cap", () => {
     expect(1 / SPAWN_MIN).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
-    // Every pick the laser, and a robot that never dies: still under the cap for two minutes.
+    // Card 0 at every pick, so every upgrade reaches its top level, and a robot that never dies:
+    // still under the cap for two minutes, piercing shots and bombs included.
     for (const player of [circle, dodge]) {
       const s = createState(6, WIDE);
       while (s.time < 120) {
         advance(s, player(s));
         s.hits = 0;
       }
-      expect(s.levels[REVIEW_LASER]).toBe(UPGRADE_MAX_LEVEL);
+      for (const id of UPGRADE_IDS) expect(s.levels[id]).toBe(UPGRADE_MAX_LEVEL);
       expect(s.squashes).toBeLessThanOrEqual(s.spawned);
       expect(s.squashes).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND * s.time);
     }

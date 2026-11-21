@@ -8,6 +8,12 @@ import type { Shake } from "./fx/shake";
 import { SQUASH_LABEL, TEXT_SECONDS, type Texts } from "./fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "./fx/trail";
 import {
+  BOMB_CHARGE,
+  BOMB_CHARGE_RADIUS,
+  BOMB_CHARGE_WIDTH,
+  BOMB_RING,
+  BOMB_RING_GLOW_WIDTH,
+  BOMB_RING_WIDTH,
   BUG_LOOKS,
   LETTERBOX,
   ROBOT_GLOW,
@@ -19,9 +25,9 @@ import {
   TEXT_STROKE,
   bugLookId,
 } from "./look";
-import { REVIEW_LASER } from "../../server/rules";
+import { REFACTOR_BOMB, REVIEW_LASER } from "../../server/rules";
 import { LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
-import { score, type State } from "./sim";
+import { bombCharge, bombRing, score, type State } from "./sim";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake };
@@ -156,6 +162,31 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
         ctx.drawImage(s.glows[p.colour[i]!]!, p.x[i]! - size, p.y[i]! - size, size * 2, size * 2);
       }
       ctx.globalAlpha = 1;
+    }
+
+    // The refactor bomb: a ring sweeping out from the robot to the farthest corner as it goes
+    // off, and while it recharges an arc around the robot that fills clockwise.
+    const ring = bombRing(state);
+    if (ring >= 0) {
+      const far = Math.hypot(Math.max(rx, arena.w - rx), Math.max(ry, arena.h - ry));
+      ctx.strokeStyle = BOMB_RING;
+      ctx.beginPath();
+      ctx.arc(rx, ry, ring * far, 0, TAU);
+      ctx.globalAlpha = 0.25 * (1 - ring);
+      ctx.lineWidth = BOMB_RING_GLOW_WIDTH * (1 - 0.5 * ring);
+      ctx.stroke();
+      ctx.globalAlpha = 1 - ring;
+      ctx.lineWidth = BOMB_RING_WIDTH * (1 - 0.5 * ring);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const charge = bombCharge(state);
+    if (state.levels[REFACTOR_BOMB] > 0 && charge < 1) {
+      ctx.strokeStyle = BOMB_CHARGE;
+      ctx.lineWidth = BOMB_CHARGE_WIDTH;
+      ctx.beginPath();
+      ctx.arc(rx, ry, BOMB_CHARGE_RADIUS, -Math.PI / 2, -Math.PI / 2 + TAU * charge);
+      ctx.stroke();
     }
 
     // The robot: body, white while flashing after a hit, then its glowing core.
