@@ -90,7 +90,7 @@ describe("name rules", () => {
     refuses(["blowjob", "dildo", "cumshot"]); // sexual
   });
 
-  test("a blocked word is looked for inside each word, never across the space between two", () => {
+  test("a blocked word is looked for inside each word, and across a space only beside a short piece", () => {
     const names = ["Anna Ziegler", "Tina Ziegler", "Dana Zito", "Rafa Garcia", "Rafa Gonzalez", "Mustafa Gul"];
     names.push("Pippa King", "Philippa King", "Marco Onofrio", "Rocco Ong", "Mona Zinn", "Gerry Cooney", "Kevin Cooney");
     names.push("Matt Watson", "Trish Ito", "Nick Ike", "Shi Taylor", "Cass Kiss");
