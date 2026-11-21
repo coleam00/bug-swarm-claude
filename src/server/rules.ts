@@ -73,13 +73,14 @@ export function compactName(s: string): string {
 }
 
 /**
- * The ways to read a name: its compact form, and, when it ends in a number, also the compact form
- * without that number (an age, a year, a "2"). A name is refused if either reading is, so "ass2",
- * "Cole Medin 2" and "admin99" are caught while "pen15" still reads "penis".
+ * The ways to read a name: its compact form, and, when it starts or ends with a number, also the
+ * compact form without those numbers (an age, a year, a "2"). A name is refused if either reading
+ * is, so "ass2", "2fag", "1 Admin" and "Cole Medin 2" are caught while "pen15" still reads "penis".
  */
 function readings(s: string): string[] {
-  const numbered = /^(.*\D)\d+$/.exec(s.replace(/[ _-]/g, ""));
-  return numbered ? [compactName(s), compactName(numbered[1]!)] : [compactName(s)];
+  const joined = s.replace(/[ _-]/g, "");
+  const bare = joined.replace(/^\d+(?=\D)/, "").replace(/(\D)\d+$/, "$1");
+  return bare === joined ? [compactName(s)] : [compactName(s), compactName(bare)];
 }
 
 /**
@@ -104,8 +105,13 @@ const EXCEPTIONS_LONGEST_FIRST = [...EXCEPTIONS].sort((a, b) => b.length - a.len
  */
 export function listedReason(name: string): "blocked" | "reserved" | null {
   const whole = readings(name);
-  // A word that is only digits is a number ("load-4455"), not "aass".
-  const words = name.split(/[ _-]+/).filter((w) => !/^\d*$/.test(w)).flatMap(readings);
+  // Words split on space, - and _, and where a capital starts a word ("FatFag", "ImASpic"). A word that is only digits is a number ("load-4455"), not "aass".
+  const words = name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
+    .split(/[ _-]+/)
+    .filter((w) => !/^\d*$/.test(w))
+    .flatMap(readings);
   for (const compact of whole) {
     // An exception becomes "|", not "", so cutting it out can't join two halves into a word.
     let cut = compact;
