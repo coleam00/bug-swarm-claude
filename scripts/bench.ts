@@ -193,13 +193,15 @@ async function measureLayout(cdp: Session, v: Viewport) {
   return cdp.evaluate(`(() => {
     const summary = document.querySelector(".over-summary");
     const hint = document.querySelector(".over-hint");
-    if (!summary || !hint) throw new Error("no game-over screen");
+    const again = document.querySelector(".over-again");
+    const button = document.querySelector(".over-again button");
+    if (!summary || !hint || !again || !button) throw new Error("no game-over screen");
     if (!document.querySelector(".over-summary [role=alert]")) {
       const alert = document.createElement("p");
       alert.setAttribute("role", "alert");
       alert.className = "over-alert";
       alert.textContent = ${JSON.stringify(LONGEST_NOTICE)};
-      summary.insertBefore(alert, hint);
+      summary.insertBefore(alert, again);
     }
     const rows = document.querySelectorAll(".over-board li").length;
     const chips = document.querySelectorAll("ul.over-upgrades li").length;
@@ -207,6 +209,7 @@ async function measureLayout(cdp: Session, v: Viewport) {
     const race = document.querySelector(".over-race");
     return {
       hintBottom: Math.round(hint.getBoundingClientRect().bottom),
+      buttonHeight: Math.round(button.getBoundingClientRect().height),
       boardBottom: lastRow ? Math.round(lastRow.getBoundingClientRect().bottom) : null,
       chipsTop: Math.round(document.querySelector(".over-upgrades").getBoundingClientRect().top),
       scrollHeight: document.scrollingElement.scrollHeight,
@@ -339,21 +342,22 @@ try {
     }
     for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
     console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the too-many-runs alert added):\n");
-    console.log("| Viewport | Upgrade chips | Top-10 rows | Race bar height | Hint bottom | Last row bottom | Page height | Fits |");
-    console.log("|---|---|---|---|---|---|---|---|");
-    const fit = (m: any) => m.race !== null && m.hintBottom <= m.innerHeight && m.scrollHeight <= m.innerHeight && m.scrollWidth <= m.innerWidth;
+    console.log("| Viewport | Upgrade chips | Top-10 rows | Race bar height | Play again height | Hint bottom | Last row bottom | Page height | Fits |");
+    console.log("|---|---|---|---|---|---|---|---|---|");
+    // "Play again" is a touch target, so it must be at least 44 px tall.
+    const fit = (m: any) => m.race !== null && m.buttonHeight >= 44 && m.hintBottom <= m.innerHeight && m.scrollHeight <= m.innerHeight && m.scrollWidth <= m.innerWidth;
     for (const { label, m } of layouts) {
       const fits = fit(m);
       if (!fits) failed = true;
       console.log(
-        `| ${label} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.hintBottom} | ${m.boardBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${fits ? "yes" : "NO"} |`,
+        `| ${label} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.buttonHeight} | ${m.hintBottom} | ${m.boardBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${fits ? "yes" : "NO"} |`,
       );
     }
     const slow = rows.filter((r) => r.avg < TARGET_FPS || r.worst < TARGET_FPS);
     if (slow.length) failed = true;
     console.log(
       `\n${failed ? "FAIL" : "PASS"}: ${slow.length ? `under ${TARGET_FPS} fps at ${slow.map((r) => r.label).join(", ")}` : `${TARGET_FPS}+ fps avg and worst 1 s at both sizes`}${
-        layouts.some((l) => !fit(l.m)) ? "; the game-over screen doesn't fit (or has no race bar)" : ""
+        layouts.some((l) => !fit(l.m)) ? "; the game-over screen doesn't fit (or has no race bar, or Play again is under 44 px)" : ""
       }`,
     );
   }
