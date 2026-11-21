@@ -86,6 +86,7 @@ describe("changes between frames", () => {
     frame(s, c, 0);
     const lastPhase = c.phase[2]!;
     const midPhase = c.phase[1]!;
+    expect(lastPhase).not.toBe(midPhase); // real phases, so a lost phase swap shows below
     const { squashed, hits } = frame(s, c, 20);
     expect(squashed).toEqual([near]);
     expect(hits).toHaveLength(0);
@@ -105,5 +106,20 @@ describe("changes between frames", () => {
       return s;
     };
     expect(play(true)).toEqual(play(false));
+  });
+
+  test("over a whole run, every squash and every hit is reported exactly once", () => {
+    const s = createState(7, { w: 1100, h: 600 });
+    const c = createChanges(createRng(1));
+    let squashes = 0;
+    let hits = 0;
+    for (let i = 0; i < 3600 && !s.over; i++) {
+      step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
+      detectChanges(c, s, () => squashes++, () => hits++);
+    }
+    expect(s.squashes).toBeGreaterThan(10);
+    expect(s.hits).toBeGreaterThan(1);
+    expect(squashes).toBe(s.squashes);
+    expect(hits).toBe(s.hits);
   });
 });
