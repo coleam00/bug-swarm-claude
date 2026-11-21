@@ -12,7 +12,13 @@
 - Container: `Dockerfile` builds the game and runs `bun run start` with `NODE_ENV=production`, which makes the server listen on all interfaces; everywhere else it listens on localhost only. `DATA_DIR` must be a persistent volume.
 - Health: `GET /health` answers `200 ok` once the app is ready.
 - Test everything: `bun run check` (`tsc --noEmit`, then `bun test`). CI runs exactly this.
-- The bet's command: `bun run stats`. Moderation: `bun run hide "<name>"`. Balance: `bun run pacing`. Load test (Phase 3): `bun run load`.
+- The bet's command: `bun run stats`. Moderation: `bun run hide "<name>"`. Balance: `bun run pacing`. Clean slate before the stream: `bun run reset -- --yes` deletes every run and player (hidden names stay); a running server needs no restart.
+- Load test: `bun run load -- --url <base url> [--players 500] [--seconds 60]`. Each simulated player (named `load-0000` up) starts a run, plays 5 to 30 s while polling the top 10 every 4 s, finishes with a score that passes the plausibility check, fetches its best and the top 10 as the game-over screen does, and starts again; runs open at the deadline still finish. It prints requests, statuses and p50/p95/p99 per route, and exits 1 unless 95% of requests took under 200 ms with no 4xx or 5xx and no network error (a 4xx means the test itself is wrong, such as a 429 from a server started without the raised limit). Every simulated player comes from one IP, so the server under test runs with `RUN_STARTS_PER_WINDOW` raised (it defaults to the real 30; anything but a positive whole number stops the server from starting). Never set it in production. The procedure, with a throwaway data folder (never `data/`):
+  - `bun run build`
+  - Start the server. bash: `RUN_STARTS_PER_WINDOW=100000 DATA_DIR=<scratch folder> bun run start`. PowerShell: `$env:RUN_STARTS_PER_WINDOW='100000'; $env:DATA_DIR='<scratch folder>'; bun run start`.
+  - In a second terminal: `bun run load -- --url http://127.0.0.1:3000`.
+  - Then `bun run reset -- --yes` with the same `DATA_DIR`, or delete the folder.
+  - The script lives in `scripts/load.ts`; its argument parsing, claims and summary math are in `scripts/load-lib.ts`, which `bun run check` tests. The load run itself is not part of `bun run check`. The team totals route and `/board` join the route table in `load-lib.ts` once they exist.
 - Frame-rate benchmark: `bun run bench`. It builds the game in bench mode and plays a 60 s stress run (150 bugs, every upgrade at its top level) in headless Chrome at 1440x900 and at 390x844 @3x. It prints avg fps, the worst 1 s and `draw()` time, and checks that the game-over screen fits at phone portrait, phone landscape and desktop. It needs Chrome (`CHROME_PATH` to point at one), so it is not part of `bun run check`.
 
 ## Shape
@@ -35,8 +41,8 @@
 - `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`). Schema changes are additive.
 - `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time) and `UPGRADE_IDS`, all pure and tested.
 - `src/server/blocked-words.ts`: the blocked-word list.
-- `src/server/main.ts`: production entry; reads `PORT` and `DATA_DIR` (default `data/`).
-- `scripts/stats.ts`, `scripts/hide.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts`.
+- `src/server/main.ts`: production entry; reads `PORT`, `DATA_DIR` (default `data/`) and, for load testing only, `RUN_STARTS_PER_WINDOW` (`src/server/limits.ts`).
+- `scripts/stats.ts`, `scripts/hide.ts`, `scripts/reset.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts` (with `scripts/load-lib.ts`, its tested pure half).
 - Tests are `*.test.ts` beside the code.
 
 ## Data
@@ -50,7 +56,7 @@
 
 ## Boundaries
 - No API keys and no outside services. The app starts and `bun run check` passes with no `.env`.
-- Public on the internet during the stream: the API accepts only well-formed requests with capped sizes, at most one score per run id, scores that pass the plausibility check, and at most 30 run starts per IP per 10 minutes.
+- Public on the internet during the stream: the API accepts only well-formed requests with capped sizes, at most one score per run id, scores that pass the plausibility check, and at most 30 run starts per IP per 10 minutes (`RUN_STARTS_PER_WINDOW` raises this for `bun run load` only; never set in production).
 - Nothing the player does depends on a server response; a run plays with the API down.
 
 ## Decisions deferred

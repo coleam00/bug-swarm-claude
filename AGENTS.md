@@ -12,3 +12,4 @@ Quick commands:
 - `bun run check` must pass before any pull request.
 - `bun run pacing` prints how long runs last with each upgrade order, and fails if balance is off.
 - `bun run bench` measures the frame rate at 150 bugs in headless Chrome. `bun run stats` prints the bet's numbers. `bun run hide "<name>"` hides a name from every board.
+- `bun run load -- --url <base url> [--players 500] [--seconds 60]` load-tests a running server (start it with `RUN_STARTS_PER_WINDOW` raised; see `architecture.md`). `bun run reset -- --yes` deletes every run and player before the stream.

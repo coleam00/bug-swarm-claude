@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { computeStats, openDb, recordRunEnded, recordRunStarted, topTen, upsertPlayer } from "./db";
+import { computeStats, hideName, openDb, recordRunEnded, recordRunStarted, resetData, topTen, upsertPlayer } from "./db";
 
 let dir: string;
 let db: Database;
@@ -118,6 +118,58 @@ test("bun run hide says when no player has the name", () => {
 test("bun run hide refuses, and creates nothing, when there is no database", () => {
   const missing = join(dir, "missing");
   const p = Bun.spawnSync(["bun", "scripts/hide.ts", "Nobody"], {
+    env: { ...process.env, DATA_DIR: missing },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(p.exitCode).toBe(1);
+  expect(p.stdout.toString()).toBe("");
+  expect(p.stderr.toString()).toContain(join(missing, "app.db"));
+  expect(existsSync(missing)).toBe(false);
+});
+
+const ZERO_STATS = { players: 0, finishedRuns: 0, medianRunsPerPlayer: 0, touchShare: 0 };
+const countRows = (table: string) => (db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+
+test("resetData deletes every run and player and keeps hidden names", () => {
+  fixture(); // 9 runs (one abandoned) by 5 players
+  hideName(db, "Rude", new Date("2026-11-28T15:00:00.000Z"));
+  expect(resetData(db)).toEqual({ runs: 9, players: 5 });
+  expect(topTen(db)).toEqual([]);
+  expect(computeStats(db)).toEqual(ZERO_STATS);
+  expect(countRows("events")).toBe(0);
+  expect(countRows("players")).toBe(0);
+  expect(countRows("hidden_names")).toBe(1);
+  expect(resetData(db)).toEqual({ runs: 0, players: 0 });
+});
+
+test("bun run reset without --yes says what it would do and deletes nothing", () => {
+  fixture();
+  db.close();
+  const bare = script(["run", "reset"]);
+  const other = script(["scripts/reset.ts", "--", "--no"]);
+  db = openDb(join(dir, "app.db"));
+  for (const r of [bare, other]) expect(r.code).toBe(1);
+  expect(computeStats(db).finishedRuns).toBe(8);
+  expect(countRows("players")).toBe(5);
+});
+
+test("bun run reset -- --yes empties runs and players, keeps hidden names, and prints the counts", () => {
+  fixture();
+  hideName(db, "Rude", new Date("2026-11-28T15:00:00.000Z"));
+  db.close();
+  const r = script(["run", "reset", "--", "--yes"]);
+  db = openDb(join(dir, "app.db"));
+  expect(r.code).toBe(0);
+  expect(r.out).toEqual(["reset: deleted 9 runs and 5 players (hidden names kept)"]);
+  expect(topTen(db)).toEqual([]);
+  expect(computeStats(db)).toEqual(ZERO_STATS);
+  expect(countRows("hidden_names")).toBe(1);
+});
+
+test("bun run reset refuses, and creates nothing, when there is no database", () => {
+  const missing = join(dir, "missing");
+  const p = Bun.spawnSync(["bun", "scripts/reset.ts", "--yes"], {
     env: { ...process.env, DATA_DIR: missing },
     stdout: "pipe",
     stderr: "pipe",
