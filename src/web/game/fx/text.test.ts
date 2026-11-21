@@ -87,12 +87,25 @@ describe("floating text pool", () => {
       spawnText(t, i * 100, 0);
       updateTexts(t, 0.01);
     }
-    expect(t.live).toBe(TEXT_CAPACITY);
+    // Slot 0 takes a merge, so its life restarts: slot 1 is now the one with least life left.
+    spawnText(t, 0, 0);
+    expect(t.count[0]).toBe(2);
     spawnText(t, 5000, 0);
     expect(t.live).toBe(TEXT_CAPACITY);
     expect(t.life.length).toBe(TEXT_CAPACITY);
-    expect(t.x[0]).toBe(5000); // the oldest, so the shortest-lived
-    expect(t.x[1]).toBe(100);
+    expect(t.x[1]).toBe(5000);
+    expect(t.x[0]).toBe(0);
+    expect(t.count[0]).toBe(2);
+    expect(t.x[2]).toBe(200);
+  });
+
+  test("never more than 12 labels are alive, however many squashes land apart", () => {
+    const t = createTexts();
+    for (let i = 0; i < 40; i++) {
+      spawnText(t, i * 100, 0);
+      expect(t.live).toBeLessThanOrEqual(12);
+    }
+    expect(t.live).toBe(12);
   });
 
   test("a label stops taking squashes at the most it can show", () => {
