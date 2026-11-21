@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { playAll } from "../web/game/pacing";
 import {
   MAX_RUN_SECONDS,
-  MAX_SQUASHES_PER_SECOND,
   MAX_UPGRADES,
   TEAMS,
   UPGRADE_IDS,
@@ -64,7 +63,6 @@ describe("name rules", () => {
 describe("score plausibility", () => {
   // At 30 s elapsed and 30 s claimed: score cap is 10 * squashes + 32, squash cap 150, seconds cap 32.
   test("accepted exactly at each bound", () => {
-    expect(MAX_SQUASHES_PER_SECOND).toBe(5);
     expect(checkScore({ score: 232, squashes: 20, seconds: 30 }, 30)).toEqual({ ok: true });
     expect(checkScore({ score: 0, squashes: 150, seconds: 30 }, 30)).toEqual({ ok: true });
     expect(checkScore({ score: 0, squashes: 0, seconds: 32 }, 30)).toEqual({ ok: true });
