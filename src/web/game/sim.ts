@@ -99,6 +99,21 @@ export function createState(seed: number, arena: Arena): State {
   };
 }
 
+/** What a finished run reports to the server. */
+export type RunResult = {
+  score: number;
+  squashes: number;
+  seconds: number;
+  touch: boolean;
+  /** The upgrades taken, in pick order. */
+  upgrades: UpgradeId[];
+};
+
+/** The run's finish: its score, squashes, seconds and upgrades, and whether it was played by touch. */
+export function runResult(state: State, touch: boolean): RunResult {
+  return { score: score(state), squashes: state.squashes, seconds: state.time, touch, upgrades: [...state.taken] };
+}
+
 /** 10 per squash plus 1 per whole second survived. */
 export function score(state: State): number {
   return POINTS_PER_SQUASH * state.squashes + POINTS_PER_SECOND * Math.floor(state.time);

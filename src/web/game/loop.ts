@@ -11,16 +11,9 @@ import { CHOICE_KEYS, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, bugLookId } from "./look";
 import { createRenderer, type Fx } from "./render";
 import { createRng } from "./rng";
-import { choose, createState, score, step, type Bug, type Input, type State } from "./sim";
+import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
 
-export type RunResult = {
-  score: number;
-  squashes: number;
-  seconds: number;
-  touch: boolean;
-  /** The upgrades taken, in pick order. */
-  upgrades: UpgradeId[];
-};
+export type { RunResult };
 
 export type Game = {
   /** Cancels the loop and removes every listener. */
@@ -189,7 +182,7 @@ export function startGame(
     renderer.draw(state, fx);
     if (state.over) {
       stop();
-      opts.onOver({ score: score(state), squashes: state.squashes, seconds: state.time, touch, upgrades: [...state.taken] });
+      opts.onOver(runResult(state, touch));
       return;
     }
     raf = requestAnimationFrame(frame);

@@ -16,7 +16,7 @@ import {
   SPAWN_START,
   spawnInterval,
 } from "./config";
-import { choose, createState, pickKind, score, step, type Bug, type Input, type State } from "./sim";
+import { choose, createState, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
 
 const DT = 1 / 60;
 const TALL = { w: 450, h: 800 };
@@ -496,18 +496,31 @@ describe("review laser", () => {
     expect(s.bugs[0]!.hp).toBe(BASE_BUG.hp - 1);
   });
 
-  test("a shot fired before the pick doesn't pierce; the pick sets the level for shots after it", () => {
-    const s = createState(2, TALL);
-    while (!s.choice) {
-      step(s, NONE, DT);
-      s.hits = 0;
-    }
-    expect(s.shots.every((sh) => sh.pierce === 0)).toBe(true);
-    s.choice = [REVIEW_LASER];
+  test("a shot in flight at the pick keeps its pierce; shots fired after it get the new level", () => {
+    const s = quiet();
+    s.bugs.push({ x: 225, y: 50, hp: 1000, kind: BASE_BUG }); // far enough that a shot is still in flight
+    s.nextChoiceAt = 0.1;
+    while (!s.choice && s.time < 1) step(s, NONE, DT);
+    expect(s.choice).toEqual([REVIEW_LASER]);
+    const inFlight = s.shots[0]!;
+    expect(inFlight.pierce).toBe(0);
     choose(s, 0);
-    while (s.shots.length === 0 || s.shots.every((sh) => sh.pierce === 0)) advance(s, NONE);
-    expect(s.shots.some((sh) => sh.pierce === LASER_PIERCE[1])).toBe(true);
+    expect(inFlight.pierce).toBe(0);
+    const fired = s.shots.length;
+    const limit = s.time + 1;
+    while (s.shots.length <= fired && s.time < limit) step(s, NONE, DT);
+    expect(s.shots).toContain(inFlight);
+    expect(inFlight.pierce).toBe(0);
+    expect(s.shots[s.shots.length - 1]!.pierce).toBe(LASER_PIERCE[1]);
   });
+});
+
+test("the run's finish carries the upgrades taken, in pick order", () => {
+  const s = createState(2, TALL);
+  keepAlive(s, NONE, 45 * 60); // through the choices at 20 s and 40 s, taking card 0
+  expect(s.taken).toEqual([REVIEW_LASER, REVIEW_LASER]);
+  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: [REVIEW_LASER, REVIEW_LASER] });
+  expect(runResult(s, false).upgrades).not.toBe(s.taken); // a copy: the finish can't change with the state
 });
 
 describe("the server's squash cap", () => {
