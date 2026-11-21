@@ -271,7 +271,7 @@ describe("top 10 and best", () => {
   async function play(a: App, playerId: string, name: string, score: number) {
     const runId = await startRun(a, playerId, name);
     clock += 10_000;
-    const res = await post(a, `/api/runs/${runId}/end`, endBody(score, Math.floor(score / 10), 1));
+    const res = await post(a, `/api/runs/${runId}/end`, endBody(score, Math.floor(score / 10), 10)); // 10 s on the clock: up to 50 squashes
     expect(res.status).toBe(200);
   }
 
@@ -335,7 +335,7 @@ describe("team totals", () => {
   async function play(a: App, playerId: string, name: string, score: number, team: Team | null = TABS) {
     const runId = await startRun(a, playerId, name, team);
     clock += 10_000;
-    const res = await post(a, `/api/runs/${runId}/end`, endBody(score, Math.floor(score / 10), 1));
+    const res = await post(a, `/api/runs/${runId}/end`, endBody(score, Math.floor(score / 10), 10)); // 10 s on the clock: up to 50 squashes
     expect(res.status).toBe(200);
   }
 

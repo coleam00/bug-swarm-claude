@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { playAll } from "../web/game/pacing";
 import {
+  MAX_RUN_SECONDS,
+  MAX_SQUASHES_PER_SECOND,
   MAX_UPGRADES,
   TEAMS,
   UPGRADE_IDS,
@@ -59,19 +62,46 @@ describe("name rules", () => {
 });
 
 describe("score plausibility", () => {
-  // At 30 s elapsed: score cap is 10 * squashes + 32, squash cap 180, seconds cap 32.
+  // At 30 s elapsed and 30 s claimed: score cap is 10 * squashes + 32, squash cap 150, seconds cap 32.
   test("accepted exactly at each bound", () => {
+    expect(MAX_SQUASHES_PER_SECOND).toBe(5);
     expect(checkScore({ score: 232, squashes: 20, seconds: 30 }, 30)).toEqual({ ok: true });
-    expect(checkScore({ score: 0, squashes: 180, seconds: 32 }, 30)).toEqual({ ok: true });
+    expect(checkScore({ score: 0, squashes: 150, seconds: 30 }, 30)).toEqual({ ok: true });
+    expect(checkScore({ score: 0, squashes: 0, seconds: 32 }, 30)).toEqual({ ok: true });
     expect(checkScore({ score: 0, squashes: 0, seconds: 0 }, 0)).toEqual({ ok: true });
+    expect(checkScore({ score: 0, squashes: 0, seconds: MAX_RUN_SECONDS }, MAX_RUN_SECONDS)).toEqual({ ok: true });
   });
 
   test("one point over the score bound is refused", () => {
     expect(checkScore({ score: 233, squashes: 20, seconds: 30 }, 30).ok).toBe(false);
   });
 
-  test("more than 6 squashes per elapsed second is refused", () => {
-    expect(checkScore({ score: 0, squashes: 181, seconds: 30 }, 30).ok).toBe(false);
+  test("more than 5 squashes per claimed second is refused", () => {
+    expect(checkScore({ score: 0, squashes: 151, seconds: 30 }, 30).ok).toBe(false);
+  });
+
+  test("a choice pause earns no squashes: the cap counts the run's seconds, not the elapsed time", () => {
+    expect(checkScore({ score: 0, squashes: 150, seconds: 30 }, 60)).toEqual({ ok: true });
+    expect(checkScore({ score: 0, squashes: 151, seconds: 30 }, 60).ok).toBe(false);
+  });
+
+  test("the audit's forgery, 120 squashes and 1,220 points 20 s after the start, is refused", () => {
+    expect(checkScore({ score: 1220, squashes: 120, seconds: 20 }, 20).ok).toBe(false);
+    expect(checkScore({ score: 1220, squashes: 120, seconds: 22 }, 20).ok).toBe(false); // with all the slack
+  });
+
+  test("a run longer than 300 s is refused, however long the server waited", () => {
+    expect(checkScore({ score: 0, squashes: 0, seconds: 300.5 }, 400).ok).toBe(false);
+  });
+
+  test("every run of the default pacing matrix is accepted, claimed the moment it ends (no pause)", () => {
+    const seeds = Array.from({ length: 50 }, (_, i) => i); // `bun run pacing`'s seeds
+    const runs = playAll(seeds);
+    expect(runs).toHaveLength(900);
+    for (const { group, seed, shape, result } of runs) {
+      const { score, squashes, seconds } = result;
+      expect({ group, seed, shape, check: checkScore({ score, squashes, seconds }, seconds) }).toEqual({ group, seed, shape, check: { ok: true } });
+    }
   });
 
   test("claiming more seconds than really passed (plus 2 s slack) is refused", () => {

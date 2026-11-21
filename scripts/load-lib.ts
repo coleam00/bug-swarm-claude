@@ -66,7 +66,8 @@ export type Claim = { score: number; squashes: number; seconds: number; touch: b
 /**
  * A finished run that passes the server's plausibility check. `elapsedSeconds` is measured from
  * when the start response arrived, so it never exceeds the server's own elapsed time; one second
- * comes off on top. At most 3 squashes per second (the server allows 6).
+ * comes off on top. At most 3 squashes per claimed second (the server allows 5), and load runs
+ * last at most 30 s (well under the server's MAX_RUN_SECONDS).
  */
 export function claimFor(elapsedSeconds: number, rand: () => number): Claim {
   const seconds = Math.max(0, Math.floor(elapsedSeconds) - 1);
