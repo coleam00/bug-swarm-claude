@@ -85,6 +85,8 @@ export function startGame(
   opts: {
     onOver: (result: RunResult) => void;
     onChoice: (cards: readonly UpgradeId[] | null) => void;
+    /** Called once, on the run's first steering input (from input events, never the frame loop). */
+    onMove?: () => void;
     /** A stress run's bug count (stress.ts); 0 or absent for a normal run. */
     stress?: number;
   },
@@ -131,10 +133,16 @@ export function startGame(
   let pointerSteers = false;
   let touch = false;
   let input: Input = NONE;
+  let moved = false;
   const updateInput = () => {
     if (keys.size > 0) input = keysToInput(keys);
     else if (stick.active) input = stickDrive(stick, stickOut) ? stickOut : NONE;
     else input = pointerSteers ? target : NONE;
+    // kind, not identity: opposing keys (A+D) give a fresh { kind: "none" }.
+    if (!moved && input.kind !== "none") {
+      moved = true;
+      opts.onMove?.();
+    }
   };
   const aimAt = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();

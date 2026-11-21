@@ -3,6 +3,7 @@ import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server
 import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
 import { restartIn } from "./game/guard";
+import { createHint, dismissHint, hintLeft, hintText, takeFirstRun, type Hint } from "./hint";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { saveNotice, upgradeLevels, type SaveState } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
@@ -171,9 +172,21 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   latest.current = props;
   const game = useRef<Running | null>(null);
   const [cards, setCards] = useState<readonly UpgradeId[] | null>(null);
+  // The first-run steering hint (hint.ts). Decided once per mounted run in a ref, like `start`:
+  // StrictMode's second effect run must not find it already taken and hide it. Never in a stress
+  // run, so `bun run bench` neither draws it nor uses it up.
+  const hint = useRef<Hint | null | undefined>(undefined);
+  const [hintShown, setHintShown] = useState<string | null>(null);
 
   useEffect(() => {
     const { player } = latest.current;
+    if (hint.current === undefined) hint.current = !STRESS && takeFirstRun() ? createHint(performance.now()) : null;
+    let hintTimer: ReturnType<typeof setTimeout> | undefined;
+    const left = hint.current ? hintLeft(hint.current, performance.now()) : 0;
+    if (left > 0) {
+      setHintShown(hintText(coarsePointer()));
+      hintTimer = setTimeout(() => setHintShown(null), left);
+    }
     if (!start.current && !STRESS) {
       start.current = startRun(player.id, player.name ?? "", player.team).then((s) => {
         if (s.kind === "name-refused") latest.current.onNameRefused();
@@ -184,6 +197,10 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
     const running = startGame(canvas.current!, {
       stress: STRESS,
       onChoice: setCards,
+      onMove: () => {
+        if (hint.current) dismissHint(hint.current);
+        setHintShown(null);
+      },
       onOver: (result) => {
         // Stamped once: the second report (once saved) keeps the same restart window.
         const diedAt = performance.now();
@@ -198,6 +215,7 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
     });
     game.current = running;
     return () => {
+      clearTimeout(hintTimer);
       running.stop();
       game.current = null;
     };
@@ -206,9 +224,24 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   return (
     <>
       <canvas ref={canvas} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", touchAction: "none", display: "block" }} />
+      {/* Layout in index.html (.hint): pointer-events none, so a drag that starts on it steers. */}
+      {hintShown && (
+        <p className="hint" role="status">
+          {hintShown}
+        </p>
+      )}
       {cards && <ChoiceScreen cards={cards} onPick={(i, pressedAt) => game.current?.pick(i, pressedAt)} />}
     </>
   );
+}
+
+/** A touch screen's main pointer: the hint says "drag" there. */
+function coarsePointer(): boolean {
+  try {
+    return matchMedia("(pointer: coarse)").matches;
+  } catch {
+    return false;
+  }
 }
 
 /**

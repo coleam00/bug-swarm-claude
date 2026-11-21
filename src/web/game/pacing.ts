@@ -16,6 +16,8 @@ export const SHAPES: readonly Arena[] = [arenaForViewport(390, 844), arenaForVie
 
 /** What the balance aims for (PRD Phase 2, issue #18). */
 export const TARGETS = {
+  /** An idle player lasts at least this, on every run (architecture.md: idle loses within 30-60 s). */
+  idleMin: 30,
   /** An idle player loses before this, on every run. */
   idleMax: 60,
   /** The realistic mover's median over every order, seed and shape. */
@@ -128,18 +130,18 @@ export function playAll(seeds: number[]): Run[] {
   return runs;
 }
 
-export type Stats = { median: number; p10: number; p90: number; max: number; unfinished: number };
+export type Stats = { min: number; median: number; p10: number; p90: number; max: number; unfinished: number };
 
 /**
- * Median (the mean of the middle two for an even count), nearest-rank 10th and 90th
- * percentiles, the longest run, and how many runs reached RUN_CAP.
+ * The shortest run, the median (the mean of the middle two for an even count), nearest-rank
+ * 10th and 90th percentiles, the longest run, and how many runs reached RUN_CAP.
  */
 export function stats(values: number[]): Stats {
   const v = [...values].sort((a, b) => a - b);
   const n = v.length;
   const at = (q: number) => v[Math.round(q * (n - 1))]!;
   const median = n % 2 ? v[(n - 1) / 2]! : (v[n / 2 - 1]! + v[n / 2]!) / 2;
-  return { median, p10: at(0.1), p90: at(0.9), max: v[n - 1]!, unfinished: v.filter((t) => t >= RUN_CAP - 1e-9).length };
+  return { min: v[0]!, median, p10: at(0.1), p90: at(0.9), max: v[n - 1]!, unfinished: v.filter((t) => t >= RUN_CAP - 1e-9).length };
 }
 
 export type Pacing = {
@@ -170,6 +172,7 @@ export function pacing(seeds: number[], runs: Run[] = playAll(seeds)): Pacing {
     orders,
     overall,
     targets: [
+      { label: `idle lasts at least ${TARGETS.idleMin} s on every run`, ok: idleStats.min >= TARGETS.idleMin },
       { label: `idle loses within ${TARGETS.idleMax} s on every run`, ok: idleStats.max < TARGETS.idleMax && idleStats.unfinished === 0 },
       { label: `mover's overall median is ${lo}-${hi} s`, ok: overall.median >= lo && overall.median <= hi },
       { label: `every order's median is ${orderLo}-${orderHi} s`, ok: medians.every((m) => m >= orderLo && m <= orderHi) },
