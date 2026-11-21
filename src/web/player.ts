@@ -35,48 +35,12 @@ export function takeRefusedName(): string | null {
   return name;
 }
 
-const ARENA_REFUSED_KEY = "bugswarm.arenaRefused";
-
-/**
- * The arena (/arena) refused the stored name and is sending the player to `/`: keep the name
- * (`/` still accepts it) and leave a note, for this tab only, so `/` can say why.
- */
-export function noteArenaRefusedName(name: string): void {
-  try {
-    sessionStorage.setItem(ARENA_REFUSED_KEY, name);
-  } catch {
-    // Storage is unavailable: then the arena had no stored player to refuse either.
-  }
-}
-
-/** The name the arena refused, once (the note is cleared), or null. */
-export function takeArenaRefusedName(): string | null {
-  try {
-    const name = sessionStorage.getItem(ARENA_REFUSED_KEY);
-    sessionStorage.removeItem(ARENA_REFUSED_KEY);
-    return name;
-  } catch {
-    return null;
-  }
-}
-
 export function setPlayerName(name: string | null): Player {
   return save({ ...loadPlayer(), name });
 }
 
 export function setPlayerTeam(team: Team): Player {
   return save({ ...loadPlayer(), team });
-}
-
-/**
- * Where a run begins. Opening the page always shows the start screen (a returning player gets
- * one "Play as" button there). Between runs in the same page it is straight into play once the
- * player has a name and a team, else the start screen. A stress run needs neither.
- */
-export function nextScreen(player: Player, stress: boolean, pageLoad: boolean): "setup" | "play" {
-  if (stress) return "play";
-  if (pageLoad) return "setup";
-  return player.name !== null && player.team !== null ? "play" : "setup";
 }
 
 /** For tests: forget the player kept in memory, as a fresh page load would. */

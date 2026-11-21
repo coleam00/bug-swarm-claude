@@ -167,7 +167,7 @@ test("hide command says when no player has the name", () => {
   const r = hideCommand(["--", "Testr"], dir, HIDE_AT);
   db = openDb(join(dir, "app.db"));
   expect(r.code).toBe(0);
-  expect(r.out).toEqual(["hidden: testr (no player has this name yet; check the spelling)"]);
+  expect(r.out).toEqual(["hidden: testr (no saved player has this name yet; anyone playing as it now is kicked within 5 s; check the spelling if you expected a saved player)"]);
   expect(topTen(db)).toEqual([{ name: "TESTER", score: 50 }]);
 });
 

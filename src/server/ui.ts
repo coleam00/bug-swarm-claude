@@ -6,9 +6,9 @@ import { requestOrigin, withAbsoluteImages } from "./share";
 
 /**
  * The built UI, in the order production needs it (serve.ts calls this after the API routes):
- * 1. /board and /board/: the stream board, `board.html`; /arena and /arena/: the arena,
- *    `arena.html`. The static files add index.html only for directories, so without these routes
- *    they would fall through to the game.
+ * 1. /board and /board/: the stream board, `board.html`. The static files add index.html only for
+ *    directories, so without this route it would fall through to the game. /arena and /arena/
+ *    (the arena's own page before #64) redirect to /, where the game now is.
  * 2. / and /index.html: the game's page, with its link-preview image URLs made absolute from the
  *    request (share.ts). Before the static files, which would otherwise answer / with the file as it is.
  * 3. The static files in `distDir`.
@@ -20,11 +20,11 @@ export function servePages(app: Hono, distDir: string): void {
     if (!(await file.exists())) return new Response(`${name} not built`, { status: 404 });
     return new Response(file, { headers: { "content-type": "text/html; charset=utf-8" } });
   };
-  for (const name of ["board", "arena"]) {
-    const page = htmlFile(name);
-    app.get(`/${name}`, page);
-    app.get(`/${name}/`, page);
-  }
+  const board = htmlFile("board");
+  app.get("/board", board);
+  app.get("/board/", board);
+  // 307: a temporary redirect, so nothing caches it as the arena's address for good.
+  for (const path of ["/arena", "/arena/"]) app.get(path, (c) => c.redirect("/", 307));
 
   let page: string | null = null;
   try {

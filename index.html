@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#05070d" />
     <title>Bug Swarm</title>
-    <meta name="description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
+    <meta name="description" content="Aim, dodge and revive your team in a shared arena. Race Tabs vs Spaces for the stream's top 10." />
     <!-- Icons and the link preview are drawn in code and served by the app (src/server/art.ts). -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="alternate icon" href="/favicon.ico" />
@@ -13,26 +13,27 @@
     <!-- The server makes the preview image URLs absolute from the request (src/server/share.ts). -->
     <meta property="og:type" content="website" />
     <meta property="og:title" content="Bug Swarm" />
-    <meta property="og:description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
+    <meta property="og:description" content="Aim, dodge and revive your team in a shared arena. Race Tabs vs Spaces for the stream's top 10." />
     <meta property="og:image" content="/og.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="A glowing robot in a dark grid arena, surrounded by bugs, under the words BUG SWARM" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Bug Swarm" />
-    <meta name="twitter:description" content="Steer a robot through a growing swarm of bugs for 2 minutes, pick upgrades, and race Tabs vs Spaces for the stream's top 10." />
+    <meta name="twitter:description" content="Aim, dodge and revive your team in a shared arena. Race Tabs vs Spaces for the stream's top 10." />
     <meta name="twitter:image" content="/og.png" />
     <style>
       /* Safe areas (a notch or a home bar, a phone held sideways): the overlays pad by these and
-         loop.ts reads them through .safe-probe to pull the canvas HUD in. One source, so
-         bun run bench can override them to simulate a notch (headless Chrome reports zero). */
+         src/web/arena/game.ts reads them through .safe-probe to pull the canvas HUD, the minimap
+         and the dash button in. One source, so a probe can override them to simulate a notch
+         (headless Chrome reports zero). */
       :root { --safe-top: env(safe-area-inset-top, 0px); --safe-right: env(safe-area-inset-right, 0px);
         --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px); }
       .safe-probe { position: fixed; top: 0; left: 0; width: 0; height: 0; visibility: hidden; pointer-events: none;
         padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left); }
       html, body { margin: 0; background: #05070d; color: #f8fafc; overscroll-behavior: none; }
       /* No stray phone gestures on game UI: no text selection or long-press menu, no double-tap zoom
-         (game over restarts on a tap anywhere). The canvas keeps its own touch-action: none. */
+         (the life-over screen plays again on a tap anywhere). The canvas keeps its own touch-action: none. */
       html, body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
         touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
       /* The name is typed and can be edited, so its input stays selectable. */
@@ -62,86 +63,65 @@
       .setup .start-change { min-height: 44px; padding: 4px 16px; background: none; color: #cbd5e1; font-size: 18px; font-weight: 500;
         text-decoration: underline; text-underline-offset: 3px; }
       .start-alert { margin: 0; color: #fda4af; font-size: 20px; font-weight: 600; }
-      /* Game over. Portrait: one column. A short landscape screen (a phone held sideways): two columns,
-         score, race, best and Play again on the left; top 10 and upgrades on the right. */
-      .over { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 12px; font-family: system-ui, sans-serif; text-align: center;
+      /* The arena's canvas, full screen. It takes every touch itself (the twin sticks). */
+      .arena { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+      /* "Connecting..." / "Reconnecting...": shown only while the socket is down; the arena rejoins on its own. */
+      .status { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); margin: 0; padding: 8px 16px; border-radius: 8px;
+        background: rgba(5, 7, 13, 0.85); border: 1px solid rgba(34, 211, 238, 0.4); font: bold 16px system-ui, sans-serif;
+        pointer-events: none; white-space: nowrap; }
+      /* The first-life hint (hint.ts): fades in, holds, fades out over HINT_MS (5 s), at the bottom.
+         Touches pass through it, so the sticks under it still work. */
+      .hint { position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 16px); transform: translateX(-50%); pointer-events: none;
+        margin: 0; padding: 10px 18px; border-radius: 12px; background: rgba(15, 23, 42, 0.8); color: #f8fafc;
+        font: 600 clamp(16px, 4.4vw, 20px)/1.3 system-ui, sans-serif; text-align: center; width: max-content;
+        max-width: calc(100% - 32px); box-sizing: border-box; opacity: 0; animation: hint 5000ms ease-in-out both; }
+      @keyframes hint { 0% { opacity: 0; } 8% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+      /* The life-over screen, over the arena that keeps playing behind it, dimmed. A tap or click
+         anywhere plays again (App.tsx), so it is one big target. Portrait: one column, the summary
+         and Play again, then the top 10. A short landscape screen (a phone held sideways): two
+         columns, summary and Play again left, top 10 right, nothing to scroll. */
+      .over { position: fixed; inset: 0; z-index: 2; box-sizing: border-box; overflow-y: auto; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 14px; background: rgba(5, 7, 13, 0.6); font-family: system-ui, sans-serif;
+        text-align: center; cursor: pointer; touch-action: manipulation; animation: over-in 200ms ease-out both;
         padding: max(12px, var(--safe-top)) max(16px, var(--safe-right)) max(12px, var(--safe-bottom)) max(16px, var(--safe-left)); }
-      .over p, .over h1, .over h2, .over ol, .over ul { margin: 0; }
-      .over-summary { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 24px; }
-      .over h1 { font-size: 34px; line-height: 1.1; }
-      .over-score { font-size: 52px; font-weight: 800; line-height: 1.1; }
-      /* Where the player stands, under Best: two short lines. */
-      .over-rank { display: flex; flex-direction: column; align-items: center; font-size: 18px; line-height: 1.2; color: #cbd5e1; }
-      .over-alert { color: #fda4af; font-size: 22px; line-height: 1.2; }
-      .over-hint { font-size: 22px; }
-      /* "Play again" and the hint: hidden (space kept) until 800 ms after death (RESTART_DELAY_MS, guard.ts). */
-      /* Spacing here is tight on purpose: a 390x844 portrait phone fits the two-line too-many-runs
-         alert, "Play again" and a full top 10 with nothing to scroll (bun run bench measures it). */
-      .over-again { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-      .over-again button { min-height: 44px; padding: 8px 24px; font: inherit; font-size: 22px; font-weight: 700; border: 0;
-        border-radius: 8px; background: #22d3ee; color: #05070d; cursor: pointer; }
-      .over-again button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
-      /* How the run was built: one chip per upgrade, with its level. */
-      .over-upgrades { font-size: 20px; max-width: 420px; }
-      .over .over-board .over-upgrades { margin: 12px auto 0; }
-      ul.over-upgrades { list-style: none; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 8px; }
-      ul.over-upgrades li { padding: 2px 10px; border: 1px solid #334155; border-radius: 999px; white-space: nowrap; line-height: 1.3; }
-      ul.over-upgrades b { color: #22d3ee; }
+      @keyframes over-in { from { opacity: 0; } }
+      .over p, .over h1, .over h2, .over ol { margin: 0; }
+      .over-summary { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+      .over h1 { font-size: 30px; line-height: 1.1; }
+      .over-score { font-size: 56px; font-weight: 800; line-height: 1.05; color: #fde047; font-variant-numeric: tabular-nums; }
+      .over-line { font-size: 22px; font-weight: 600; }
+      .over-rank { font-size: 18px; font-weight: 600; color: #cbd5e1; }
+      .over-alert { color: #fda4af; }
+      /* Play again: big, hidden (its space kept) until 800 ms after the life ended (RESTART_DELAY_MS, guard.ts). */
+      .over-again { margin-top: 6px; min-height: 60px; min-width: 220px; padding: 10px 32px; font: inherit; font-size: 26px; font-weight: 800;
+        border: 0; border-radius: 12px; background: #22d3ee; color: #05070d; cursor: pointer; }
+      .over-again:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
       /* Tabs vs Spaces: one line of totals over a thin bar split by them. */
       .over-race { width: min(100%, 360px); display: flex; flex-direction: column; gap: 4px; }
       .over .over-race p { display: flex; justify-content: space-between; gap: 12px; font-size: 16px; line-height: 1.2; }
       .over-race-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #1e293b; }
       .over-race-bar span { flex-basis: 0; min-width: 0; }
-      .over-board { width: min(100%, 420px); font-size: 22px; }
-      .over h2 { font-size: 26px; margin-bottom: 4px; }
+      .over-board { width: min(100%, 380px); font-size: 18px; }
+      .over h2 { font-size: 20px; margin-bottom: 4px; }
       .over ol { padding-left: 36px; line-height: 1.25; text-align: left; }
-      /* Name and score stay inline blocks: display:flex on the li would drop the list numbers.
-         The score column fits the top score with its separator (15,300). */
-      .over ol > li > span { display: inline-block; width: calc(100% - 3.6em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-      .over ol > li > b { display: inline-block; width: 3.6em; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      /* Name and score stay inline blocks: display:flex on the li would drop the list numbers. */
+      .over ol > li > span { display: inline-block; width: calc(100% - 4.2em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+      .over ol > li > b { display: inline-block; width: 4.2em; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
       .over ol > li.mine { background: rgba(34, 211, 238, 0.18); color: #22d3ee; border-radius: 6px; }
-      /* The upgrade choice, over the paused run. Portrait: cards stacked. Landscape: in a row. */
-      .choice { position: fixed; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 16px; background: rgba(5, 7, 13, 0.72);
-        padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left)); font-family: system-ui, sans-serif;
-        text-align: center; touch-action: manipulation; }
-      .choice h2 { margin: 0; font-size: 30px; }
-      .choice-cards { display: flex; flex-direction: column; gap: 12px; width: min(100%, 360px); animation: choice-in 350ms ease-out both; }
-      /* As long as CHOICE_DELAY_MS (guard.ts): pick() refuses cards and 1-3 until the fade ends. */
-      @keyframes choice-in { from { opacity: 0; transform: translateY(8px); } }
-      .choice button { min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 16px;
-        border-radius: 12px; border: 2px solid #22d3ee; background: #0f172a; color: #f8fafc; font: inherit; cursor: pointer; }
-      .choice button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
-      .choice b { font-size: 24px; }
-      .choice span { font-size: 20px; opacity: 0.85; }
-      .choice kbd { font: inherit; font-size: 16px; opacity: 0.6; }
-      /* The first-run steering hint: below the HUD, above the robot's start. Touches pass through it. */
-      .hint { position: fixed; left: 50%; top: 24%; transform: translateX(-50%); pointer-events: none; margin: 0; padding: 10px 18px;
-        border-radius: 12px; background: rgba(15, 23, 42, 0.75); color: #f8fafc; font-family: system-ui, sans-serif; font-size: 22px;
-        text-align: center; width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; animation: hint-in 250ms ease-out both; }
-      @keyframes hint-in { from { opacity: 0; } }
-      @media (orientation: landscape) {
-        .choice-cards { flex-direction: row; width: min(100%, 900px); }
-        .choice button { flex: 1 1 0; justify-content: center; }
-      }
       @media (orientation: landscape) and (max-height: 520px) {
-        .over { flex-direction: row; gap: 24px;
+        .over { flex-direction: row; gap: 32px;
           padding: max(8px, var(--safe-top)) max(24px, var(--safe-right)) max(8px, var(--safe-bottom)) max(24px, var(--safe-left)); }
-        .over-summary { flex: 1 1 0; gap: 6px; font-size: 20px; }
-        .over h1 { font-size: 30px; }
+        .over-summary { flex: 1 1 0; max-width: 380px; gap: 4px; }
+        .over h1 { font-size: 24px; }
         .over-score { font-size: 44px; }
-        .over-rank { font-size: 15px; line-height: 1.15; }
-        .over-alert, .over-hint, .over-upgrades { font-size: 18px; }
-        .over-again { gap: 4px; }
-        .over-again button { min-height: 44px; padding: 6px 20px; font-size: 18px; }
-        .over-board { flex: 1 1 0; max-width: 420px; font-size: 18px; }
-        .over .over-board .over-upgrades { margin-top: 8px; font-size: 16px; }
-        ul.over-upgrades { gap: 4px 6px; }
-        .over h2 { font-size: 20px; margin-bottom: 4px; }
-        .over ol { line-height: 1.25; }
+        .over-line { font-size: 18px; }
+        .over-rank { font-size: 15px; }
         .over .over-race p { font-size: 14px; }
         .over-race-bar { height: 6px; }
+        .over-again { min-height: 52px; font-size: 22px; padding: 8px 28px; }
+        .over-board { flex: 1 1 0; font-size: 16px; }
+        .over h2 { font-size: 18px; margin-bottom: 2px; }
+        .over ol { line-height: 1.2; }
         .setup { gap: 8px;
           padding: max(8px, var(--safe-top)) max(16px, var(--safe-right)) max(8px, var(--safe-bottom)) max(16px, var(--safe-left)); }
         .start-title { font-size: clamp(40px, 15vh, 88px); }

@@ -1,8 +1,8 @@
-// Touch steering: a floating joystick. Where the first finger lands is the centre; dragging away
-// from it steers that way, faster the further the drag, full speed at STICK_RANGE. A second
-// finger is ignored until the first lifts. Coordinates are CSS px relative to the canvas, not
-// arena units, so the stick feels the same at any arena scale. No DOM and no clock: loop.ts feeds
-// it pointer events and render.ts draws it.
+// A floating touch stick (the arena's move and aim sticks are two of these). Where the first finger
+// lands is the centre; dragging away from it points that way, further for a longer drag, full at
+// STICK_RANGE. A second finger is ignored until the first lifts. Coordinates are CSS px relative
+// to the canvas, not arena units, so the stick feels the same at any scale. No DOM and no clock:
+// src/web/arena/controls.ts feeds it pointer events and src/web/arena/render.ts draws it.
 
 /** Drag distance for full speed, CSS px. */
 export const STICK_RANGE = 60;

@@ -90,17 +90,6 @@ export function findPlayer(db: Database, id: string): { name: string; team: Team
   return row ? { name: row.name, team: isTeam(row.team) ? row.team : null } : null;
 }
 
-export type RunStart = { runId: string; playerId: string; at: Date; team: Team | null };
-
-export function findRunStart(db: Database, runId: string): RunStart | null {
-  const row = db
-    .query("SELECT run_id, player_id, at, team FROM events WHERE type = ? AND run_id = ?")
-    .get(RUN_STARTED, runId) as { run_id: string; player_id: string; at: string; team: string | null } | null;
-  return row
-    ? { runId: row.run_id, playerId: row.player_id, at: new Date(row.at), team: isTeam(row.team) ? row.team : null }
-    : null;
-}
-
 export type RunEnd = {
   runId: string;
   playerId: string;
@@ -108,7 +97,8 @@ export type RunEnd = {
   squashes: number;
   seconds: number;
   touch: boolean;
-  upgrades: string[];
+  /** Release 1 stored the upgrades a run took; an arena life stores none. */
+  upgrades: readonly string[];
   /** The team from the run's start. */
   team: Team | null;
 };
