@@ -121,7 +121,7 @@ export const DRONE_ORBIT = 34;
 /** CI drone: radians a second around the orbit. */
 export const DRONE_SPIN = 3;
 /** CI drone: the drone's drawn radius. */
-export const DRONE_RADIUS = 5;
+export const DRONE_RADIUS = 8;
 /**
  * CI drone: seconds between a drone's shots while the robot moves. It doesn't reload faster for
  * moving, but slower for standing still (DRONE_STILL_RATE).

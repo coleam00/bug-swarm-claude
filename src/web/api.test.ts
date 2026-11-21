@@ -29,7 +29,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const down = () => Promise.reject(new TypeError("Failed to fetch"));
 const RESULT: RunResult = { score: 10, squashes: 1, seconds: 3, touch: false, upgrades: [REVIEW_LASER, REVIEW_LASER] };
 
-test("startRun: a run id, a name refusal, or a failure", async () => {
+test("startRun: a run id, a name refusal, a refusal for too many runs, or a failure", async () => {
   respond = () => json(200, { runId: "run-1" });
   expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "ok", runId: "run-1" });
   respond = () => json(400, { error: "name", reason: "blocked" });
@@ -39,7 +39,7 @@ test("startRun: a run id, a name refusal, or a failure", async () => {
   respond = () => json(400, { error: "team" });
   expect(await startRun("player-0001", "Robo", null)).toEqual({ kind: "failed" });
   respond = () => json(429, { error: "rate" });
-  expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "failed" });
+  expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "rate" });
   respond = down;
   expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "failed" });
 });
@@ -90,6 +90,12 @@ test("finishRun saves under the run's id, fails without one, and sends nothing f
   expect(await finishRun(null, RESULT)).toBe("not-saved");
   expect(calls).toBe(0);
   expect(sent).toBeUndefined();
+});
+
+test("finishRun: a start refused for too many runs is 'rate-limited' and sends nothing", async () => {
+  respond = () => json(200, { ok: true });
+  expect(await finishRun(Promise.resolve({ kind: "rate" }), RESULT)).toBe("rate-limited");
+  expect(calls).toBe(0);
 });
 
 test("fetchTop and fetchBest report a failure instead of throwing", async () => {

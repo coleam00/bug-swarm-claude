@@ -16,3 +16,12 @@ export function upgradeLevels(taken: readonly UpgradeId[]): UpgradeLevel[] {
   }
   return levels;
 }
+
+export type SaveState = "saving" | "saved" | "failed" | "not-saved" | "rate-limited";
+
+/** The line the game-over screen shows about saving, or null when there is nothing to say. */
+export function saveNotice(saved: SaveState): string | null {
+  if (saved === "rate-limited") return "Too many runs right now. Your next run will save.";
+  if (saved === "failed") return "Couldn't save your score";
+  return null;
+}
