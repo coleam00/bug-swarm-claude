@@ -122,7 +122,8 @@ export const DRONE_RADIUS = 5;
 export const DRONE_FIRE_INTERVAL = 0.5;
 /**
  * CI drone: the part of its reload rate a drone keeps while the robot stands still, the gun's
- * "moving pays" rule (the balance plan for #18). Without it an idle player who is offered the
+ * "moving pays" rule (owner ruling on #18, an intended change to the drone: as built while the
+ * robot moves, a third as fast while it stands). Without it an idle player who is offered the
  * drone outlasts 60 s (bun run pacing: idle up to 84 s).
  */
 export const DRONE_STILL_RATE = 1 / 3;
@@ -136,5 +137,5 @@ export const UPGRADES: Record<UpgradeId, { name: string; line: string }> = {
   [REVIEW_LASER]: { name: "Review laser", line: "Shots pierce through bugs" },
   [REFACTOR_BOMB]: { name: "Refactor bomb", line: "Clears the screen, recharges in 30 s (15 s if taken twice)" },
   [TEST_SHIELD]: { name: "Test shield", line: "Blocks the next hit" },
-  [CI_DRONE]: { name: "CI drone", line: "A drone orbits you and fires too, while you move" },
+  [CI_DRONE]: { name: "CI drone", line: "A drone orbits you and fires too, faster while you move" },
 };

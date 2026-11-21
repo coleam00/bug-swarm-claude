@@ -9,7 +9,7 @@ const num = (v: number) => v.toFixed(0).padStart(4);
 const line = (name: string, s: Stats) =>
   `${name.padEnd(22)} ${num(s.median)} ${num(s.p10)} ${num(s.p90)} ${num(s.max)} ${String(s.unfinished).padStart(11)}`;
 
-console.log(`Run seconds, seeds 0-${seeds.length - 1}, 450x800 and 759x474 (did not end = still going at ${RUN_CAP} s)`);
+console.log(`Run seconds, seeds 0-${seeds.length - 1}, screens 390x844 and 1280x800 (arenas 450x800 and 759x474; did not end = still going at ${RUN_CAP} s)`);
 console.log(`${"group".padEnd(22)}  med  p10  p90  max  did-not-end`);
 console.log(line("idle", result.idle));
 for (const [name, s] of Object.entries(result.orders)) console.log(line(name, s));
