@@ -71,6 +71,7 @@ import { connectArena } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
 import { createArenaRenderer, type BugsView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
+import { isBot } from "./tag";
 
 /** Local steps one frame may run; a stalled tab drops the rest rather than burst inputs. */
 const MAX_STEPS_PER_FRAME = 3;
@@ -174,9 +175,13 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
         left: 0,
         rev: 0,
         revBy: 0,
+        bot: false,
+        tag: { x: 0, w: 0 },
       };
       roster.set(id, r);
     }
+    if (r.name !== n) r.tag.w = 0;
+    r.bot = isBot(n);
     r.name = n;
     r.team = t;
     return r;
