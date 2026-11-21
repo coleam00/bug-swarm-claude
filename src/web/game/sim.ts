@@ -35,12 +35,12 @@ import {
 } from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
 
-// The server's squash cap (MAX_SQUASHES_PER_SECOND in rules.ts): a squash takes a bug, so
-// squashes never exceed bugs spawned, and bugs spawn at most once every SPAWN_MIN seconds of run
-// time (the interval's last floor, past the surge). Run time never runs ahead of the server's
-// clock (a choice pauses the run, which only adds real time), so a run squashes at most
-// 1 / SPAWN_MIN bugs a second whatever shots pierce, bombs clear and however many drones fire.
-// A test in sim.test.ts holds that under the cap.
+// The server's squash cap (MAX_SQUASHES_PER_SECOND in rules.ts) counts the run's own seconds:
+// a squash takes a bug, so squashes never exceed bugs spawned, and bugs come only from the spawn
+// schedule (spawnInterval), which advances with run time (a choice pauses it). Through the
+// longest run the server takes (MAX_RUN_SECONDS), the schedule spawns at most 4.9 bugs per run
+// second, so a run stays under the cap whatever shots pierce, bombs clear and however many
+// drones fire. Tests in sim.test.ts hold the schedule and a maxed, unkillable robot under it.
 // A stress run (`createState`'s `stress`) is exempt: it refills the swarm every step, and it is
 // never submitted.
 

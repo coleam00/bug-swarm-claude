@@ -6,7 +6,7 @@
 import { UPGRADE_IDS, type UpgradeId } from "../../server/rules";
 import { arenaForViewport, type Arena } from "./arena";
 import { createRng, nextRandom } from "./rng";
-import { choose, createState, step, type Input, type State } from "./sim";
+import { choose, createState, runResult, step, type Input, type RunResult, type State } from "./sim";
 
 const DT = 1 / 60;
 /** Seconds a run may last before it counts as one that did not end. */
@@ -103,14 +103,29 @@ export const ORDERS: ReadonlyArray<{ name: string; pick: Picker }> = [
   ...UPGRADE_IDS.map((id) => ({ name: `same-${id}`, pick: same(id) })),
 ];
 
-/** Plays one run to its end (or RUN_CAP) and returns its seconds. */
-export function play(seed: number, arena: Arena, input: Player, pick: Picker): number {
+/** Plays one run to its end (or RUN_CAP) and returns its finish, as the game would submit it. */
+export function play(seed: number, arena: Arena, input: Player, pick: Picker): RunResult {
   const s = createState(seed, arena);
   while (!s.over && s.time < RUN_CAP) {
     step(s, input(s), DT);
     if (s.choice) choose(s, pick(s));
   }
-  return s.time;
+  return runResult(s, false);
+}
+
+/** One run of the matrix: its group ("idle" or an order's name), seed, screen shape and finish. */
+export type Run = { group: string; seed: number; shape: number; result: RunResult };
+
+/** The whole matrix over `seeds`: the idle player, then the mover through every order, on both shapes. */
+export function playAll(seeds: number[]): Run[] {
+  const runs: Run[] = [];
+  const groups = [{ name: "idle", pick: (() => 0) as Picker, input: () => idle }, ...ORDERS.map((o) => ({ ...o, input: mover }))];
+  for (const g of groups) {
+    for (const seed of seeds) {
+      SHAPES.forEach((arena, shape) => runs.push({ group: g.name, seed, shape, result: play(seed, arena, g.input(seed), g.pick) }));
+    }
+  }
+  return runs;
 }
 
 export type Stats = { median: number; p10: number; p90: number; max: number; unfinished: number };
@@ -134,15 +149,14 @@ export type Pacing = {
   targets: { label: string; ok: boolean }[];
 };
 
-/** Plays every group over `seeds` and both shapes, and checks the targets. */
-export function pacing(seeds: number[]): Pacing {
+/** Plays every group over `seeds` and both shapes (or takes `runs`, already played), and checks the targets. */
+export function pacing(seeds: number[], runs: Run[] = playAll(seeds)): Pacing {
   const idleTimes: number[] = [];
   const all: number[] = [];
   const orders: Record<string, Stats> = {};
-  for (const seed of seeds) for (const arena of SHAPES) idleTimes.push(play(seed, arena, idle, () => 0));
+  for (const r of runs) if (r.group === "idle") idleTimes.push(r.result.seconds);
   for (const order of ORDERS) {
-    const times: number[] = [];
-    for (const seed of seeds) for (const arena of SHAPES) times.push(play(seed, arena, mover(seed), order.pick));
+    const times = runs.filter((r) => r.group === order.name).map((r) => r.result.seconds);
     orders[order.name] = stats(times);
     all.push(...times);
   }
@@ -162,4 +176,24 @@ export function pacing(seeds: number[]): Pacing {
       { label: `no run lasts beyond ${TARGETS.runMax} s`, ok: overall.max <= TARGETS.runMax && idleStats.max <= TARGETS.runMax },
     ],
   };
+}
+
+/**
+ * What the server's plausibility caps are measured from (MAX_SQUASHES_PER_SECOND and
+ * MAX_RUN_SECONDS in rules.ts): the run with the most squashes per second of run time, and the
+ * longest run, over every run played.
+ */
+export function squashRates(runs: Run[]): { maxRate: number; maxRateRun: Run; longest: Run } {
+  let maxRate = 0;
+  let maxRateRun = runs[0]!;
+  let longest = runs[0]!;
+  for (const r of runs) {
+    const { squashes, seconds } = r.result;
+    if (seconds > 0 && squashes / seconds > maxRate) {
+      maxRate = squashes / seconds;
+      maxRateRun = r;
+    }
+    if (seconds > longest.result.seconds) longest = r;
+  }
+  return { maxRate, maxRateRun, longest };
 }

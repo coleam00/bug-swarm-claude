@@ -44,7 +44,7 @@ export const SPAWN_PLATEAU = 0.25;
 export const SURGE_FROM = 60;
 /** The surge: seconds the spawn interval loses for every second survived past SURGE_FROM. */
 export const SURGE_SPAWN_RAMP = 0.003;
-/** The last floor, reached at about 83 s. Its inverse bounds squashes a second (sim.ts). */
+/** The last floor, reached at about 83 s. The server's squash cap rests on the whole schedule (sim.ts, sim.test.ts). */
 export const SPAWN_MIN = 0.18;
 /** The surge: the part of its base speed every bug gains for every second survived past SURGE_FROM. */
 export const SURGE_SPEED = 0.035;

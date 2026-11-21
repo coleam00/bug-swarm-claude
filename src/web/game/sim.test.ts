@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { arenaForViewport, type Arena } from "./arena";
-import { CI_DRONE, MAX_SQUASHES_PER_SECOND, REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { CI_DRONE, MAX_RUN_SECONDS, MAX_SQUASHES_PER_SECOND, REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import {
   ARENA_AREA,
   BASE_BUG,
@@ -817,20 +817,39 @@ test("the run's finish carries the upgrades taken, in pick order", () => {
 });
 
 describe("the server's squash cap", () => {
-  test("squashes never outrun spawns, and spawns come no faster than the cap", () => {
-    expect(1 / SPAWN_MIN).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
+  test("the spawn schedule never spawns more than the cap per run second, through the longest run the server takes", () => {
+    // spawnBugs' own timer, at the game's fixed step: bugs spawned by each step's end, against
+    // MAX_SQUASHES_PER_SECOND times the run seconds by then. A swarm retune that breaks this
+    // would make the server refuse real runs.
+    let timer = spawnInterval(0);
+    let spawned = 0;
+    let worst = 0;
+    for (let n = 0; n < MAX_RUN_SECONDS * 60; n++) {
+      const time = n * DT;
+      timer -= DT;
+      while (timer <= 0) {
+        timer += spawnInterval(time);
+        spawned++;
+      }
+      worst = Math.max(worst, spawned / (time + DT));
+    }
+    expect(spawned).toBeGreaterThan(0);
+    expect(worst).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
+  });
+
+  test("squashes never outrun spawns, and stay under the cap", () => {
     // Every upgrade at its top level from the start, and a robot that never dies: still under
-    // the cap for two minutes.
+    // the cap through the longest run the server takes.
     for (const player of [circle, dodge]) {
       const s = createState(6, WIDE);
       for (const id of UPGRADE_IDS) s.levels[id] = UPGRADE_MAX_LEVEL;
       s.nextChoiceAt = Infinity;
-      while (s.time < 120) {
+      while (s.time < MAX_RUN_SECONDS) {
         step(s, player(s), DT);
         s.hits = 0;
+        expect(s.squashes).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND * s.time);
       }
       expect(s.squashes).toBeLessThanOrEqual(s.spawned);
-      expect(s.squashes).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND * s.time);
     }
   });
 });
