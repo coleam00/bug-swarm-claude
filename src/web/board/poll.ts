@@ -4,7 +4,7 @@
 // here: `scripts/load.ts` imports the cadence from this file.
 import { parseBoard, type Board } from "./data";
 
-/** A refresh every 2 s; with a request cut at 2.5 s the board is never more than 5 s stale while the API answers. */
+/** A load every 2 s once the last one settles, each cut at 2.5 s: while the API answers, a refresh lands at least every 4.5 s. */
 export const BOARD_POLL_MS = 2000;
 export const BOARD_TIMEOUT_MS = 2500;
 export const BOARD_MAX_BACKOFF_MS = 10_000;

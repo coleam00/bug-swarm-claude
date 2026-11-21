@@ -31,7 +31,7 @@ function flash(e: HTMLElement): void {
 }
 
 /** Draws the whole frame at once (empty slots, no totals yet), so the page is never blank. */
-export function createBoardDom(root: HTMLElement, join: string): BoardDom {
+export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
   const top = el("ol", "top");
   const rows: RowEls[] = [];
   for (let i = 0; i < TOP_SIZE; i++) {
@@ -60,7 +60,12 @@ export function createBoardDom(root: HTMLElement, join: string): BoardDom {
     bar.append(seg);
     teams[team] = { root: block, total, bar: seg };
   }
-  race.append(el("h1", "title", "Bug Swarm"), el("p", "race-title", "Tabs vs Spaces"), teamsBox, bar, el("p", "join", join));
+  // The address to join: each piece unbreakable, with a break allowed only between pieces (after a dot).
+  const join = el("p", "join");
+  const address = el("span", "join-host");
+  for (const part of host) address.append(el("span", "join-part", part), document.createElement("wbr"));
+  join.append(el("span", "join-label", "Play at"), address);
+  race.append(el("h1", "title", "Bug Swarm"), el("p", "race-title", "Tabs vs Spaces"), teamsBox, bar, join);
 
   const status = el("p", "status", "reconnecting...");
   status.hidden = true;

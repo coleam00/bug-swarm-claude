@@ -75,7 +75,10 @@ export function boardView(prev: Board | null, next: Board): BoardView {
   return { rows, teams, leader, overtook: was !== null && leader !== null && leader !== was };
 }
 
-/** The join line: the page's own host, so the board never names a URL of its own. */
-export function joinText(origin: string): string {
-  return `Play at ${new URL(origin).host}`;
+/**
+ * The join line's address: the page's own host, so the board never names a URL of its own. Split
+ * after each dot, so a long host wraps only there and never at a hyphen viewers might type.
+ */
+export function joinHost(origin: string): string[] {
+  return new URL(origin).host.split(/(?<=\.)/);
 }

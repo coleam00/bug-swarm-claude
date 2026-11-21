@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TEAMS } from "../../server/rules";
 import { TEAM_LOOK } from "../teams";
-import { boardView, joinText, parseBoard, type Board } from "./data";
+import { boardView, joinHost, parseBoard, type Board } from "./data";
 
 const [TABS, SPACES] = TEAMS;
 const board = (names: [string, number][], tabs = 0, spaces = 0): Board => ({
@@ -121,9 +121,10 @@ describe("boardView teams", () => {
   });
 });
 
-test("joinText names the page's own host, without protocol or slash", () => {
-  expect(joinText("http://localhost:5173")).toBe("Play at localhost:5173");
-  expect(joinText("https://x.example.com/")).toBe("Play at x.example.com");
+test("joinHost names the page's own host, without protocol or slash, split after each dot", () => {
+  expect(joinHost("http://localhost:5173")).toEqual(["localhost:5173"]);
+  expect(joinHost("https://x.example.com/")).toEqual(["x.", "example.", "com"]);
+  expect(joinHost("https://bug-swarm-claude-production.up.railway.app").join("")).toBe("bug-swarm-claude-production.up.railway.app");
 });
 
 test("the board's DOM code never writes HTML, so names always render as text", () => {

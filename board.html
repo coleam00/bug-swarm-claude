@@ -38,7 +38,9 @@
         text-shadow: 0 0 2.5vh var(--team); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .bar { display: flex; height: 3.5vh; border-radius: 1.75vh; overflow: hidden; background: #1e293b; }
       .bar-seg { flex-basis: 0; min-width: 0; transition: flex-grow 0.8s ease; }
-      .join { font-size: 4.5vh; font-weight: 700; overflow-wrap: anywhere; }
+      .join { display: flex; flex-direction: column; font-size: 4.5vh; font-weight: 700; line-height: 1.2; }
+      .join-label { font-size: 3.5vh; color: #94a3b8; font-weight: 400; }
+      .join-part { white-space: nowrap; }
 
       .status { position: fixed; right: 2vh; bottom: 1.5vh; font-size: 2.6vh; color: #94a3b8; }
 
@@ -68,6 +70,7 @@
         .team-total { font-size: 13vw; }
         .bar { height: 3vw; border-radius: 1.5vw; }
         .join { font-size: 5.5vw; }
+        .join-label { font-size: 4.5vw; }
         .row { font-size: 7vw; gap: 2.5vw; padding: 0 1.5vw; border-radius: 1.5vw; }
         .status { font-size: 3.5vw; right: 3vw; bottom: 2vw; }
       }
