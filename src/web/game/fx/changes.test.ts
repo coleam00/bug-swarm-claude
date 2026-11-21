@@ -132,7 +132,9 @@ describe("changes between frames", () => {
     let squashes = 0;
     let hits = 0;
     let blocks = 0;
-    for (let i = 0; i < 7200 && !s.over; i++) {
+    // Until the run has had squashes, a hit and a block to report (upgrades can make it long), at most 15 min.
+    const seen = () => s.squashes > 10 && s.hits > 0 && s.blocks > 0;
+    for (let i = 0; i < 54_000 && !s.over && !(i >= 7200 && seen()); i++) {
       step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
       // Take the shield whenever it is offered, so the run has blocks to report too.
       if (s.choice) choose(s, Math.max(0, s.choice.indexOf(TEST_SHIELD)));

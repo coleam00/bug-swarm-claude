@@ -1,6 +1,6 @@
 // Every tuning number in the game, in one place. Distances are arena units, times seconds.
 // The simulation (sim.ts), the arena (arena.ts) and the drawing (look.ts, render.ts, sprites.ts) import from here.
-import { REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD, type UpgradeId } from "../../server/rules";
+import { CI_DRONE, REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD, type UpgradeId } from "../../server/rules";
 
 // The arena: the same area on every screen, in the screen's ratio between 9:16 and 16:9.
 export const ARENA_AREA = 360_000;
@@ -87,10 +87,25 @@ export const BOMB_RING_SECONDS = 0.5;
  * bubble at its level's charges (a spent one too); charges never come back on their own.
  */
 export const SHIELD_CHARGES = [0, 1, 2] as const;
+/** CI drone: drones orbiting the robot. The second level adds a second drone, opposite the first. */
+export const DRONE_COUNT = [0, 1, 2] as const;
+/** CI drone: the orbit's radius, from the robot's centre. */
+export const DRONE_ORBIT = 34;
+/** CI drone: radians a second around the orbit. */
+export const DRONE_SPIN = 3;
+/** CI drone: the drone's drawn radius. */
+export const DRONE_RADIUS = 5;
+/** CI drone: seconds between a drone's shots. It doesn't reload faster while the robot moves. */
+export const DRONE_FIRE_INTERVAL = 0.5;
+/** CI drone: a drone fires only at a bug within this distance of itself. */
+export const DRONE_RANGE = 220;
+/** CI drone: seconds a drone's shot flies, enough to cross its range at SHOT_SPEED. */
+export const DRONE_SHOT_LIFETIME = 0.45;
 
 /** What each upgrade's card says. A Record over the ids, so an id without a card fails tsc. */
 export const UPGRADES: Record<UpgradeId, { name: string; line: string }> = {
   [REVIEW_LASER]: { name: "Review laser", line: "Shots pierce through bugs" },
   [REFACTOR_BOMB]: { name: "Refactor bomb", line: "Clears the screen, recharges in 30 s (15 s if taken twice)" },
   [TEST_SHIELD]: { name: "Test shield", line: "Blocks the next hit" },
+  [CI_DRONE]: { name: "CI drone", line: "A drone orbits you and fires too" },
 };

@@ -84,6 +84,6 @@ describe("upgrades", () => {
 
   test("only the listed ids are upgrades", () => {
     for (const id of UPGRADE_IDS) expect(isUpgradeId(id)).toBe(true);
-    for (const v of ["", "Review-Laser", "laser", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
+    for (const v of ["", "Review-Laser", "laser", "CI-Drone", "drone", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
   });
 });
