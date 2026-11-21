@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { TOP_CACHE_MS, createApp } from "./app";
-import { findPlayer, findRunStart, hideName, openDb, playerBest, recordRunEnded, recordRunStarted, upsertPlayer } from "./db";
+import { findPlayer, hideName, openDb, playerBest, recordRunEnded, recordRunStarted, upsertPlayer } from "./db";
 import { ROBOT_RIM } from "../web/game/look";
 import { TEAMS, type Team } from "./rules";
 
@@ -31,6 +31,7 @@ const app = (): App => createApp(db, { now: () => clock });
 // Runs are written as the arena saves a life (arena/lives.ts writeLife: the stored team wins, the
 // name is upserted), split into its start and end so a test can leave one unfinished.
 let nextRun = 0;
+const started = new Map<string, { playerId: string; team: Team | null }>();
 
 /** Starts a run, with a team unless `team` is null (a player from before teams). */
 function startRun(_a: App, playerId = "player-0001", name = "Robo", team: Team | null = TABS): string {
@@ -39,12 +40,13 @@ function startRun(_a: App, playerId = "player-0001", name = "Robo", team: Team |
   const stored = findPlayer(db, playerId)?.team ?? team;
   upsertPlayer(db, playerId, name, stored, at);
   recordRunStarted(db, runId, playerId, at, stored);
+  started.set(runId, { playerId, team: stored });
   return runId;
 }
 
 /** Ends a run started with startRun, at the clock. */
 function endRun(runId: string, score: number, squashes = 0, seconds = 0, touch = false): void {
-  const start = findRunStart(db, runId)!;
+  const start = started.get(runId)!;
   recordRunEnded(db, { runId, playerId: start.playerId, score, squashes, seconds, touch, upgrades: [], team: start.team }, new Date(clock));
 }
 

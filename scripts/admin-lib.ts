@@ -93,8 +93,8 @@ export function resetCommand(argv: string[], dataDir: string): CommandResult {
   const db = openDb(path);
   try {
     const { runs, players } = resetData(db);
-    // A running server needs no restart: its top 10 cache lasts 1 s, and a run started before the
-    // reset can no longer be finished, because its start is gone (the end is a 404).
+    // A running server needs no restart: its top 10 cache lasts 1 s, and a life in progress is
+    // saved as a new run (with its player) when it ends.
     return {
       code: 0,
       out: [`reset: deleted ${runs} run${runs === 1 ? "" : "s"} and ${players} player${players === 1 ? "" : "s"} (hidden names kept)`],
