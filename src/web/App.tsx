@@ -284,25 +284,15 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
     };
   }, [diedAt, tryRestart]);
 
-  // Layout and sizes live in index.html (.over): on a phone held sideways the score and the
-  // top 10 sit side by side, so all of it fits a 390 px tall screen with nothing to scroll.
+  // Layout and sizes live in index.html (.over): on a short landscape screen (a phone held
+  // sideways) the summary and Play again sit left, the top 10 and the upgrades right, so all of it
+  // fits a 360 px tall screen with nothing to scroll. In portrait, Play again comes before both.
   return (
     <main className="over">
       <div className="over-summary">
         <h1>Game over</h1>
         <p className="over-score">{over.result.score}</p>
         {teams !== "failed" && <Race teams={teams} mine={team} />}
-        {upgrades.length === 0 ? (
-          <p className="over-upgrades">No upgrades</p>
-        ) : (
-          <ul className="over-upgrades" aria-label="Upgrades">
-            {upgrades.map((u) => (
-              <li key={u.id}>
-                {u.name} <b>L{u.level}</b>
-              </li>
-            ))}
-          </ul>
-        )}
         {over.saved === "not-saved" ? (
           <p>Stress test: not saved</p>
         ) : (
@@ -339,6 +329,17 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
             ))}
           </ol>
         )}
+        {upgrades.length === 0 ? (
+          <p className="over-upgrades">No upgrades</p>
+        ) : (
+          <ul className="over-upgrades" aria-label="Upgrades">
+            {upgrades.map((u) => (
+              <li key={u.id}>
+                {u.name} <b>L{u.level}</b>
+              </li>
+            ))}
+          </ul>
+          )}
       </section>
     </main>
   );
