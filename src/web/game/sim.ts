@@ -27,6 +27,7 @@ import {
   SHIELD_CHARGES,
   SHOT_LIFETIME,
   SHOT_SPEED,
+  STRESS_SECONDS,
   spawnInterval,
   type BugKind,
 } from "./config";
@@ -37,6 +38,8 @@ import { createRng, nextRandom, type Rng } from "./rng";
 // time. Run time never runs ahead of the server's clock (a choice pauses the run, which only
 // adds real time), so a run squashes at most 1 / SPAWN_MIN bugs a second whatever shots
 // pierce, bombs clear and however many drones fire. A test in sim.test.ts holds that under the cap.
+// A stress run (`createState`'s `stress`) is exempt: it refills the swarm every step, and it is
+// never submitted.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
@@ -91,6 +94,12 @@ export type State = {
   bombAt: number;
   /** Bugs spawned so far (for tests and tuning). */
   spawned: number;
+  /**
+   * Stress mode (dev and bench only, never submitted): the swarm held at this many bugs, every
+   * upgrade at its top level, a robot that can't lose, and a run that ends at STRESS_SECONDS.
+   * 0 in normal play.
+   */
+  stress: number;
   over: boolean;
 };
 
@@ -98,8 +107,12 @@ export type State = {
 const DRAW_SEED_MIX = 0x9e3779b9;
 const TAU = Math.PI * 2;
 
-export function createState(seed: number, arena: Arena): State {
-  return {
+/**
+ * A new run. `stress` > 0 (clamped to 1..MAX_BUGS) makes it a stress run for measuring the frame
+ * rate: see `State.stress`.
+ */
+export function createState(seed: number, arena: Arena, stress = 0): State {
+  const state: State = {
     arena: { w: arena.w, h: arena.h },
     rng: createRng(seed),
     drawRng: createRng((seed ^ DRAW_SEED_MIX) | 0),
@@ -123,8 +136,18 @@ export function createState(seed: number, arena: Arena): State {
     squashes: 0,
     bombAt: -Infinity,
     spawned: 0,
+    stress: Math.max(0, Math.min(MAX_BUGS, Math.floor(stress) || 0)),
     over: false,
   };
+  if (state.stress > 0) {
+    for (const id of UPGRADE_IDS) {
+      state.levels[id] = UPGRADE_MAX_LEVEL;
+      for (let i = 0; i < UPGRADE_MAX_LEVEL; i++) state.taken.push(id);
+    }
+    state.shield = SHIELD_CHARGES[UPGRADE_MAX_LEVEL];
+    state.nextChoiceAt = Infinity;
+  }
+  return state;
 }
 
 /** What a finished run reports to the server. */
@@ -156,7 +179,7 @@ export function step(state: State, input: Input, dt: number): void {
   // First, so it never clears a bug in the step that bug spawned.
   refactorBomb(state);
   const moved = moveRobot(state, input, dt);
-  spawnBugs(state, dt);
+  if (state.stress === 0) spawnBugs(state, dt);
   moveBugs(state, dt);
   fire(state, dt, moved);
   fireDrones(state, dt);
@@ -164,6 +187,12 @@ export function step(state: State, input: Input, dt: number): void {
   hitBugs(state);
   hitRobot(state, dt);
   state.time += dt;
+  if (state.stress > 0) {
+    // Last, so every step ends with the full swarm, the one after a blast too.
+    while (state.bugs.length < state.stress) spawnOne(state, Infinity);
+    if (state.time >= STRESS_SECONDS - 1e-9) state.over = true;
+    return;
+  }
   if (!state.over && state.time >= state.nextChoiceAt - 1e-9) offerChoice(state);
 }
 
@@ -232,19 +261,24 @@ function spawnBugs(state: State, dt: number): void {
   while (state.spawnTimer <= 0) {
     state.spawnTimer += spawnInterval(state.time);
     if (state.bugs.length >= MAX_BUGS) continue;
-    const { w, h } = state.arena;
-    const edge = Math.floor(nextRandom(state.rng) * 4);
-    const along = nextRandom(state.rng);
-    // Just outside the chosen edge: 0 top, 1 right, 2 bottom, 3 left.
-    // The kind takes a draw only once a later kind can appear, so the opening of a run plays
-    // the same whatever kinds come later.
-    const kind = laterKindDue(state.time) ? pickKind(state.time, nextRandom(state.rng)) : BASE_BUG;
-    const r = kind.radius;
-    const x = edge === 1 ? w + r : edge === 3 ? -r : along * w;
-    const y = edge === 0 ? -r : edge === 2 ? h + r : along * h;
-    state.bugs.push({ x, y, hp: kind.hp, kind });
-    state.spawned++;
+    spawnOne(state, state.time);
   }
+}
+
+/** Spawns one bug just outside a random edge, of a kind due `time` seconds into a run. */
+function spawnOne(state: State, time: number): void {
+  const { w, h } = state.arena;
+  const edge = Math.floor(nextRandom(state.rng) * 4);
+  const along = nextRandom(state.rng);
+  // Just outside the chosen edge: 0 top, 1 right, 2 bottom, 3 left.
+  // The kind takes a draw only once a later kind can appear, so the opening of a run plays
+  // the same whatever kinds come later.
+  const kind = laterKindDue(time) ? pickKind(time, nextRandom(state.rng)) : BASE_BUG;
+  const r = kind.radius;
+  const x = edge === 1 ? w + r : edge === 3 ? -r : along * w;
+  const y = edge === 0 ? -r : edge === 2 ? h + r : along * h;
+  state.bugs.push({ x, y, hp: kind.hp, kind });
+  state.spawned++;
 }
 
 function laterKindDue(time: number): boolean {
@@ -444,7 +478,10 @@ function hitRobot(state: State, dt: number): void {
     }
     state.hits++;
     state.invuln = INVULN_SECONDS;
-    if (state.hits >= MAX_HITS) state.over = true;
+    // A stress run can't lose; its bubble comes back after each hit it lets through, so the
+    // shake, the pop and the bubble all keep drawing.
+    if (state.stress > 0) state.shield = SHIELD_CHARGES[state.levels[TEST_SHIELD]]!;
+    else if (state.hits >= MAX_HITS) state.over = true;
     return;
   }
 }
