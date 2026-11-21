@@ -120,11 +120,13 @@ const HELP_FONT = "bold 15px system-ui, sans-serif";
 const HELP_TEXT = "HELP";
 /** HELP's baseline above the robot's centre, world units: over the name tag. */
 const HELP_ABOVE = NAME_ABOVE + 16;
-const REVIVE_WIDTH = 3;
+const REVIVE_WIDTH = 4;
+/** The revive ring is never smaller than this, world units, so it clears the countdown ring. */
+const REVIVE_MIN_RADIUS = COUNTDOWN_RADIUS + 9;
 const REVIVE_TRACK = "rgba(248, 250, 252, 0.15)";
 /** The edge arrow: a triangle this long and wide, CSS px. */
-const ARROW_LENGTH = 22;
-const ARROW_WIDTH = 16;
+const ARROW_LENGTH = 26;
+const ARROW_WIDTH = 20;
 const DOWN_FONT = "bold 40px system-ui, sans-serif";
 const DOWN_HINT_FONT = "bold 16px system-ui, sans-serif";
 /** The DOWN line, CSS px below the screen's centre (under your robot), and its hint below it. */
@@ -298,7 +300,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     if (!h) return;
     const mx = (r.x + h.x) / 2;
     const my = (r.y + h.y) / 2;
-    const radius = Math.hypot(h.x - r.x, h.y - r.y) / 2 + PLAYER_RADIUS;
+    const radius = Math.max(REVIVE_MIN_RADIUS, Math.hypot(h.x - r.x, h.y - r.y) / 2 + PLAYER_RADIUS);
     ctx.lineWidth = REVIVE_WIDTH;
     ctx.strokeStyle = REVIVE_TRACK;
     ctx.beginPath();
