@@ -1,14 +1,17 @@
 // One arena on the server: the authoritative simulation, its members' input queues, and the tick
 // that steps it and sends every member a snapshot. No timers and no clock of its own: rooms.ts
-// drives `advance` from its timer, so tests step it by hand. A life that ends (out, or its player
-// leaving) is handed to `onLifeEnd` as a LifeRecord; the server saves it off the tick (lives.ts).
+// drives `advance` from its timer, so tests step it by hand. A player going down and a revive are
+// broadcast to everyone. A life that ends (bled out while down, or its player leaving) is handed
+// to `onLifeEnd` as a LifeRecord; the server saves it off the tick (lives.ts).
 import { BUG_KINDS, HITS_PER_LIFE, INPUT_BUFFER, INPUT_STALE_TICKS, TICK_MS } from "../../shared/arena/constants";
 import { mult } from "../../shared/arena/combat";
 import {
+  DOWN,
   EVENT,
   JOIN,
   LEAVE,
   OVER,
+  REVIVE,
   encodeSnapshot,
   encodeSnapshotShared,
   type ArenaEvent,
@@ -16,6 +19,7 @@ import {
   type SnapshotMe,
 } from "../../shared/arena/protocol";
 import {
+  canAct,
   clampInput,
   createArena,
   joinPlayer,
@@ -72,8 +76,9 @@ export function meOf(p: Player, out: SnapshotMe): SnapshotMe {
   out.mu = mult(p.streak);
   out.he = p.heat;
   out.lk = p.lockTicks > 0 ? 1 : 0;
-  out.hl = p.alive ? HITS_PER_LIFE - p.hits : 0;
+  out.hl = canAct(p) ? HITS_PER_LIFE - p.hits : 0;
   out.al = p.alive ? 1 : 0;
+  out.dn = p.down ? 1 : 0;
   return out;
 }
 
@@ -81,7 +86,7 @@ export class Room {
   readonly state: ArenaState;
   private readonly members = new Map<number, Member>();
   private nextTickAt: number;
-  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0 };
+  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dn: 0 };
 
   constructor(
     readonly id: number,
@@ -151,9 +156,10 @@ export class Room {
   /**
    * One tick: each member's next queued input becomes its current one (a held input repeats
    * while the queue is empty, its move and fire stopped once INPUT_STALE_TICKS pass with nothing
-   * new), the arena steps, every life that ended is handed on and its player told, and every
-   * member gets a snapshot with its own ack and numbers. The shared part of the snapshot is
-   * encoded once for everyone.
+   * new), the arena steps, everyone is told of each player who went down and then of each
+   * revive, every life that ended is handed on and its player told, and every member gets a
+   * snapshot with its own ack and numbers. Events of a tick are sent before its snapshot. The
+   * shared part of the snapshot is encoded once for everyone.
    */
   tick(nowMs: number): void {
     const t0 = this.clock();
@@ -173,6 +179,9 @@ export class Room {
       if (!next) p.input.dash = false;
     }
     stepArena(this.state);
+    const ev = this.state.events;
+    for (const id of ev.downs) this.broadcast({ t: EVENT, kind: DOWN, id });
+    for (const r of ev.revives) this.broadcast({ t: EVENT, kind: REVIVE, id: r.id, by: r.by, points: r.points });
     for (const life of this.state.events.livesEnded) {
       const m = this.members.get(life.id);
       if (m) this.lifeEnded(m, life, nowMs);

@@ -3,8 +3,10 @@
 // runs the frame loop: every local 50 ms step reads the controls, sends one input and predicts
 // your robot with it; every frame draws you between predicted steps, everyone else and the bugs
 // ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the effects
-// and the HUD, with the camera following you. When your life ends the server says so ("over"),
-// and after RESTART_DELAY_MS any key, click or tap sends the respawn press.
+// and the HUD, with the camera following you. When you go down you stop (no move, no fire, no
+// prediction: you are drawn where the server has you) until someone revives you; when your life
+// ends the server says so ("over"), and after RESTART_DELAY_MS any key, click or tap sends the
+// respawn press.
 import { MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
 import {
   ERROR_NAME,
@@ -12,10 +14,12 @@ import {
   JOIN,
   LEAVE,
   OVER,
+  REVIVE,
   SNAPSHOT,
   WELCOME,
   encodeInput,
   type ServerMessage,
+  type SnapshotDown,
   type SnapshotMe,
 } from "../../shared/arena/protocol";
 import { clampInput, type Input } from "../../shared/arena/sim";
@@ -34,7 +38,19 @@ import { loadPlayer, nextScreen, noteArenaRefusedName } from "../player";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createControls, pointerDown, pointerMove, pointerUp, pressRespawn, readControls, releaseAll, type PointerKind } from "./controls";
 import { createHudFx, noteMe, resetHudFx, updateHudFx } from "./hudfx";
-import { DELAY_TICKS, bugSpan, createInterp, newestPlayers, pushSnapshot, renderTick, resetInterp, sample, type BugSpan } from "./interp";
+import {
+  DELAY_TICKS,
+  bugSpan,
+  createInterp,
+  downAt,
+  newestDown,
+  newestPlayers,
+  pushSnapshot,
+  renderTick,
+  resetInterp,
+  sample,
+  type BugSpan,
+} from "./interp";
 import { connectArena } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
 import { createArenaRenderer, type BugsView, type OverView, type Robot, type Scene } from "./render";
@@ -84,10 +100,12 @@ function start(playerId: string, name: string, team: Team): void {
   let you: number | null = null;
   let spawned = false;
   let alive = false;
+  /** Down, waiting for a revive (still in the life: `alive` stays true). */
+  let down = false;
   let seq = 0;
   let wave = 0;
   /** Your numbers from the last snapshot. */
-  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0 };
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dn: 0 };
   let haveMe = false;
   /** Your last life's end: when (performance.now ms) and what to show. */
   let overAt: number | null = null;
@@ -96,7 +114,7 @@ function start(playerId: string, name: string, team: Team): void {
   const robotFor = (id: number, n: string, t: Team): Robot => {
     let r = roster.get(id);
     if (!r) {
-      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false };
+      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false, down: false, left: 0, rev: 0, revBy: 0 };
       roster.set(id, r);
     }
     r.name = n;
@@ -123,6 +141,7 @@ function start(playerId: string, name: string, team: Team): void {
       you = m.you;
       spawned = false;
       alive = false;
+      down = false;
       haveMe = false;
       overAt = null;
       seq = 0;
@@ -133,7 +152,7 @@ function start(playerId: string, name: string, team: Team): void {
       resetHudFx(hudFx);
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
     } else if (m.t === SNAPSHOT) {
-      pushSnapshot(interp, m.tick, m.p, performance.now(), m.b);
+      pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d);
       wave = m.w;
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick);
       for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
@@ -144,8 +163,9 @@ function start(playerId: string, name: string, team: Team): void {
       const self = m.p.find((p) => p[0] === you);
       if (!self) return;
       const nowAlive = m.me.al === 1;
-      if (!spawned || (nowAlive && !alive)) {
-        // A join or a respawn: start predicting from where the server put you.
+      const nowDown = m.me.dn === 1;
+      if (!spawned || (nowAlive && !alive) || (down && nowAlive && !nowDown)) {
+        // A join, a respawn or a revive: start predicting from where the server put you.
         resetPredictor(predictor, self[1], self[2], self[3], self[4]);
         snapCamera(cam, self[1], self[2]);
         const r = roster.get(self[0]);
@@ -153,12 +173,18 @@ function start(playerId: string, name: string, team: Team): void {
         spawned = true;
         acc = 0;
         if (nowAlive) overAt = null;
-      } else if (nowAlive) reconcile(predictor, self[1], self[2], self[3], self[4], m.ack);
+      } else if (nowAlive && !nowDown) reconcile(predictor, self[1], self[2], self[3], self[4], m.ack);
       alive = nowAlive;
+      down = nowDown;
     } else if (m.t === EVENT) {
       if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);
       else if (m.kind === LEAVE) roster.delete(m.id);
       else if (m.kind === OVER && m.id === you) lifeOver(m.score ?? 0, m.kills ?? 0, m.seconds ?? 0);
+      else if (m.kind === REVIVE) {
+        // Everyone sees the reviver's points float up over the robot they brought back.
+        const r = roster.get(m.id);
+        if (r && (m.points ?? 0) > 0) spawnText(texts, r.x, r.y, m.points);
+      }
     }
   };
 
@@ -244,13 +270,17 @@ function start(playerId: string, name: string, team: Team): void {
   canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  /** Sends one input and predicts with it. While out you send no move and no fire, only the respawn press. */
+  /**
+   * Sends one input and predicts with it. While out you send no move and no fire, only the
+   * respawn press; while down, nothing at all, and nothing is predicted (the server holds you still).
+   */
   const sendInput = (mx: number, my: number, aim: number, fire: boolean, dash: boolean) => {
-    const input: Input = alive
-      ? clampInput({ seq: ++seq, mx, my, aim, fire, dash: false })
-      : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash });
+    const input: Input =
+      alive && !down
+        ? clampInput({ seq: ++seq, mx, my, aim, fire, dash: false })
+        : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash: alive ? false : dash });
     conn.send(encodeInput(input));
-    predictLocal(predictor, input);
+    if (!down) predictLocal(predictor, input);
   };
   // A hidden tab gets no frames: stop rather than repeat the last move until the server's stale limit.
   document.addEventListener("visibilitychange", () => {
@@ -299,6 +329,14 @@ function start(playerId: string, name: string, team: Team): void {
   let statsText = "";
   let acc = 0;
   let last = performance.now();
+
+  const setDown = (r: Robot, row: SnapshotDown | undefined) => {
+    r.down = row !== undefined;
+    r.left = row ? row[1] : 0;
+    r.revBy = row ? row[2] : 0;
+    r.rev = row ? row[3] : 0;
+    if (r.down) r.trail.count = 0;
+  };
 
   const fillBugs = (rt: number) => {
     bugSpan(interp, rt, span);
@@ -377,10 +415,19 @@ function start(playerId: string, name: string, team: Team): void {
           r.trail.count = 0; // no streak across the map on the respawn
           continue;
         }
-        predictedAt(predictor, Math.min(1, acc / TICK_MS), self);
-        r.x = self.x;
-        r.y = self.y;
-        r.aim = controls.aim;
+        const dn = down ? newestDown(interp, row[0]) : undefined;
+        if (dn) {
+          // Down: where the server holds you, aim frozen.
+          r.x = row[1];
+          r.y = row[2];
+          r.aim = row[5];
+        } else {
+          predictedAt(predictor, Math.min(1, acc / TICK_MS), self);
+          r.x = self.x;
+          r.y = self.y;
+          r.aim = controls.aim;
+        }
+        setDown(r, dn);
         r.inv = row[7] === 1;
         selfIndex = drawn.length;
       } else if (sample(interp, row[0], rt, at) && at.alive) {
@@ -388,6 +435,7 @@ function start(playerId: string, name: string, team: Team): void {
         r.y = at.y;
         r.aim = at.aim;
         r.inv = at.inv;
+        setDown(r, downAt(interp, row[0], rt));
       } else {
         r.trail.count = 0;
         continue;

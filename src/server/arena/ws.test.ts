@@ -5,7 +5,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION } from "../../shared/arena/constants";
+import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
+import { placeBug } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
 import { computeStats, findPlayer, openDb, playerBest, teamTotals } from "../db";
 import { startServer, type RunningServer } from "../serve";
@@ -310,6 +311,81 @@ test(
     expect(findPlayer(db, key)).toEqual({ name: "Toucher", team: "spaces" });
     expect(computeStats(db)).toMatchObject({ players: 1, finishedRuns: 1, touchShare: 100 });
     expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
+  },
+  TIMEOUT,
+);
+
+/** Where `id` was in the latest snapshot `c` received. */
+function posOf(c: Client, id: number): [number, number] | null {
+  for (let i = c.got.length - 1; i >= 0; i--) {
+    const m = c.got[i]!;
+    if (m.t === "snapshot") {
+      const row = (m as Snapshot).p.find((p) => p[0] === id);
+      return row ? [row[1], row[2]] : null;
+    }
+  }
+  return null;
+}
+
+const eventIndex = (c: Client, kind: string) => c.got.findIndex((m) => m.t === "event" && m.kind === kind);
+
+test(
+  "two clients: one goes down, the other walks over and revives it; both receive the events in order",
+  async () => {
+    const a = await enter("Ada", "tabs");
+    const b = await enter("Bob", "spaces");
+    const ida = a.welcome.you;
+    const idb = b.welcome.you;
+    const room = srv.rooms.room(a.welcome.arena)!;
+    const pa = room.state.players.find((p) => p.id === ida)!;
+    const pb = room.state.players.find((p) => p.id === idb)!;
+    // Between ticks, on the server's own thread: Bob 150 units from Ada, no bugs but one placed on
+    // Bob's last hit, and Ada untouchable for the walk.
+    room.state.bugs.length = 0;
+    pa.budget = 0;
+    pb.budget = 0;
+    pb.x = pa.x + 150;
+    pb.y = pa.y;
+    pb.vx = pb.vy = 0;
+    pa.invulnTicks = 400;
+    pb.invulnTicks = 0;
+    pb.hits = HITS_PER_LIFE - 1;
+    placeBug(room.state, pb.x - 5, pb.y);
+    await Promise.all([a.c, b.c].map((c) => c.waitFor("Bob's down event", () => eventIndex(c, "down") >= 0)));
+    // Ada walks over with real inputs, steering from her snapshots, and holds still once close.
+    const revived = Promise.all([a.c, b.c].map((c) => c.waitFor("Bob's revive event", () => eventIndex(c, "revive") >= 0)));
+    let done = false;
+    void revived.finally(() => (done = true));
+    let seq = 0;
+    while (!done) {
+      const me = posOf(a.c, ida);
+      const him = posOf(a.c, idb);
+      let mx = 0;
+      let my = 0;
+      if (me && him) {
+        const dx = him[0] - me[0];
+        const dy = him[1] - me[1];
+        const d = Math.hypot(dx, dy);
+        if (d > 35) {
+          mx = dx / d;
+          my = dy / d;
+        }
+      }
+      a.c.send(encodeInput({ seq: ++seq, mx, my, aim: 0, fire: false, dash: false }));
+      await Bun.sleep(50);
+    }
+    await revived;
+    for (const c of [a.c, b.c]) {
+      const down = eventIndex(c, "down");
+      const revive = eventIndex(c, "revive");
+      expect(down).toBeLessThan(revive);
+      expect(c.got[down]).toEqual({ t: "event", kind: "down", id: idb });
+      expect(c.got[revive]).toEqual({ t: "event", kind: "revive", id: idb, by: ida, points: REVIVE_POINTS });
+    }
+    // The first snapshot after the revive: Bob is up with one hit left, Ada has her 50.
+    const after = (c: Client) => c.waitFor("a snapshot after the revive", () => c.got.slice(eventIndex(c, "revive")).find((m): m is Snapshot => m.t === "snapshot"));
+    expect((await after(b.c)).me).toMatchObject({ al: 1, dn: 0, hl: 1 });
+    expect((await after(a.c)).me.sc).toBeGreaterThanOrEqual(REVIVE_POINTS);
   },
   TIMEOUT,
 );

@@ -2,7 +2,7 @@
 // its type. One validator, `parseClientMessage`, is the only way the server reads a client
 // message: anything malformed, unknown or over MAX_CLIENT_MESSAGE_BYTES is dropped (null). The
 // validator rejects junk only; the simulation still clamps what it accepts (sim.ts clampInput).
-import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
+import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES, REVIVE_TICKS, TICK_MS } from "./constants";
 
 /** Client to server. */
 export const CLIENT_TYPES = ["hello", "input"] as const;
@@ -15,12 +15,13 @@ export type ServerType = (typeof SERVER_TYPES)[number];
 export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 
 /**
- * What an `event` reports: a join, a leave, or your life being over (sent to you only). Hits,
- * kills and shots travel in snapshots. Later items append down, revive and pickup.
+ * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
+ * going down, and a revive (who, by whom, the points). Hits, kills and shots travel in snapshots,
+ * and so does who is down now (`d`), for a late joiner. A later item appends pickup.
  */
-export const EVENT_KINDS = ["join", "leave", "over"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE] = EVENT_KINDS;
 
 /** Why the server refused a hello. The socket closes after each. */
 export const ERROR_CODES = ["version", "name", "team", "hello"] as const;
@@ -86,6 +87,11 @@ export type SnapshotShot = [id: number, owner: number, x: number, y: number, ang
 export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
 /** A bug killed this tick: bug id, by (0: nobody scores), x, y, points. */
 export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number];
+/**
+ * A downed player: id, seconds left before bleeding out (to 0.01), the player holding revive
+ * progress (0: none), and that progress, 0 to 1 (to 0.01). Only downed players have a row.
+ */
+export type SnapshotDown = [id: number, secondsLeft: number, reviver: number, progress: number];
 
 /** Your own numbers, in your snapshots only. */
 export type SnapshotMe = {
@@ -99,8 +105,10 @@ export type SnapshotMe = {
   lk: 0 | 1;
   /** Hits left this life. */
   hl: number;
-  /** In a life (1) or out (0). */
+  /** In a life (1) or out (0). Still 1 while down. */
   al: 0 | 1;
+  /** Down (1): waiting for a revive. */
+  dn: 0 | 1;
 };
 
 export type Snapshot = {
@@ -116,6 +124,8 @@ export type Snapshot = {
   s: SnapshotShot[];
   e: SnapshotShotEnd[];
   k: SnapshotKill[];
+  /** Every downed player now. */
+  d: SnapshotDown[];
   /** The arena's wave. */
   w: number;
   me: SnapshotMe;
@@ -127,6 +137,10 @@ export type ArenaEvent = {
   id: number;
   name?: string;
   team?: string;
+  /** With "revive": the reviver. */
+  by?: number;
+  /** With "revive": the points it scored. */
+  points?: number;
   /** With "over": the life's score, kills and length. */
   score?: number;
   kills?: number;
@@ -211,7 +225,20 @@ const q1 = (v: number) => Math.round(v * 10) / 10;
 const q2 = (v: number) => Math.round(v * 100) / 100;
 const q3 = (v: number) => Math.round(v * 1000) / 1000;
 
-type PlayerRow = { id: number; x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; invulnTicks: number };
+type PlayerRow = {
+  id: number;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  aim: number;
+  alive: boolean;
+  invulnTicks: number;
+  down: boolean;
+  downTick: number;
+  reviver: number;
+  reviveTicks: number;
+};
 
 /** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv],...]`, quantized. */
 export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
@@ -238,8 +265,10 @@ export type SharedSource = {
 
 /**
  * The part of a snapshot every socket in an arena shares, built once per tick: `"p":...,"b":...,
- * "s":...,"e":...,"k":...,"w":...` (no braces). `kinds` is BUG_KINDS, passed in so this file
- * imports no simulation; `wave` is the arena's wave.
+ * "s":...,"e":...,"k":...,"d":...,"w":...` (no braces). `kinds` is BUG_KINDS, passed in so this
+ * file imports no simulation; `wave` is the arena's wave. `src.tick` is the tick after the step
+ * (the snapshot's tick), so a player who went down in the step just run shows DOWN_S less one
+ * tick left.
  */
 export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[], wave: number): string {
   let b = "[";
@@ -271,12 +300,21 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
     k += `[${x.bug},${x.by},${q1(x.x)},${q1(x.y)},${x.points}]`;
   }
   k += "]";
-  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"w":${wave}`;
+  let d = "[";
+  for (let i = 0; i < src.players.length; i++) {
+    const p = src.players[i]!;
+    if (!p.down) continue;
+    if (d.length > 1) d += ",";
+    const left = (Math.max(0, DOWN_TICKS - (src.tick - p.downTick)) * TICK_MS) / 1000;
+    d += `[${p.id},${q2(left)},${p.reviver},${q2(p.reviveTicks / REVIVE_TICKS)}]`;
+  }
+  d += "]";
+  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"d":${d},"w":${wave}`;
 }
 
 /** One socket's snapshot: its own ack and numbers around the shared part. */
 export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared: string): string {
-  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al}},${shared}}`;
+  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dn":${me.dn}},${shared}}`;
 }
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean): string {

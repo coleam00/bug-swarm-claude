@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
-import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
+import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, downAt, newestDown, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
 const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0];
 const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false });
@@ -115,5 +115,30 @@ describe("lives and bugs", () => {
     bugSpan(it, 11.2, span);
     expect(span.from!.b.map((b) => b[0])).toEqual([1]);
     expect(span.to).toBeNull();
+  });
+});
+
+describe("downs", () => {
+  test("a down row is read from the frame at or before the drawing time, like the robot's other states", () => {
+    const it = createInterp();
+    pushSnapshot(it, 10, [row(1, 0, 0)], 0, [], []);
+    pushSnapshot(it, 11, [row(1, 0, 0)], 50, [], [[1, 9.95, 0, 0]]);
+    pushSnapshot(it, 12, [row(1, 0, 0)], 100, [], [[1, 9.9, 2, 0.03]]);
+    expect(downAt(it, 1, 10.9)).toBeUndefined();
+    expect(downAt(it, 1, 11)).toEqual([1, 9.95, 0, 0]);
+    expect(downAt(it, 1, 11.5)).toEqual([1, 9.95, 0, 0]);
+    expect(downAt(it, 1, 14)).toEqual([1, 9.9, 2, 0.03]);
+    expect(downAt(it, 1, 2)).toBeUndefined(); // before the buffer: the oldest
+    expect(downAt(it, 2, 12)).toBeUndefined();
+  });
+
+  test("your own down row is the newest snapshot's", () => {
+    const it = createInterp();
+    expect(newestDown(it, 1)).toBeUndefined();
+    pushSnapshot(it, 10, [row(1, 0, 0)], 0, [], [[1, 5, 0, 0]]);
+    pushSnapshot(it, 11, [row(1, 0, 0)], 50);
+    expect(newestDown(it, 1)).toBeUndefined();
+    pushSnapshot(it, 12, [row(1, 0, 0)], 100, [], [[1, 4.9, 0, 0]]);
+    expect(newestDown(it, 1)).toEqual([1, 4.9, 0, 0]);
   });
 });
