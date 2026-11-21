@@ -92,9 +92,10 @@
 // two-letter names beside a word: "F Aguilar" and "Rafa G" (fag), "T Watson" (twat), "Anna L"
 // and "Anna Al" (anal), "Ji Smith" (jism), "Andy Ke" (dyke).
 //
-// RESERVED_NAMES: refused for players with "That name is reserved". Matched against the whole
-// normalised name with the same repeated-letter rule ("Cole Medin", "c0le_medin" and "Addmin"
-// are refused); a name that only contains one ("Archonaut") is fine.
+// RESERVED_NAMES: refused for players, who see the start screen's "Pick a different name"
+// (src/web/start.ts). Matched against the whole normalised name with the same repeated-letter
+// rule ("Cole Medin", "c0le_medin" and "Addmin" are refused); a name that only contains one
+// ("Archonaut") is fine.
 //
 // The boards (top 10 and team totals) hide a stored name these lists now refuse, at read time.
 //
