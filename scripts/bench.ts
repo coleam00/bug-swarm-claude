@@ -113,6 +113,8 @@ type Row = {
   avg: number;
   worst: number;
   slow: number;
+  /** When each frame over 20 ms ended, seconds into the run. */
+  slowAt: number[];
   fxMax: number;
   draw: { avg: number; p99: number; max: number };
 };
@@ -147,6 +149,7 @@ function summarise(label: string, rec: { frames: number[]; draws: number[]; bugs
     avg,
     worst,
     slow: keep.filter((i) => rec.frames[i]! > 20).length,
+    slowAt: keep.flatMap((i, k) => (rec.frames[i]! > 20 ? [times[k]! / 1000] : [])),
     fxMax: Math.max(...keep.map((i) => rec.fx[i]!)),
     draw: {
       avg: draws.reduce((a, b) => a + b, 0) / draws.length,
@@ -267,7 +270,8 @@ try {
     await until("the stress run to start", 20_000, () => cdp!.evaluate("!!window.bugSwarmBench"));
     // F: the readout is on for the whole measurement, so its cost is in the numbers.
     for (const type of ["keyDown", "keyUp"]) await cdp.send("Input.dispatchKeyEvent", { type, code: "KeyF", key: "f", windowsVirtualKeyCode: 70 });
-    await wait(30_000);
+    // Inside the skipped first SKIP_MS: a screenshot takes long enough to cost a frame.
+    await wait(3000);
     await screenshot(cdp, `run-${run.width}x${run.height}`);
     await until("the stress run to end", RUN_TIMEOUT_MS, () => cdp!.evaluate("window.bugSwarmBench.done"));
     const rec = await cdp.evaluate(`(() => {
@@ -292,6 +296,7 @@ try {
   for (const r of rows) {
     console.log(`| ${r.label} | ${r.bugs} | ${f1(r.avg)} | ${r.worst} | ${r.slow} | ${r.fxMax} | ${f2(r.draw.avg)} / ${f1(r.draw.p99)} / ${f1(r.draw.max)} ms |`);
   }
+  for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
   console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the couldn't-save alert added):\n");
   console.log("| Viewport | Upgrade chips | Top-10 rows | Hint bottom | Last row bottom | Page height | Fits |");
   console.log("|---|---|---|---|---|---|---|");
