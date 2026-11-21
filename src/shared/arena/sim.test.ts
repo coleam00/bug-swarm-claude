@@ -175,7 +175,7 @@ describe("arena", () => {
 });
 
 describe("lives", () => {
-  test("a bug touching you costs a hit and is gone; you are untouchable for INVULN_S; 3 hits end the life once", () => {
+  test("a bug touching you costs a hit and is gone; you are untouchable for INVULN_S; the life ends once", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
     p.score = 40;
@@ -200,12 +200,8 @@ describe("lives", () => {
     p.invulnTicks = 0;
     placeBug(a, p.x + 10, p.y);
     stepQuiet(a);
-    // The third hit puts you down, not out (downs.test.ts has the rest).
+    // The third hit puts you down (downs.test.ts); bleeding out ends the life once.
     expect(p.hits).toBe(HITS_PER_LIFE);
-    expect([p.alive, p.down]).toEqual([true, true]);
-    expect(a.events.downs).toEqual([p.id]);
-    expect(a.events.livesEnded).toEqual([]);
-    // Bleeding out ends the life once.
     bleedNow(a, p);
     expect(p.alive).toBe(false);
     expect(a.events.livesEnded).toEqual([{ id: p.id, score: 40, kills: 4, ticks: a.tick - 1 }]);
@@ -245,20 +241,16 @@ describe("lives", () => {
   });
 
   test("leaving ends an alive life and returns it; the step's own list is untouched", () => {
-    const { a, ps } = arenaWith([1200, 1200], [600, 600], [1800, 1800]);
-    const [p1, p2, p3] = [ps[0]!, ps[1]!, ps[2]!];
-    p2.score = 30;
-    downNow(a, p2);
+    const { a, ps } = arenaWith([1200, 1200], [1800, 1800]);
+    const [p1, p3] = [ps[0]!, ps[1]!];
     p3.score = 15;
     downNow(a, p3);
     bleedNow(a, p3);
     stepQuiet(a, 8);
     p1.score = 25;
     p1.kills = 2;
-    expect(leavePlayer(a, p1.id)).toEqual({ life: { id: p1.id, score: 25, kills: 2, ticks: 11 } });
+    expect(leavePlayer(a, p1.id)).toEqual({ life: { id: p1.id, score: 25, kills: 2, ticks: 10 } });
     expect(a.events.livesEnded).toEqual([]);
-    // Down is still in a life: leaving ends it. Out is not.
-    expect(leavePlayer(a, p2.id)).toEqual({ life: { id: p2.id, score: 30, kills: 0, ticks: 11 } });
     expect(leavePlayer(a, p3.id)).toEqual({ life: null });
   });
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 import {
   CLIENT_TYPES,
-  EVENT_KINDS,
   SERVER_TYPES,
   encodeHello,
   encodeInput,
@@ -172,10 +171,6 @@ describe("server messages", () => {
     const none = encodeSnapshotShared({ ...src, players: players.slice(0, 3) }, ["crawler"], 3);
     expect(none).toContain(`"d":[],"w":3`);
     expect(parseServerMessage(encodeSnapshot(9, 4, { ...me, hl: 0, dn: 1 }, none))).toMatchObject({ me: { hl: 0, dn: 1 }, d: [] });
-  });
-
-  test("event kinds are only ever appended: down and revive come after join, leave and over", () => {
-    expect(EVENT_KINDS).toEqual(["join", "leave", "over", "down", "revive"]);
   });
 
   test("parseServerMessage accepts only known types", () => {

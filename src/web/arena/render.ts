@@ -131,7 +131,7 @@ const DOWN_FONT = "bold 40px system-ui, sans-serif";
 const DOWN_HINT_FONT = "bold 16px system-ui, sans-serif";
 /** The DOWN line, CSS px below the screen's centre (under your robot), and its hint below it. */
 const DOWN_BELOW = 70;
-const DOWN_HINT = "Stay close to a player to be revived";
+const DOWN_HINT = "A player next to you revives you";
 
 /**
  * One robot to draw, world units. `inv`: untouchable, so it blinks. `down`: waiting for a revive,

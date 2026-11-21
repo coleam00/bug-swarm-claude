@@ -116,7 +116,10 @@ describe("reviving", () => {
     expect(a.events.revives).toEqual([{ id: p.id, by: h.id, points: REVIVE_POINTS }]);
     expect([p.down, p.alive, p.hits, p.invulnTicks, p.reviver, p.reviveTicks]).toEqual([false, true, HITS_PER_LIFE - 1, REVIVE_PROTECT_TICKS, 0, 0]);
     expect(h.score).toBe(REVIVE_POINTS);
+    // The item's numbers: 2 s (40 steps) in range, 50 points, 1.5 s (30 steps) of protection.
     expect(REVIVE_TICKS).toBe(40);
+    expect(h.score).toBe(50);
+    expect(p.invulnTicks).toBe(30);
     // Back up: it moves again.
     hold(p, { mx: 1 });
     stepQuiet(a);
