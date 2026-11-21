@@ -38,7 +38,8 @@ import { createRng, nextRandom, type Rng } from "./rng";
 // squashes never exceed bugs spawned, and bugs spawn at most once every SPAWN_MIN seconds of run
 // time (the interval's last floor, past the surge). Run time never runs ahead of the server's
 // clock (a choice pauses the run, which only adds real time), so a run squashes at most
-// 1 / SPAWN_MIN bugs a second whatever shots pierce, bombs clear and however many drones fire. A test in sim.test.ts holds that under the cap.
+// 1 / SPAWN_MIN bugs a second whatever shots pierce, bombs clear and however many drones fire.
+// A test in sim.test.ts holds that under the cap.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
