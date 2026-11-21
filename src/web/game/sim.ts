@@ -105,7 +105,7 @@ export function createState(seed: number, arena: Arena): State {
     spawnTimer: spawnInterval(0),
     fireTimer: 0,
     droneAngle: 0,
-    // Half an interval apart, so two drones take turns rather than fire as one.
+    // Two drones start half an interval apart rather than firing as one (they can fall into step).
     droneTimers: [0, DRONE_FIRE_INTERVAL / 2],
     invuln: 0,
     hits: 0,
