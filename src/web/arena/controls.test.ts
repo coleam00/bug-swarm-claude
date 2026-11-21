@@ -40,6 +40,51 @@ describe("fire and respawn", () => {
     expect(o.fire).toBe(false);
   });
 
+  test("the click that respawns does not fire until it is let go; the next press does", () => {
+    const c = createControls(1440);
+    const o = out();
+    // main.ts: a press while out calls pressRespawn, then pointerDown.
+    pressRespawn(c);
+    pointerDown(c, "mouse", 1, 800, 450, 0);
+    readControls(c, 700, 450, o);
+    expect([o.respawn, o.fire]).toEqual([true, false]);
+    readControls(c, 700, 450, o);
+    expect([o.respawn, o.fire]).toEqual([false, false]);
+    pointerUp(c, "mouse", 1, 0);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(false);
+    pointerDown(c, "mouse", 1, 800, 450, 0);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(true);
+  });
+
+  test("the tap that respawns on the aim side does not fire until the thumb lifts", () => {
+    const c = createControls(844);
+    const o = out();
+    pressRespawn(c);
+    pointerDown(c, "touch", 2, 650, 200);
+    pointerMove(c, "touch", 2, 650 + STICK_DEAD + 1, 200);
+    readControls(c, 0, 0, o);
+    expect([o.respawn, o.fire]).toEqual([true, false]);
+    pointerUp(c, "touch", 2);
+    readControls(c, 0, 0, o);
+    pointerDown(c, "touch", 3, 650, 200);
+    pointerMove(c, "touch", 3, 650 + STICK_DEAD + 1, 200);
+    readControls(c, 0, 0, o);
+    expect(o.fire).toBe(true);
+  });
+
+  test("a key that respawns leaves a later click free to fire at once", () => {
+    const c = createControls(1440);
+    const o = out();
+    pressRespawn(c);
+    readControls(c, 700, 450, o);
+    expect(o.respawn).toBe(true);
+    pointerDown(c, "mouse", 1, 800, 450, 0);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(true);
+  });
+
   test("the aim stick fires while held past its dead zone, and stops when the thumb lifts", () => {
     const c = createControls(844);
     const o = out();

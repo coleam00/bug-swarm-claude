@@ -8,8 +8,9 @@
 // the right stick (`dashButtonAt`). The button is there only on a touch screen (#64): a coarse
 // pointer, or once a finger has touched (`dashButtonOn`); then any pointer can tap it, and a finger
 // on it never starts a stick. A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
-// while alive and the respawn while out. Pure: main.ts feeds it DOM events in CSS px relative to
-// the canvas.
+// while alive and the respawn while out. The click or tap that pressed a respawn does not fire
+// until it is let go, so it does not end the new life's spawn protection (#58). Pure: main.ts
+// feeds it DOM events in CSS px relative to the canvas.
 import type { Insets } from "../game/hud";
 import { keysToInput } from "../game/keys";
 import { STICK_DEAD, createStick, stickDown, stickDrive, stickMove, stickUp, type Stick, type StickOut } from "../game/stick";
@@ -49,6 +50,8 @@ export type Controls = {
   leftOnDash: boolean;
   /** A respawn press waiting for the next input. */
   respawn: boolean;
+  /** Fire reads false until the mouse button and the aim stick are both let go (set by a respawn press). */
+  holdFire: boolean;
   /** A dash press waiting for the next input. */
   dashPress: boolean;
   dashButton: DashButton;
@@ -69,6 +72,7 @@ export function createControls(width: number): Controls {
     mouseButtons: 0,
     leftOnDash: false,
     respawn: false,
+    holdFire: false,
     dashPress: false,
     dashButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1 },
     dashButtonOn: false,
@@ -183,9 +187,13 @@ export function releaseAll(c: Controls): void {
   stickUp(c.aimStick, c.aimStick.id);
 }
 
-/** Asks for a respawn: the next input carries it as a dash press, once. */
+/**
+ * Asks for a respawn: the next input carries it as a dash press, once. A button or finger held
+ * from this press does not fire until it has been let go.
+ */
 export function pressRespawn(c: Controls): void {
   c.respawn = true;
+  c.holdFire = true;
 }
 
 /** A dash press (a key): the next input carries it, once. */
@@ -198,7 +206,8 @@ const drive: StickOut = { kind: "stick", dx: 0, dy: 0 };
 /**
  * This step's move, aim and fire into `out`. Held keys win over the move stick. The aim stick,
  * else the mouse (aimed from `selfX, selfY`, your robot on screen in CSS px), sets the aim; else
- * it stays. Fire is the held left button, or the aim stick held past its dead zone. `dash` and
+ * it stays. Fire is the held left button, or the aim stick held past its dead zone, except while
+ * a respawn press is still held (holdFire, cleared once both are let go). `dash` and
  * `respawn` are the presses waiting since the last read, consumed here: main.ts sends the one
  * that fits (the dash while alive, the respawn while out). The move may be longer than 1 (a diagonal key pair); the
  * sim clamps it.
@@ -225,7 +234,8 @@ export function readControls(
   if (aiming) c.aim = Math.atan2(s.y - s.cy, s.x - s.cx);
   else if (c.mouse.on && (c.mouse.x !== selfX || c.mouse.y !== selfY)) c.aim = Math.atan2(c.mouse.y - selfY, c.mouse.x - selfX);
   out.aim = c.aim;
-  out.fire = aiming || c.firing;
+  if (c.holdFire && !c.firing && !s.active) c.holdFire = false;
+  out.fire = !c.holdFire && (aiming || c.firing);
   out.dash = c.dashPress;
   out.respawn = c.respawn;
   c.dashPress = false;

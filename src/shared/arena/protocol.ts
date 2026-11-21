@@ -75,9 +75,9 @@ export type Welcome = {
 };
 
 /**
- * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable by a hit or spawn
- * protection (0/1), dashing (0/1, v3). Positions and velocities to 0.01, aim to 0.001. Fields are
- * only ever appended, never reordered.
+ * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable after a hit or a
+ * revive (0/1), dashing (0/1, v3), spawn-protected (0/1, v5, #58). Positions and velocities to
+ * 0.01, aim to 0.001. Fields are only ever appended, never reordered.
  */
 export type SnapshotPlayer = [
   id: number,
@@ -89,6 +89,7 @@ export type SnapshotPlayer = [
   alive: 0 | 1,
   invulnerable: 0 | 1,
   dashing: 0 | 1,
+  spawnProtected: 0 | 1,
 ];
 /** One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number];
@@ -249,19 +250,20 @@ type PlayerRow = {
   alive: boolean;
   invulnTicks: number;
   dashTicks: number;
+  protectTicks: number;
   down: boolean;
   downTick: number;
   reviver: number;
   reviveTicks: number;
 };
 
-/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash],...]`, quantized. */
+/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash,prot],...]`, quantized. */
 export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
   let s = "[";
   for (let i = 0; i < players.length; i++) {
     const p = players[i]!;
     if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0}]`;
+    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0},${p.alive && p.protectTicks > 0 ? 1 : 0}]`;
   }
   return s + "]";
 }

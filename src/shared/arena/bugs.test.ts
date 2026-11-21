@@ -1,8 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import { CRAWLER_SPEED, DT, MAX_BUGS_PER_ARENA, SPAWN_BASE_PER_S, SPAWN_DIST_MAX, SPAWN_MAX_PER_S, WAVE_S } from "./constants";
-import { inView, spawnRate } from "./bugs";
-import { createArena, joinPlayer, stepArena, wave, type ArenaState, type Bug } from "./sim";
+import {
+  CRAWLER_SPEED,
+  DT,
+  MAX_BUGS_PER_ARENA,
+  SPAWN_BASE_PER_S,
+  SPAWN_DIST_MAX,
+  SPAWN_MAX_PER_S,
+  SPAWN_PROTECT_S,
+  WAVE_S,
+  WORLD_H,
+  WORLD_W,
+} from "./constants";
+import { inView, pressureAge, spawnRate } from "./bugs";
+import { POLICIES, createMemory, createObservation, observe, type PolicyInput } from "./policies";
+import { createRng } from "./rng";
+import { clampInput, createArena, joinPlayer, stepArena, wave, type ArenaState, type Bug } from "./sim";
 import { arenaWith, placeBug, stepQuiet } from "./testkit";
+
+/** The item's numbers (#58), written out so a test fails if a constant drifts from them. */
+const ITEM_EASY_S = 10;
+const ITEM_PROTECT_S = 2;
 
 /** Steps with every player untouchable and standing still; returns how many bugs spawned. */
 function stepSpawning(a: ArenaState, ticks: number, onSpawn?: (bug: Bug) => void): number {
@@ -23,10 +40,10 @@ describe("personal spawn budget", () => {
     expect(spawnRate(60)).toBeGreaterThan(spawnRate(30));
     expect(spawnRate(10_000)).toBe(SPAWN_MAX_PER_S);
     const { a } = arenaWith([1200, 1200]);
-    // The integral of the rate over the first 10 s.
+    // The integral of the rate over the first 30 s of a first life (held back 10 s).
     let owed = 0;
-    for (let t = 0; t < 10 / DT; t++) owed += spawnRate(t * DT) * DT;
-    expect(Math.abs(stepSpawning(a, 10 / DT) - owed)).toBeLessThanOrEqual(1);
+    for (let t = 0; t < 30 / DT; t++) owed += spawnRate(Math.max(0, t * DT - ITEM_EASY_S)) * DT;
+    expect(Math.abs(stepSpawning(a, 30 / DT) - owed)).toBeLessThanOrEqual(1);
   });
 
   test("two players with lives of different ages bring different pressure", () => {
@@ -98,5 +115,157 @@ describe("crawlers", () => {
     ps[0]!.alive = false;
     stepQuiet(a);
     expect([b.vx, b.vy, b.target]).toEqual([0, 0, 0]);
+  });
+});
+
+describe("fair drop-in: personal pacing", () => {
+  test("pressure follows the life's age, held back 10 s on the first life only", () => {
+    const first = { lifeStartTick: 100, firstLife: true };
+    const later = { lifeStartTick: 100, firstLife: false };
+    const at = (s: number) => 100 + Math.round(s / DT);
+    expect(pressureAge(first, at(5))).toBe(0);
+    expect(pressureAge(first, at(ITEM_EASY_S))).toBe(0);
+    expect(pressureAge(first, at(ITEM_EASY_S + 20))).toBeCloseTo(20, 9);
+    expect(pressureAge(later, at(5))).toBeCloseTo(5, 9);
+    expect(pressureAge(later, at(30))).toBeCloseTo(30, 9);
+  });
+
+  test("a newcomer joining an arena aimer bots have played for 10 minutes meets the same pressure as one joining at the start, or alone", () => {
+    // What the sim itself charges the newcomer each tick: their budget is zeroed before each step
+    // (so nothing spawns for them and the step's whole growth stays in it), and read after. They
+    // cannot be hit, so all three records run the full 30 s.
+    const record = (warmTicks: number, botCount = 3): number[] => {
+      const a = createArena(21);
+      const bots = Array.from({ length: botCount }, (_, i) => i).map((i) => ({
+        id: joinPlayer(a, `bot ${i}`, "tabs").id,
+        rng: createRng(100 + i),
+        mem: createMemory(),
+        obs: createObservation(),
+        out: { mx: 0, my: 0, aim: 0, fire: false, dash: false } as PolicyInput,
+      }));
+      const drive = () => {
+        for (const b of bots) {
+          observe(a, b.id, WORLD_W, WORLD_H, b.obs);
+          POLICIES.aimer(b.obs, b.mem, b.rng, b.out);
+          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out });
+        }
+      };
+      for (let t = 0; t < warmTicks; t++) {
+        drive();
+        stepArena(a);
+      }
+      const p = joinPlayer(a, "new", "tabs");
+      const rates: number[] = [];
+      for (let t = 0; t < 600 && p.alive; t++) {
+        drive();
+        p.budget = 0;
+        p.invulnTicks = 1e9; // kept alive by the hit timer, which neither pressure nor targeting reads
+        stepArena(a);
+        rates.push(p.budget);
+      }
+      return rates;
+    };
+    const early = record(0);
+    const late = record(Math.round(600 / DT));
+    const alone = record(0, 0);
+    const easy = Math.round(ITEM_EASY_S / DT);
+    // The late arena is busy, but the newcomer's own pressure is the same, tick by tick: no boost
+    // from the arena's age, its crowd or its bugs.
+    expect([early.length, late.length, alone.length]).toEqual([600, 600, 600]);
+    expect(late).toEqual(early.slice(0, late.length));
+    expect(early).toEqual(alone.slice(0, early.length));
+    // And it is the curve: the base rate through the first life's easy 10 s, rising after.
+    expect(late[0]).toBeCloseTo(spawnRate(0) * DT, 12);
+    expect(late.slice(0, easy)).toEqual(Array(easy).fill(late[0]));
+    expect(late[late.length - 1]).toBeGreaterThan(late[0]!);
+  });
+
+  test("a newcomer joining at 10 minutes is sent as many bugs over 30 s as one joining at the start, or alone", () => {
+    // What is actually spawned for them: the bots' budgets are zeroed before each step, so every
+    // new bug in the step is the newcomer's, and the newcomer's own spawn loop runs as in play.
+    const spawned = (warmTicks: number, botCount = 3): number => {
+      const a = createArena(21);
+      const bots = Array.from({ length: botCount }, (_, i) => i).map((i) => ({
+        id: joinPlayer(a, `bot ${i}`, "tabs").id,
+        rng: createRng(100 + i),
+        mem: createMemory(),
+        obs: createObservation(),
+        out: { mx: 0, my: 0, aim: 0, fire: false, dash: false } as PolicyInput,
+      }));
+      const drive = () => {
+        for (const b of bots) {
+          observe(a, b.id, WORLD_W, WORLD_H, b.obs);
+          POLICIES.aimer(b.obs, b.mem, b.rng, b.out);
+          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out });
+        }
+      };
+      for (let t = 0; t < warmTicks; t++) {
+        drive();
+        stepArena(a);
+      }
+      const p = joinPlayer(a, "new", "tabs");
+      let count = 0;
+      for (let t = 0; t < 600; t++) {
+        drive();
+        for (const q of a.players) if (q.id !== p.id) q.budget = 0;
+        p.invulnTicks = 1e9;
+        const before = a.nextBugId;
+        stepArena(a);
+        count += a.nextBugId - before;
+      }
+      expect(p.alive).toBe(true);
+      return count;
+    };
+    // The curve's integral over 30 s of a first life: 10 s at the base rate, then 20 s rising.
+    let owed = 0;
+    for (let t = 0; t < 600; t++) owed += spawnRate(Math.max(0, (t + 1) * DT - ITEM_EASY_S)) * DT;
+    const early = spawned(0);
+    expect(early).toBeLessThanOrEqual(owed); // whole bugs only: the fraction stays in the budget
+    expect(early).toBeGreaterThan(owed - 2);
+    expect(spawned(Math.round(600 / DT))).toBe(early);
+    expect(spawned(0, 0)).toBe(early);
+  });
+
+  test("bugs chasing someone else are not redirected at a protected newcomer, until protection ends", () => {
+    const { a, ps } = arenaWith([300, 1200]);
+    const A = ps[0]!;
+    const b = placeBug(a, 1300, 1200);
+    stepQuiet(a);
+    expect(b.target).toBe(A.id);
+    const B = joinPlayer(a, "new", "spaces");
+    B.x = b.x + 50;
+    B.y = 1200;
+    const protect = Math.round(ITEM_PROTECT_S / DT);
+    for (let t = 0; t < protect; t++) {
+      stepQuiet(a);
+      expect(b.target).toBe(A.id);
+    }
+    expect(B.protectTicks).toBe(0);
+    stepQuiet(a);
+    expect(b.target).toBe(B.id);
+  });
+
+  test("a protected newcomer's own spawns chase them; with only protected players alive, bugs take the nearest", () => {
+    const { a, ps } = arenaWith([100, 100]);
+    const B = joinPlayer(a, "new", "spaces");
+    B.x = 1800;
+    B.y = 1800;
+    B.lifeStartTick = -Math.round(100 / DT); // enough pressure to spawn inside the protection
+    let own = 0;
+    for (let t = 0; t < Math.round(SPAWN_PROTECT_S / DT) - 1; t++) {
+      const before = a.nextBugId;
+      stepArena(a);
+      for (const bug of a.bugs) {
+        if (bug.id < before || Math.hypot(bug.x - B.x, bug.y - B.y) > SPAWN_DIST_MAX + 10) continue;
+        expect(bug.target).toBe(B.id);
+        own++;
+      }
+    }
+    expect(B.protectTicks).toBeGreaterThan(0);
+    expect(own).toBeGreaterThan(0);
+    ps[0]!.alive = false;
+    const stray = placeBug(a, 1000, 1000);
+    stepQuiet(a);
+    expect(stray.target).toBe(B.id);
   });
 });
