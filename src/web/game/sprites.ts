@@ -1,6 +1,7 @@
 // Pre-rendered sprites on offscreen canvases, drawn in code from look.ts. Anything with a glow
 // or many path segments is drawn once here, so a frame is mostly drawImage calls and never uses
-// shadowBlur. Browser only: render.ts is the one importer, and nothing here runs at import.
+// shadowBlur. Browser only: render.ts draws with it, the server's art.ts reads only its sizes,
+// and nothing here runs at import.
 import type { Arena } from "./arena";
 import {
   ARENA_EDGE,
