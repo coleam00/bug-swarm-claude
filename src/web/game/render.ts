@@ -52,6 +52,7 @@ import { REFACTOR_BOMB, REVIEW_LASER } from "../../server/rules";
 import { DRONE_RADIUS, LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
 import { bombCharge, bombRing, droneCount, droneX, droneY, score, type State } from "./sim";
 import { STICK_RANGE, stickKnob, type Stick } from "./stick";
+import { NO_INSETS, hudLayout, type Insets } from "./hud";
 import { BUG_SPRITE_HALF, ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake; pops: Pops };
@@ -61,8 +62,6 @@ export type Stats = { show: boolean; fps: number; bugs: number; effects: number;
 
 const HUD_FONT = "bold 28px system-ui, sans-serif";
 const STATS_FONT = "bold 16px system-ui, sans-serif";
-/** The readout's line, under the HUD's top row. */
-const STATS_Y = 52;
 const TAU = Math.PI * 2;
 /** Leg frames walked forward then back: 0 1 2 3 2 1. */
 const LEG_CYCLE = [0, 1, 2, 3, 2, 1];
@@ -92,9 +91,12 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
   let timeText = "";
   let statsReading = -1;
   let statsText = "";
+  /** The HUD's anchors, inside the safe area: set on resize. */
+  let hud = hudLayout(canvas.width, NO_INSETS);
 
   /** Takes the layout loop.ts worked out; rebuilds sprites only when their resolution changes. */
-  function resize(newDpr: number, newScale: number, newOffX: number, newOffY: number): void {
+  function resize(newDpr: number, newScale: number, newOffX: number, newOffY: number, insets: Insets): void {
+    hud = hudLayout(canvas.width / newDpr, insets);
     dpr = newDpr;
     scale = newScale;
     offX = newOffX;
@@ -368,14 +370,13 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     ctx.font = HUD_FONT;
     ctx.textBaseline = "top";
     ctx.fillStyle = "#f8fafc";
-    const w = canvas.width / dpr;
     ctx.textAlign = "left";
-    ctx.fillText(scoreText, 16, 16);
+    ctx.fillText(scoreText, hud.left, hud.top);
     ctx.textAlign = "center";
-    ctx.fillText(timeText, w / 2, 16);
+    ctx.fillText(timeText, hud.center, hud.top);
     ctx.textAlign = "right";
     ctx.fillStyle = "#f43f5e";
-    ctx.fillText(hitsText, w - 16, 16);
+    ctx.fillText(hitsText, hud.right, hud.top);
 
     if (stats.show) {
       if (stats.reading !== statsReading) {
@@ -385,7 +386,7 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
       ctx.font = STATS_FONT;
       ctx.textAlign = "left";
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText(statsText, 16, STATS_Y);
+      ctx.fillText(statsText, hud.left, hud.statsTop);
     }
   }
 

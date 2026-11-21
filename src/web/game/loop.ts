@@ -8,22 +8,29 @@ import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, setTextScale, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import { createFpsMeter, tickFps } from "./fps";
+import { createSteerLatch, firstSteer } from "../hint";
+import { createChoiceGate, pickChoice, showChoice } from "./guard";
 import type { UpgradeId } from "../../server/rules";
 import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
 import { STRESS_SECONDS } from "./config";
 import { createRenderer, type Fx, type Stats } from "./render";
+import type { Insets } from "./hud";
 import { createRng } from "./rng";
 import { createStick, stickDown, stickDrive, stickMove, stickReset, stickUp, type StickOut } from "./stick";
-import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
+import { createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
 
 export type { RunResult };
 
 export type Game = {
   /** Cancels the loop and removes every listener. */
   stop: () => void;
-  /** Takes card `index` of the choice on offer; false if there is no such card. */
-  pick: (index: number) => boolean;
+  /**
+   * Takes card `index` of the choice on offer for a press at `pressedAt` (performance.now(), the
+   * default). False if there is no such card, or if the press came less than CHOICE_DELAY_MS
+   * after the choice showed (guard.ts), so a reflexive re-touch can't pick unseen.
+   */
+  pick: (index: number, pressedAt?: number) => boolean;
 };
 
 const STEP = 1 / 60;
@@ -72,13 +79,16 @@ function effectsAlive(fx: Fx): number {
  * Plays one run on `canvas` and calls `onOver` once when it ends. The simulation advances in
  * fixed steps by real elapsed time, so its clock tracks the server's on 60, 120 or 144 Hz
  * screens. While an upgrade choice waits it doesn't advance: `onChoice` gets the cards when one
- * comes up and null once `pick` (or keys 1-3) takes one.
+ * comes up and null once `pick` (or keys 1-3) takes one. Both ignore the first CHOICE_DELAY_MS
+ * (350 ms, guard.ts) after the choice opens.
  */
 export function startGame(
   canvas: HTMLCanvasElement,
   opts: {
     onOver: (result: RunResult) => void;
     onChoice: (cards: readonly UpgradeId[] | null) => void;
+    /** Called once, on the run's first steering input (from input events, never the frame loop). */
+    onMove?: () => void;
     /** A stress run's bug count (stress.ts); 0 or absent for a normal run. */
     stress?: number;
   },
@@ -96,6 +106,11 @@ export function startGame(
   let offY = 0;
   // The floating labels merge within a CSS px distance, so they follow the layout too.
   const texts = createTexts();
+  // The safe-area insets (index.html's --safe-*), read as resolved px from a hidden probe's padding.
+  const probe = document.createElement("div");
+  probe.className = "safe-probe";
+  document.body.appendChild(probe);
+  const insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   const resize = () => {
     dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
@@ -105,7 +120,12 @@ export function startGame(
     scale = Math.min(w / arena.w, h / arena.h);
     offX = (w - arena.w * scale) / 2;
     offY = (h - arena.h * scale) / 2;
-    renderer.resize(dpr, scale, offX, offY);
+    const cs = getComputedStyle(probe);
+    insets.top = parseFloat(cs.paddingTop) || 0;
+    insets.right = parseFloat(cs.paddingRight) || 0;
+    insets.bottom = parseFloat(cs.paddingBottom) || 0;
+    insets.left = parseFloat(cs.paddingLeft) || 0;
+    renderer.resize(dpr, scale, offX, offY, insets);
     setTextScale(texts, scale);
   };
   resize();
@@ -125,10 +145,12 @@ export function startGame(
   let pointerSteers = false;
   let touch = false;
   let input: Input = NONE;
+  const steer = createSteerLatch();
   const updateInput = () => {
     if (keys.size > 0) input = keysToInput(keys);
     else if (stick.active) input = stickDrive(stick, stickOut) ? stickOut : NONE;
     else input = pointerSteers ? target : NONE;
+    if (firstSteer(steer, input)) opts.onMove?.();
   };
   const aimAt = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
@@ -174,13 +196,12 @@ export function startGame(
     pointerSteers = false;
     updateInput();
   };
-  const pick = (index: number): boolean => {
-    if (stopped || !choose(state, index)) return false;
+  const pick = (index: number, pressedAt = performance.now()): boolean => {
+    if (stopped || !pickChoice(gate, state, index, pressedAt)) return false;
     // The mouse that picked steers again once it moves; a finger, once it touches down again.
     pointerSteers = false;
     stickReset(stick);
     updateInput();
-    shown = null;
     opts.onChoice(null);
     return true;
   };
@@ -261,8 +282,8 @@ export function startGame(
   let last: number | null = null;
   let acc = 0;
   let stopped = false;
-  /** The choice last reported to `onChoice`, so it is reported once. */
-  let shown: readonly UpgradeId[] | null = null;
+  /** The choice last reported to `onChoice` (so it is reported once) and when, for pick()'s guard. */
+  const gate = createChoiceGate();
   const frame = (ts: number) => {
     if (stopped) return;
     const real = last === null ? 0 : (ts - last) / 1000;
@@ -285,7 +306,7 @@ export function startGame(
     if (steps === MAX_STEPS_PER_FRAME) acc = 0; // fell behind: drop the rest rather than spiral
     if (state.choice) {
       acc = 0; // the pause isn't owed back as a burst of steps when play resumes
-      if (state.choice !== shown) opts.onChoice((shown = state.choice));
+      if (showChoice(gate, state.choice, performance.now())) opts.onChoice(state.choice);
     }
     detectChanges(fx.changes, state, onSquash, onHit, onBlock);
     updateTrail(fx.trail, state.robot.x, state.robot.y, delta);
@@ -335,6 +356,7 @@ export function startGame(
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("blur", onBlur);
     window.removeEventListener("resize", resize);
+    probe.remove();
   }
   return { stop, pick };
 }

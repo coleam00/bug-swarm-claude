@@ -6,16 +6,20 @@ import {
   DuplicateRunEnd,
   findPlayer,
   findRunStart,
+  hiddenKeys,
   playerBest,
+  rankOf,
+  ranking,
   recordRunEnded,
   recordRunStarted,
   teamTotals,
-  topTen,
+  topOf,
   upsertPlayer,
+  type RankEntry,
   type TopRow,
 } from "./db";
 import { ASSET_PATHS, asset } from "./art";
-import { MAX_UPGRADES, checkName, checkScore, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
+import { MAX_UPGRADES, checkName, checkScore, isShownName, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
 
 /**
  * At most this many run starts per client IP per window (architecture.md, "Boundaries"). Sized
@@ -25,7 +29,7 @@ export const RUN_STARTS_PER_WINDOW = 300;
 /** And at most this many per player id per window, so one player can't use up a shared IP's budget. */
 export const RUN_STARTS_PER_PLAYER = 40;
 export const RATE_WINDOW_MS = 10 * 60 * 1000;
-/** Hundreds of clients polling the top 10 cost one query a second. */
+/** Hundreds of clients polling the top 10 and their rank cost one ranking query a second. */
 export const TOP_CACHE_MS = 1000;
 /** Team totals are cached the same way. */
 export const TEAMS_CACHE_MS = TOP_CACHE_MS;
@@ -92,7 +96,7 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
   const playerStarts = new Map<string, number[]>();
   const log = opts.log ?? (() => {});
   let loggedStarts = 0;
-  let topCache: { at: number; top: TopRow[] } | null = null;
+  let rankCache: { at: number; entries: RankEntry[]; top: TopRow[]; hidden: Set<string> } | null = null;
   let teamsCache: { at: number; teams: Record<Team, number> } | null = null;
 
   const app = new Hono();
@@ -197,17 +201,38 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     return c.json({ ok: true });
   });
 
-  app.get("/api/top", (c) => {
+  // One ranking a second feeds the top 10, the board and every player's rank, so they agree.
+  const cachedRanking = () => {
     const t = now();
-    if (!topCache || t - topCache.at >= TOP_CACHE_MS) topCache = { at: t, top: topTen(db) };
-    return c.json({ top: topCache.top });
-  });
-
-  app.get("/api/teams", (c) => {
+    if (!rankCache || t - rankCache.at >= TOP_CACHE_MS) {
+      const entries = ranking(db);
+      rankCache = { at: t, entries, top: topOf(entries), hidden: hiddenKeys(db) };
+    }
+    return rankCache;
+  };
+  const cachedTop = (): TopRow[] => cachedRanking().top;
+  const cachedTeams = (): Record<Team, number> => {
     const t = now();
     if (!teamsCache || t - teamsCache.at >= TEAMS_CACHE_MS) teamsCache = { at: t, teams: teamTotals(db) };
-    return c.json({ teams: teamsCache.teams });
+    return teamsCache.teams;
+  };
+
+  // With ?player=<id>, also where that player stands (`me`, db.ts rankOf). Their best is read
+  // fresh and ranked against the 1 s snapshot, so a run that just finished ranks at once; `row`
+  // points into the snapshot's rows and catches up on the next poll. No player id is ever sent back.
+  app.get("/api/top", (c) => {
+    const { entries, top, hidden } = cachedRanking();
+    const id = c.req.query("player");
+    if (id === undefined || !PLAYER_ID.test(id)) return c.json({ top });
+    const p = findPlayer(db, id);
+    // As the ranking's filters compare: lower(name) against the stored keys, and the word lists.
+    const isHidden = p !== null && (hidden.has(p.name.toLowerCase()) || !isShownName(p.name));
+    return c.json({ top, me: rankOf(entries, id, playerBest(db, id), isHidden) });
   });
+  app.get("/api/teams", (c) => c.json({ teams: cachedTeams() }));
+  // The stream board: the top 10 and the team totals in one read, from the same two caches,
+  // so the board moves from one snapshot to the next and costs no extra query.
+  app.get("/api/board", (c) => c.json({ top: cachedTop(), teams: cachedTeams() }));
 
   app.get("/api/players/:id/best", (c) => c.json({ best: playerBest(db, c.req.param("id")) }));
 

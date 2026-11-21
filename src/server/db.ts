@@ -48,6 +48,8 @@ export function openDb(path: string): Database {
   // One start and one end per run, even under concurrent requests.
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS events_run_type ON events(run_id, type) WHERE run_id IS NOT NULL;");
   db.exec("CREATE INDEX IF NOT EXISTS events_type_at ON events(type, at);");
+  // A player's best is read on every game-over poll (their rank): an index lookup, not a scan.
+  db.exec("CREATE INDEX IF NOT EXISTS events_player_type ON events(player_id, type);");
   db.exec(`CREATE TABLE IF NOT EXISTS players (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -139,23 +141,81 @@ export function recordRunEnded(db: Database, end: RunEnd, at: Date): void {
 
 export type TopRow = { name: string; score: number };
 
+/** One ranked player: their best score and when they first finished a run (the tie order). */
+export type RankEntry = { playerId: string; name: string; score: number; firstAt: string };
+
 /**
- * Best score per player, one row each, highest first (ties go to the player who finished a run
- * first). Leaves out hidden names, and stored names the word lists now refuse (isShownName):
- * those rows stay stored, they are only not shown. The list check runs before the cut to 10, so a
- * refused name that ranks high doesn't shorten the board.
+ * Every player with a finished run, by best score, non-hidden names only, highest first. Ties go
+ * to the player who finished a run first, then to the lower player id, so the order is total.
+ * The top 10 is its first ten rows and a player's rank is their place in it. Stored names the
+ * word lists now refuse (isShownName) are left out too: those rows stay stored, they are only
+ * not shown, and they are dropped before the cut to 10, so a high-ranked one doesn't shorten
+ * the board.
  */
-export function topTen(db: Database): TopRow[] {
+export function ranking(db: Database): RankEntry[] {
   const rows = db
     .query(
-      `SELECT p.name AS name, MAX(e.score) AS score
+      `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(e.at) AS firstAt
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY p.id
-       ORDER BY score DESC, MIN(e.at) ASC`,
+       ORDER BY score DESC, firstAt ASC, p.id ASC`,
     )
-    .all(RUN_ENDED) as TopRow[];
-  return rows.filter((r) => isShownName(r.name)).slice(0, 10);
+    .all(RUN_ENDED) as RankEntry[];
+  return rows.filter((r) => isShownName(r.name));
+}
+
+/** The first ten rows of the ranking: best score per player, one row each. */
+export function topTen(db: Database): TopRow[] {
+  return topOf(ranking(db));
+}
+
+export function topOf(entries: RankEntry[]): TopRow[] {
+  return entries.slice(0, 10).map(({ name, score }) => ({ name, score }));
+}
+
+/** The hidden names' keys (lower case, as the ranking's filter compares them). */
+export function hiddenKeys(db: Database): Set<string> {
+  return new Set((db.query("SELECT name_key FROM hidden_names").all() as { name_key: string }[]).map((r) => r.name_key));
+}
+
+/**
+ * Where a player stands. `rank` is their place among `ranked` visible players (null when hidden
+ * or with no finished run); `next` is the rank just above and the points it takes to pass it;
+ * `row` is their index in the top 10 rows, when they are in them.
+ */
+export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
+
+/**
+ * Ranks a player's best against a ranking. `best` may be fresher than the ranking (a run that
+ * finished since it was read): the player is placed by it, with their first-finish time from the
+ * ranking, or after everyone already in it when they are not in it yet. `row` follows the
+ * ranking as it is, since it points into the rows read with it.
+ */
+export function rankOf(entries: RankEntry[], playerId: string, best: number | null, hidden: boolean): Me {
+  const at = entries.findIndex((e) => e.playerId === playerId);
+  const row = !hidden && at >= 0 && at < 10 ? at : null;
+  if (hidden || best === null) return { rank: null, ranked: entries.length, next: null, row: null };
+  const mine = at >= 0 ? entries[at]! : null;
+  // The ranking's order: score down, then first finish, then id. Not in the ranking yet: their
+  // first finish is after the ranking was read, so after everyone in it.
+  const ahead = (e: RankEntry) =>
+    e.score > best ||
+    (e.score === best && (mine === null || e.firstAt < mine.firstAt || (e.firstAt === mine.firstAt && e.playerId < mine.playerId)));
+  let above: RankEntry | null = null;
+  let count = 0;
+  for (const e of entries) {
+    if (e.playerId === playerId || !ahead(e)) continue;
+    count++;
+    above = e;
+  }
+  const rank = count + 1;
+  return {
+    rank,
+    ranked: entries.length + (mine ? 0 : 1),
+    next: above ? { rank: rank - 1, points: above.score - best + 1 } : null,
+    row,
+  };
 }
 
 /**

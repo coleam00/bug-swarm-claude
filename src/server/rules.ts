@@ -7,11 +7,26 @@ import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./b
 export const POINTS_PER_SQUASH = 10;
 export const POINTS_PER_SECOND = 1;
 
-// Plausibility. Phase 2 tunes these.
+// Plausibility. Not cheat-proof (a non-goal): these only keep an obvious forgery small.
 /** Seconds the client may claim beyond the server's own elapsed time (network and clock jitter). */
 export const ELAPSED_SLACK_SECONDS = 2;
-/** Squashes per second of real elapsed time above which a run can't be real. */
-export const MAX_SQUASHES_PER_SECOND = 6;
+/**
+ * Squashes per second of run time (the submitted `seconds`; a choice pause squashes nothing)
+ * above which a run can't be real. Measured by `bun run pacing --broad` (2,000 mover runs and
+ * 250 idle, 2026-11-21): the most was 4.056 a second (same-ci-drone, seed 19, 560 squashes in
+ * 138 s). A squash takes a bug and bugs come only from the spawn schedule, which spawns at most
+ * 4.9 per second of run time through MAX_RUN_SECONDS (sim.test.ts guards that), so 5 can't
+ * refuse a real run. It is not 1.5x the measured rate: real runs come close to the schedule's
+ * ceiling, and 6.08 would let 120 squashes through in a 20 s run (with the 2 s slack, a forgery
+ * needs over 120 / 22 = 5.45).
+ */
+export const MAX_SQUASHES_PER_SECOND = 5;
+/**
+ * The longest run, in run seconds, the server accepts. The longest measured run is 138 s
+ * (`bun run pacing --broad`) and balance holds every run under 240 s (TARGETS.runMax in
+ * src/web/game/pacing.ts); 300 is the owner's ceiling.
+ */
+export const MAX_RUN_SECONDS = 300;
 
 // Upgrades.
 /**
@@ -199,8 +214,9 @@ export type ScoreCheck = { ok: true } | { ok: false; reason: string };
 
 /**
  * Is this score possible for a run that really lasted `elapsedSeconds` by the server's clock?
- * The score can't exceed 10 per squash plus 1 per (elapsed + slack) second, squashes can't
- * exceed 6 per elapsed second, and the run can't claim more time than really passed (+ slack).
+ * The run can't claim more time than really passed (+ slack) or more than MAX_RUN_SECONDS, the
+ * score can't exceed 10 per squash plus 1 per (elapsed + slack) second, and squashes can't
+ * exceed MAX_SQUASHES_PER_SECOND per claimed second (choice pauses earn none).
  */
 export function checkScore(claim: ScoreClaim, elapsedSeconds: number): ScoreCheck {
   const { score, squashes, seconds } = claim;
@@ -208,12 +224,13 @@ export function checkScore(claim: ScoreClaim, elapsedSeconds: number): ScoreChec
   if (!Number.isInteger(squashes) || squashes < 0) return { ok: false, reason: "squashes" };
   if (!Number.isFinite(seconds) || seconds < 0) return { ok: false, reason: "seconds" };
   const allowedSeconds = elapsedSeconds + ELAPSED_SLACK_SECONDS;
+  if (seconds > allowedSeconds) return { ok: false, reason: "more seconds than really passed" };
+  if (seconds > MAX_RUN_SECONDS) return { ok: false, reason: "run longer than any real run" };
   if (score > POINTS_PER_SQUASH * squashes + POINTS_PER_SECOND * allowedSeconds) {
     return { ok: false, reason: "score too high for the elapsed time" };
   }
-  if (squashes > MAX_SQUASHES_PER_SECOND * elapsedSeconds) {
-    return { ok: false, reason: "too many squashes for the elapsed time" };
+  if (squashes > MAX_SQUASHES_PER_SECOND * seconds) {
+    return { ok: false, reason: "too many squashes for the run's seconds" };
   }
-  if (seconds > allowedSeconds) return { ok: false, reason: "more seconds than really passed" };
   return { ok: true };
 }
