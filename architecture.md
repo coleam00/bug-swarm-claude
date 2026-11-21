@@ -13,7 +13,7 @@
 - Health: `GET /health` answers `200 ok` once the app is ready.
 - Test everything: `bun run check` (`tsc --noEmit`, then `bun test`). CI runs exactly this.
 - The bet's command: `bun run stats`. Moderation: `bun run hide "<name>"`. Balance: `bun run pacing`. Clean slate before the stream: `bun run reset -- --yes` deletes every run and player (hidden names stay); a running server needs no restart.
-- Load test: `bun run load -- --url <base url> [--players 500] [--seconds 60]`. Each simulated player (named `load-0000` up) starts a run, plays 5 to 30 s while polling the top 10 every 4 s, finishes with a score that passes the plausibility check, fetches its best and the top 10 as the game-over screen does, and starts again; runs open at the deadline still finish. It prints requests, statuses and p50/p95/p99 per route, and exits 1 unless 95% of requests took under 200 ms with no 4xx or 5xx and no network error (a 4xx means the test itself is wrong, such as a 429 from a server started without the raised limit). Every simulated player comes from one IP, so the server under test runs with `RUN_STARTS_PER_WINDOW` raised (it defaults to the real 30; anything but a positive whole number stops the server from starting). Never set it in production. The procedure, with a throwaway data folder (never `data/`):
+- Load test: `bun run load -- --url <base url> [--players 500] [--seconds 60]`. Each simulated player (named `load-0000` up) starts a run, plays 5 to 30 s while polling the top 10 every 4 s, finishes with a score that passes the plausibility check, fetches its best and the top 10 as the game-over screen does, and starts again; runs open at the deadline still finish. It prints requests, statuses and p50/p95/p99 per route, and exits 1 unless 95% of requests took under 200 ms with no 4xx or 5xx and no network error (a 4xx means the test itself is wrong, such as a 429 from a server started without the raised limit). Every simulated player comes from one IP, so the server under test runs with `RUN_STARTS_PER_WINDOW` raised (it defaults to the real 300 per IP and 40 per player; setting it lifts both, because a load run of more than a few minutes starts a simulated player more than 40 times; anything but a positive whole number stops the server from starting). Never set it in production. The procedure, with a throwaway data folder (never `data/`):
   - `bun run build`
   - Start the server. bash: `RUN_STARTS_PER_WINDOW=100000 DATA_DIR=<scratch folder> bun run start`. PowerShell: `$env:RUN_STARTS_PER_WINDOW='100000'; $env:DATA_DIR='<scratch folder>'; bun run start`.
   - In a second terminal: `bun run load -- --url http://127.0.0.1:3000`.
@@ -41,7 +41,7 @@
 - `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`; defined in `rules.ts` so the browser can import it, and re-exported here). Schema changes are additive.
 - `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time), `UPGRADE_IDS` and `TEAMS`, all pure and tested.
 - `src/server/blocked-words.ts`: the blocked-word list.
-- `src/server/main.ts`: production entry; reads `PORT`, `DATA_DIR` (default `data/`) and, for load testing only, `RUN_STARTS_PER_WINDOW` (`src/server/limits.ts`).
+- `src/server/main.ts`: production entry; reads `PORT`, `DATA_DIR` (default `data/`), `TRUST_PROXY_HOPS` (see "Client IP behind a proxy") and, for load testing only, `RUN_STARTS_PER_WINDOW` (both parsed in `src/server/limits.ts`).
 - `scripts/stats.ts`, `scripts/hide.ts`, `scripts/reset.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts` (with `scripts/load-lib.ts`, its tested pure half).
 - Tests are `*.test.ts` beside the code.
 
@@ -52,11 +52,18 @@
 - **Top 10 and team totals:** computed from finished, non-hidden runs (`GET /api/top`, `GET /api/teams`), each cached for 1 second so hundreds of clients polling cost one query a second. The game-over screen polls both every 4 s.
 
 ## Hosting
-- Railway, from the `Dockerfile`, with a volume mounted at `DATA_DIR` and GitHub auto-deploy on `main`, so a merged change reaches players within minutes. One instance (SQLite needs one long-running process with a disk). The owner sets up the Railway project; the app only has to honor `PORT` and `DATA_DIR`.
+- Railway, from the `Dockerfile`, with a volume mounted at `DATA_DIR` and GitHub auto-deploy on `main`, so a merged change reaches players within minutes. One instance (SQLite needs one long-running process with a disk). The owner sets up the Railway project; the app only has to honor `PORT` and `DATA_DIR`, and should run with `TRUST_PROXY_HOPS=1`.
+
+### Client IP behind a proxy
+The run start limit counts by client IP, and behind Railway the socket address is Railway's proxy, so the client comes from headers (`pickClientIp` in `src/server/app.ts`):
+- `TRUST_PROXY_HOPS` unset or `0` (the default, the behaviour before the variable existed): `X-Real-IP`, else the rightmost `X-Forwarded-For` entry, else the socket address. It is not "the socket address only".
+- `TRUST_PROXY_HOPS=n`: the n-th `X-Forwarded-For` entry from the right; `X-Real-IP` is ignored. Each trusted proxy appends one entry, so entries a client sends sit further left and can't choose its IP. A missing header, too few entries or an entry that isn't an IP address falls back to the socket address; a bad header never fails the request.
+- On Railway set `TRUST_PROXY_HOPS=1` (the entry Railway's proxy appends). Use `2` if another proxy, such as a CDN, sits in front of Railway.
+- Anything but a whole number from 0 to 10 stops the server from starting.
 
 ## Boundaries
 - No API keys and no outside services. The app starts and `bun run check` passes with no `.env`.
-- Public on the internet during the stream: the API accepts only well-formed requests with capped sizes, at most one score per run id, scores that pass the plausibility check, and at most 30 run starts per IP per 10 minutes (`RUN_STARTS_PER_WINDOW` raises this for `bun run load` only; never set in production).
+- Public on the internet during the stream: the API accepts only well-formed requests with capped sizes, at most one score per run id, scores that pass the plausibility check, and at most 300 run starts per client IP and 40 per player id per 10 minutes, each refused with 429 and `Retry-After` (sized for many phone viewers behind one carrier IP; `RUN_STARTS_PER_WINDOW` raises both for `bun run load` only; never set in production). A refused start spends neither budget; the game still plays, and game over says "Too many runs right now. Your next run will save."
 - Nothing the player does depends on a server response; a run plays with the API down.
 
 ## Decisions deferred

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { createApp } from "./app";
+import { RATE_WINDOW_MS, RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW, clientIpResolver, createApp } from "./app";
 import { RUN_ENDED, computeStats, hideName, openDb, upsertPlayer } from "./db";
 import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, TEAMS, TEST_SHIELD, UPGRADE_IDS, type Team } from "./rules";
 
@@ -75,7 +75,7 @@ describe("run start", () => {
     }
     expect(db.query("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 0 });
     expect(db.query("SELECT COUNT(*) AS n FROM players").get()).toEqual({ n: 0 });
-    for (let i = 0; i < 30; i++) await startRun(a); // the refused starts used none of the 30
+    for (let i = 0; i < RUN_STARTS_PER_PLAYER; i++) await startRun(a); // the refused starts used none of the budget
   });
 
   test("a team is set once: a different team sent later is ignored, not switched", async () => {
@@ -94,39 +94,93 @@ describe("run start", () => {
     expect(await res.json()).toEqual({ error: "name", reason: "blocked" });
   });
 
-  test("the 31st start from one IP in 10 minutes is 429; other IPs are fine; it resets", async () => {
+  test("300 starts from one IP in 10 minutes are fine; the 301st is 429 with Retry-After; other IPs are fine; it resets", async () => {
     const a = app();
-    for (let i = 0; i < 30; i++) await startRun(a);
-    expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo", team: TABS })).status).toBe(429);
+    // Many players behind one public IP (carrier NAT): a player id each, so the per-player cap never trips.
+    const natPlayer = (i: number) => `nat-${String(i).padStart(6, "0")}`;
+    for (let i = 0; i < RUN_STARTS_PER_WINDOW; i++) await startRun(a, natPlayer(i));
+    clock += 60_000;
+    const refused = await post(a, "/api/runs", { playerId: natPlayer(9999), name: "Robo", team: TABS });
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({ error: "rate" });
+    expect(refused.headers.get("retry-after")).toBe(String(9 * 60)); // the oldest start leaves the window in 9 minutes
     ip = "2.2.2.2";
-    await startRun(a);
+    await startRun(a, natPlayer(9999));
     ip = "1.1.1.1";
-    clock += 10 * 60 * 1000;
+    clock += 9 * 60 * 1000;
+    await startRun(a, natPlayer(9999));
+  }, 30_000);
+
+  test("one player id gets 40 starts in 10 minutes, from any IPs; the 41st is 429 with Retry-After; other players are fine", async () => {
+    const a = app();
+    for (let i = 0; i < RUN_STARTS_PER_PLAYER; i++) {
+      ip = `198.51.100.${i}`;
+      await startRun(a);
+    }
+    ip = "203.0.113.9";
+    const refused = await post(a, "/api/runs", { playerId: "player-0001", name: "Robo", team: TABS });
+    expect(refused.status).toBe(429);
+    expect(await refused.json()).toEqual({ error: "rate" });
+    expect(refused.headers.get("retry-after")).toBe(String(RATE_WINDOW_MS / 1000));
+    await startRun(a, "player-0002");
+    clock += RATE_WINDOW_MS;
     await startRun(a);
   });
 
-  test("runStartsPerWindow sets the limit: with 2, the 3rd start is 429", async () => {
+  test("a start one cap refuses spends neither budget", async () => {
+    const a = createApp(db, { now: () => clock, clientIp: () => ip, runStartsPerWindow: RUN_STARTS_PER_PLAYER + 1 });
+    for (let i = 0; i < RUN_STARTS_PER_PLAYER; i++) await startRun(a);
+    expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" })).status).toBe(429); // player cap
+    await startRun(a, "player-0002"); // the IP's 41st: the refused start didn't take it
+    const both = await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" }); // both caps refuse
+    expect(both.status).toBe(429);
+    expect(both.headers.get("retry-after")).toBe(String(RATE_WINDOW_MS / 1000));
+  });
+
+  test("runStartsPerWindow sets the IP limit: with 2, the 3rd start is 429", async () => {
     const a = createApp(db, { now: () => clock, clientIp: () => ip, runStartsPerWindow: 2 });
+    await startRun(a, "player-0001");
+    await startRun(a, "player-0002");
+    expect((await post(a, "/api/runs", { playerId: "player-0003", name: "Robo", team: TABS })).status).toBe(429);
+  });
+
+  test("runStartsPerPlayer sets the player limit: with 2, the 3rd start is 429", async () => {
+    const a = createApp(db, { now: () => clock, clientIp: () => ip, runStartsPerPlayer: 2 });
     await startRun(a);
     await startRun(a);
     expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" })).status).toBe(429);
   });
 
+  /** A start through a proxy that sends `headers`, as player `n`. */
+  const startVia = (a: App, n: number, headers: Record<string, string>) =>
+    a.request("/api/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({ playerId: `player-${String(n).padStart(4, "0")}`, name: "Robo", team: TABS }),
+    });
+
   test("by default the client is X-Real-IP, else the rightmost X-Forwarded-For entry", async () => {
-    const a = createApp(db, { now: () => clock });
-    const start = (headers: Record<string, string>) =>
-      a.request("/api/runs", {
-        method: "POST",
-        headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ playerId: "player-0001", name: "Robo", team: TABS }),
-      });
-    for (let i = 0; i < 30; i++) {
-      expect((await start({ "x-real-ip": "9.9.9.9", "x-forwarded-for": `10.0.0.${i}` })).status).toBe(200);
+    const a = createApp(db, { now: () => clock, runStartsPerWindow: 3 });
+    for (let i = 0; i < 3; i++) {
+      expect((await startVia(a, i, { "x-real-ip": "9.9.9.9", "x-forwarded-for": `10.0.0.${i}` })).status).toBe(200);
     }
-    expect((await start({ "x-real-ip": "9.9.9.9" })).status).toBe(429);
-    expect((await start({ "x-forwarded-for": "9.9.9.9" })).status).toBe(429);
-    expect((await start({ "x-forwarded-for": "9.9.9.9, 8.8.8.8" })).status).toBe(200);
+    expect((await startVia(a, 3, { "x-real-ip": "9.9.9.9" })).status).toBe(429);
+    expect((await startVia(a, 4, { "x-forwarded-for": "9.9.9.9" })).status).toBe(429);
+    expect((await startVia(a, 5, { "x-forwarded-for": "9.9.9.9, 8.8.8.8" })).status).toBe(200);
   });
+
+  test("300 viewers through one proxy each get their own budget, by default and with TRUST_PROXY_HOPS=1", async () => {
+    // Hono's test requests have no socket: every start comes from the same peer, as behind Railway.
+    const byDefault = createApp(db, { now: () => clock, runStartsPerWindow: 1 });
+    const hops1 = createApp(db, { now: () => clock, runStartsPerWindow: 1, clientIp: clientIpResolver(1, () => "100.64.0.1") });
+    for (let i = 0; i < RUN_STARTS_PER_WINDOW; i++) {
+      const client = `198.51.${Math.floor(i / 256)}.${i % 256}`;
+      expect((await startVia(byDefault, i, { "x-forwarded-for": client })).status).toBe(200);
+      // A client prepending its own entries changes nothing: the proxy's entry is the rightmost.
+      expect((await startVia(hops1, i, { "x-forwarded-for": `6.6.6.6, ${client}` })).status).toBe(200);
+    }
+    expect((await startVia(hops1, 0, { "x-forwarded-for": "7.7.7.7, 198.51.0.0" })).status).toBe(429);
+  }, 30_000);
 
   test("an oversize body is 413, with or without a content-length", async () => {
     const body = JSON.stringify({ playerId: "player-0001", name: "x".repeat(3000) });
