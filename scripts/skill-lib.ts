@@ -3,8 +3,8 @@
 // (one life per policy per seed, alone); aiming late joiners living at least 0.8x as long as early
 // ones (the mover's ratio is reported, not gated); and an idle newcomer living at least 10 s at
 // every arena age (newcomers joining seeded arenas that aimer bots have played in). The dasher
-// (#60) is printed beside the first gate and against the aimer, not gated. Tested in
-// skill-lib.test.ts on a few seeds.
+// (#60) is printed beside the first gate and against the aimer, not gated; so is the server's fill
+// bot (#66), placed between 2x the mover and the aimer. Tested in skill-lib.test.ts on a few seeds.
 import { DASH_TICKS, DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
@@ -212,7 +212,7 @@ export const BACKGROUND_BOTS = 3;
  * The policies the late gate gates (owner ruling, 2026-11-21): the aimer. The mover's late ratio is
  * measured and printed but not gated: an early mover lives long only because the fresh aimer bots
  * beside it clear its bugs, which says nothing about pacing (that is proven tick for tick in
- * bugs.test.ts). Re-measure once fill bots and revive land.
+ * bugs.test.ts). Fill bots (#66) do not change it: this background stays plain aimer bots.
  */
 export const LATE_POLICIES = ["aimer"] as const satisfies readonly PolicyName[];
 /** Policies whose late ratio is reported alongside the gate, not gated. */

@@ -249,7 +249,7 @@ export class Room {
    * Fill bots, at the start of a tick: bots marked to leave go once out of a life (never
    * respawning first: a respawn takes RESPAWN_DELAY_S of presses), the arena is topped up to the
    * fill target (their joins go out before this tick's snapshot), and every bot's policy writes
-   * its input for this step, in place. Nothing here allocates once the bots exist.
+   * its input for this step, in place (no new input objects; adding a bot allocates its state).
    */
   private driveBots(): void {
     if (this.fillTo > 0 && this.members.size > 0) {
