@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { TEAMS } from "../server/rules";
-import { changeName, nameMessage, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type StartView } from "./start";
+import { BOT_NAME_MESSAGE, changeName, nameMessage, openingNotice, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type StartView } from "./start";
 
 const id = "0123456789abcdef0123456789abcdef";
 const [TABS, SPACES] = TEAMS;
@@ -71,4 +71,14 @@ test("a stored name the rules now refuse: an empty field, the team kept, and the
   expect(view).toEqual({ kind: "entry", name: "", team: TABS, message: "Pick a different name" });
   expect(teamLocked(view, SPACES)).toBe(true);
   expect(pressEnter(view, "Robo")).toEqual({ kind: "start", name: "Robo", team: TABS });
+});
+
+test("sent back by the arena for a bot name: the name field, filled in, says why", () => {
+  const notice = openingNotice(false, "bot alice");
+  expect(notice).toBe(BOT_NAME_MESSAGE);
+  expect(startView({ id, name: "bot alice", team: SPACES }, notice)).toEqual({ kind: "entry", name: "bot alice", team: SPACES, message: BOT_NAME_MESSAGE });
+  // A name the rules now refuse says so first; any other arena refusal asks for a different name.
+  expect(openingNotice(true, "bot alice")).toBe(REFUSED);
+  expect(openingNotice(false, "Robo")).toBe(REFUSED);
+  expect(openingNotice(false, null)).toBeNull();
 });

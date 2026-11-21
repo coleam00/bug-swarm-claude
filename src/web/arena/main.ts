@@ -11,7 +11,7 @@ import { createFpsMeter, tickFps } from "../game/fps";
 import { createTrail, updateTrail } from "../game/fx/trail";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { loadPlayer, nextScreen, setPlayerName } from "../player";
+import { loadPlayer, nextScreen, noteArenaRefusedName } from "../player";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createControls, pointerDown, pointerMove, pointerUp, readControls, releaseAll, type PointerKind } from "./controls";
 import { createInterp, newestPlayers, pushSnapshot, renderTick, resetInterp, sample } from "./interp";
@@ -92,8 +92,9 @@ function start(playerId: string, name: string, team: Team): void {
         if (text !== null) statusEl.textContent = text;
       },
       refused: (code) => {
-        // The server's name rules refused the name (or the team): `/` asks for a new one.
-        if (code === ERROR_NAME) setPlayerName(null);
+        // The server refused the name (a "bot ..." name, which `/` still accepts) or the team:
+        // `/` keeps the name and says why on its start screen.
+        if (code === ERROR_NAME) noteArenaRefusedName(name);
         location.replace("/");
       },
     },

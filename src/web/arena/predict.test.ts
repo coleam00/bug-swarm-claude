@@ -5,7 +5,7 @@ import { PLAYER_RADIUS } from "../../shared/arena/constants";
 import { encodeSnapshotPlayers } from "../../shared/arena/protocol";
 import { ROBOT_RADIUS } from "../game/config";
 import { clampInput, createArena, joinPlayer, stepArena, type Input, type Player } from "../../shared/arena/sim";
-import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor, SNAP_DISTANCE } from "./predict";
+import { MAX_PENDING, createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor, SNAP_DISTANCE } from "./predict";
 
 /** A wandering input sequence: turns, stops and diagonals. */
 function inputs(n: number): Input[] {
@@ -73,6 +73,31 @@ describe("prediction", () => {
     for (let i = 0; i < 60; i++) decayCorrection(client, 1 / 60);
     predictedAt(client, 1, out);
     expect(Math.hypot(out.x - client.x, out.y - client.y)).toBeLessThan(0.01);
+  });
+
+  test("a correction moves nothing on screen at the moment it lands, at any point between steps", () => {
+    const p = createPredictor();
+    resetPredictor(p, 500, 500);
+    for (let seq = 1; seq <= 4; seq++) predictLocal(p, clampInput({ seq, mx: 1, my: 0.5, aim: 0, fire: false, dash: false }));
+    const before = { x: 0, y: 0 };
+    const after = { x: 0, y: 0 };
+    for (const alpha of [0, 0.3, 0.7]) {
+      const q = structuredClone(p);
+      predictedAt(q, alpha, before);
+      // The server has you 4 units back and 2 up after input 2; inputs 3 and 4 replay from there.
+      reconcile(q, 500 + 6 + 18 - 4, 500 + 3 + 9 + 2, 240, 120, 2);
+      predictedAt(q, alpha, after);
+      expect(after.x).toBeCloseTo(before.x, 9);
+      expect(after.y).toBeCloseTo(before.y, 9);
+    }
+  });
+
+  test("at most MAX_PENDING unacknowledged inputs are kept, the oldest dropped", () => {
+    const p = createPredictor();
+    resetPredictor(p, 500, 500);
+    for (let seq = 1; seq <= MAX_PENDING + 5; seq++) predictLocal(p, clampInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash: false }));
+    expect(p.pending.length).toBe(MAX_PENDING);
+    expect(p.pending[0]!.seq).toBe(6);
   });
 
   test("a huge correction snaps instead of sliding across the arena", () => {
