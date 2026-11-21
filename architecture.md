@@ -19,7 +19,9 @@
 - `src/web/App.tsx`: name and team entry, the canvas, the game-over screen.
 - `src/web/game/`: the game in plain TypeScript.
   - The simulation (robot, bugs, shots, hits, upgrades, spawn ramp) is pure: it advances by a time step from input and state, with no canvas, DOM or clock access, so `bun test` covers it.
-  - The loop runs on `requestAnimationFrame` with a fixed time step and draws the state to the canvas, scaled to the screen in portrait or landscape.
+  - The loop (`loop.ts`) runs on `requestAnimationFrame` with a fixed time step and draws the state to the canvas, scaled to the screen in portrait or landscape.
+  - Drawing: `render.ts` draws a frame from the state and the effects; `sprites.ts` pre-renders the floor, glows, bug and robot sprites on offscreen canvases (rebuilt only when the resolution changes); `look.ts` holds every colour and size, with one entry per bug kind.
+  - Effects (`fx/`): pure, pooled in typed arrays, tested without a canvas. `changes.ts` finds squashes and hits by comparing the bug list between frames, so the simulation needs no event hooks; effects use their own seeded generator, never the simulation's.
   - Input: touch drag (the robot moves toward the finger), WASD and arrow keys, mouse steering, 1-3 or tap to pick an upgrade, F for the frame-rate readout on desktop.
   - The API client starts a run and submits its score without blocking the loop; failures are logged and the game-over screen says the score wasn't saved.
 - `src/web/board/`: the `/board` page for the stream (top 10 and team totals, big type, polls the API).
