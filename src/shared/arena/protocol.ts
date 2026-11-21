@@ -23,10 +23,13 @@ export const EVENT_KINDS = ["join", "leave", "over", "down", "revive"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 export const [JOIN, LEAVE, OVER, DOWN, REVIVE] = EVENT_KINDS;
 
-/** Why the server refused a hello. The socket closes after each. */
-export const ERROR_CODES = ["version", "name", "team", "hello"] as const;
+/**
+ * Why the server closed the socket: a refused hello (version, name, team, no hello in time), or
+ * the server stopping for a redeploy (restarting: reconnect). The socket closes after each.
+ */
+export const ERROR_CODES = ["version", "name", "team", "hello", "restarting"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
-export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO] = ERROR_CODES;
+export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO, ERROR_RESTARTING] = ERROR_CODES;
 
 /** The longest name a hello may carry before the server's name rules (rules.ts) even look at it. */
 export const HELLO_NAME_MAX = 64;

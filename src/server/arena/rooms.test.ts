@@ -101,12 +101,6 @@ describe("joining", () => {
     expect(rooms.join("Cy", "tabs", INFO, client().send).room).toBe(2);
   });
 
-  test("close stops every timer", () => {
-    const { rooms, timers } = setup();
-    for (let i = 0; i < 25; i++) rooms.join(`p${i}`, "tabs", INFO, client().send);
-    rooms.close();
-    expect(timers.size).toBe(0);
-  });
 });
 
 describe("ticking", () => {
@@ -236,6 +230,44 @@ describe("lives", () => {
     // Leaving while out saves nothing more.
     rooms.leave(ja.room, ja.entity);
     expect(saved.length).toBe(1);
+  });
+
+  test("endAll (the server stopping) ends and saves every life in progress, with its score, once", () => {
+    const saved: LifeRecord[] = [];
+    const { rooms, timers, tick } = setup((r) => saved.push(r));
+    const key = (i: number) => i.toString(16).padStart(32, "0");
+    // A full arena and one more player in a second.
+    for (let i = 0; i <= MAX_PLAYERS_PER_ARENA; i++) rooms.join(`p${i}`, "tabs", { playerKey: key(i), touch: false }, client().send);
+    expect(rooms.stats().arenas.map((a) => a.players)).toEqual([MAX_PLAYERS_PER_ARENA, 1]);
+    const room = rooms.room(1)!;
+    const [scorer, downed, out] = [room.state.players[0]!, room.state.players[1]!, room.state.players[2]!];
+    tick(30);
+    scorer.score = 70;
+    scorer.kills = 4;
+    // One player out (down, then bled out), one down and waiting for a revive.
+    for (const p of [out, downed]) {
+      p.invulnTicks = 0;
+      p.protectTicks = 0;
+      p.hits = HITS_PER_LIFE - 1;
+      placeBug(room.state, p.x + 5, p.y);
+      tick();
+      expect(p.down).toBe(true);
+    }
+    out.downTick = room.state.tick - DOWN_TICKS;
+    tick();
+    expect([out.alive, downed.down]).toEqual([false, true]);
+    expect(saved.map((r) => r.playerKey)).toEqual([key(2)]);
+    saved.length = 0;
+
+    expect(rooms.endAll()).toBe(MAX_PLAYERS_PER_ARENA);
+    // Everyone with a life, the downed player and the one in the second arena included; not the out one.
+    expect(saved.map((r) => r.playerKey).sort()).toEqual([...Array(MAX_PLAYERS_PER_ARENA + 1).keys()].filter((i) => i !== 2).map(key).sort());
+    expect(saved.find((r) => r.playerKey === key(0))).toMatchObject({ name: "p0", score: 70, kills: 4 });
+    expect(rooms.stats().arenas).toEqual([]);
+    expect(timers.size).toBe(0);
+    // Nothing is saved twice.
+    expect(rooms.endAll()).toBe(0);
+    expect(saved.length).toBe(MAX_PLAYERS_PER_ARENA);
   });
 
   test("leaving in the middle of a life saves it once", () => {

@@ -356,6 +356,33 @@ test(
   TIMEOUT,
 );
 
+test(
+  "stopping the server (a redeploy) saves every life in progress with its score and tells every client it is restarting",
+  async () => {
+    const [ka, kb] = ["a".repeat(32), "b".repeat(32)];
+    const a = await connect();
+    const b = await connect();
+    a.send(encodeHello(PROTOCOL_VERSION, "Ada", "tabs", ka, false));
+    b.send(encodeHello(PROTOCOL_VERSION, "Bob", "spaces", kb, true));
+    for (const c of [a, b]) await c.waitFor("a snapshot", () => c.got.some((m) => m.t === "snapshot"));
+    // Ada has points mid-life.
+    const room = srv.rooms.room(1)!;
+    room.state.players.find((p) => p.name === "Ada")!.score = 85;
+    expect(await srv.stop()).toBe(2);
+    for (const c of [a, b]) {
+      expect(await c.closed).toBe(1012);
+      expect(c.got.at(-1)).toEqual({ t: "error", code: "restarting" });
+    }
+    // Saved before stop resolved: the caller closes the database next.
+    expect([playerBest(db, ka), playerBest(db, kb)]).toEqual([85, 0]);
+    expect(computeStats(db)).toMatchObject({ players: 2, finishedRuns: 2 });
+    expect(srv.rooms.stats().arenas).toEqual([]);
+    // A second stop (the afterEach) is the same stop.
+    expect(await srv.stop()).toBe(2);
+  },
+  TIMEOUT,
+);
+
 /** Where `id` was in the latest snapshot `c` received. */
 function posOf(c: Client, id: number): [number, number] | null {
   for (let i = c.got.length - 1; i >= 0; i--) {

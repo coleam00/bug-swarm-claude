@@ -118,17 +118,24 @@ export class Room {
     return player;
   }
 
+  /** Every member's entity id, as a new array (safe to remove members while walking it). */
+  memberIds(): number[] {
+    return [...this.members.keys()];
+  }
+
   /**
    * Removes a member and tells everyone left. A life in progress ends here and is saved, so a
-   * disconnect never loses a score (a reconnect starts a new life).
+   * disconnect or a server shutting down never loses a score (a reconnect starts a new life).
+   * Returns true when it ended a life (false for a member already out, or not here).
    */
-  remove(id: number, nowMs: number): void {
+  remove(id: number, nowMs: number): boolean {
     const m = this.members.get(id);
-    if (!m) return;
+    if (!m) return false;
     this.members.delete(id);
     const left = leavePlayer(this.state, id);
     if (left?.life) this.lifeEnded(m, left.life, nowMs);
     this.broadcast({ t: EVENT, kind: LEAVE, id });
+    return Boolean(left?.life);
   }
 
   /**

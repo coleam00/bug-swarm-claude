@@ -111,10 +111,19 @@ export class Rooms {
     };
   }
 
-  /** Stops every arena's timer. */
-  close(): void {
-    for (const { stop } of this.rooms.values()) stop();
+  /**
+   * The server is stopping: takes every player out of every arena, which ends and saves each life
+   * in progress with its score so far (Room.remove), then stops every timer and forgets the arenas.
+   * Returns how many lives it ended. Sends nothing to the players.
+   */
+  endAll(): number {
+    let ended = 0;
+    for (const { room, stop } of this.rooms.values()) {
+      for (const id of room.memberIds()) if (room.remove(id, this.now())) ended++;
+      stop();
+    }
     this.rooms.clear();
+    return ended;
   }
 
   /** The fullest arena with room (ties: the lowest id), else a new one. */

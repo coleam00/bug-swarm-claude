@@ -84,7 +84,7 @@ export type LifeSummary = { score: number; kills: number; seconds: number };
 
 /** What the arena tells the page around it. */
 export type ArenaEvents = {
-  /** "Connecting...", "Reconnecting...", "Reload to update", or null when playing. */
+  /** "Connecting...", "Reconnecting...", "Updating...", "Reload to update", or null when playing. */
   status(text: string | null): void;
   /** The server refused the name (hidden, a bot name) or the team: the arena has stopped connecting. */
   refused(code: ErrorCode): void;
@@ -256,7 +256,8 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
 
   const conn = connectArena(
     { name: player.name, team: player.team, player: player.id, touch: () => controls.touched || coarsePointer() },
-    { message: onMessage, status: on.status, refused: on.refused },
+    // A redeploy with a new build: load it (the life before was saved by the server).
+    { message: onMessage, status: on.status, refused: on.refused, newBuild: () => location.reload() },
   );
 
   // Layout: the canvas at device resolution, the camera's view, the safe-area insets.

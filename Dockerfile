@@ -12,4 +12,6 @@ RUN bun run build
 # from the platform; DATA_DIR must point at a mounted persistent volume.
 ENV NODE_ENV=production
 EXPOSE 3000
-CMD ["bun", "run", "start"]
+# The server itself, not `bun run start`: as PID 1 it gets the platform's SIGTERM directly and
+# saves every life in progress before it exits (src/server/main.ts).
+CMD ["bun", "src/server/main.ts"]

@@ -9,12 +9,16 @@
 // A hidden name (`bun run hide`, or a stored name the word lists now refuse) is refused at hello,
 // and every HIDE_SWEEP_MS the joined sockets are checked against it, off the tick: a name hidden
 // mid-life gets the same `error name` and close, and leaving saves its life as a disconnect does.
+// When the server stops (a redeploy), `restart` sends every socket `error restarting` and closes it
+// (the lives were already ended and saved, Rooms.endAll); from then on any socket is refused the same
+// way, so a quick reconnect can't join an arena on a server that is going away.
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
   ERROR_HELLO,
   ERROR_NAME,
+  ERROR_RESTARTING,
   ERROR_TEAM,
   ERROR_VERSION,
   HELLO,
@@ -36,6 +40,8 @@ export const PING_MS = 5000;
 export const SILENT_MS = 15_000;
 /** The WebSocket close code for a refused hello (policy violation). */
 export const CLOSE_REFUSED = 1008;
+/** The WebSocket close code for a server restarting (a redeploy): come back later. */
+export const CLOSE_RESTARTING = 1012;
 /** How often joined sockets are checked for a name hidden since they joined, ms. */
 export const HIDE_SWEEP_MS = 2000;
 
@@ -71,6 +77,13 @@ export type ArenaSocketOptions = {
 export type ArenaSockets = WebSocketHandler<SocketData> & {
   /** Stops the hidden-name sweep (the server is stopping). */
   stop(): void;
+  /**
+   * The server is stopping: sends every open socket `error restarting` and closes it, and refuses
+   * every later one the same way. Call it after Rooms.endAll: it does not leave the arenas.
+   */
+  restart(): void;
+  /** Sockets open now, welcomed or not. */
+  readonly openCount: number;
 };
 
 export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}): ArenaSockets {
@@ -80,11 +93,19 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
   const sweepMs = opts.sweepMs ?? HIDE_SWEEP_MS;
   /** The welcomed sockets, which the sweep checks. */
   const joined = new Set<ServerWebSocket<SocketData>>();
+  /** Every open socket, for restart. */
+  const all = new Set<ServerWebSocket<SocketData>>();
+  let restarting = false;
   let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   const refuse = (ws: ServerWebSocket<SocketData>, code: ErrorCode) => {
     ws.send(JSON.stringify({ t: ERROR, code }));
     ws.close(CLOSE_REFUSED, code);
+  };
+
+  const sendRestarting = (ws: ServerWebSocket<SocketData>) => {
+    ws.send(JSON.stringify({ t: ERROR, code: ERROR_RESTARTING }));
+    ws.close(CLOSE_RESTARTING, ERROR_RESTARTING);
   };
 
   const stopSweep = () => {
@@ -120,8 +141,24 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
 
   return {
     stop: stopSweep,
+    restart() {
+      restarting = true;
+      stopSweep();
+      joined.clear();
+      for (const ws of all) {
+        // The arenas are gone (Rooms.endAll): the close must not leave one again.
+        ws.data.room = null;
+        ws.data.entity = null;
+        sendRestarting(ws);
+      }
+    },
+    get openCount() {
+      return all.size;
+    },
     maxPayloadLength: MAX_FRAME_BYTES,
     open(ws) {
+      all.add(ws);
+      if (restarting) return sendRestarting(ws);
       ws.data.helloTimer = setTimeout(() => refuse(ws, ERROR_HELLO), HELLO_TIMEOUT_MS);
       ws.data.lastHeard = now();
       ws.data.liveTimer = setInterval(() => {
@@ -139,7 +176,8 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       if (!m) return;
       const { room, entity } = ws.data;
       if (m.t === HELLO) {
-        if (room === null) hello(ws, m);
+        if (restarting) sendRestarting(ws);
+        else if (room === null) hello(ws, m);
         return;
       }
       if (room === null || entity === null) return;
@@ -147,6 +185,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash });
     },
     close(ws) {
+      all.delete(ws);
       joined.delete(ws);
       if (joined.size === 0) stopSweep();
       if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
