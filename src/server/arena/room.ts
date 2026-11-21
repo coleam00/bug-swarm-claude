@@ -2,7 +2,7 @@
 // that steps it and sends every member a snapshot. No timers and no clock of its own: rooms.ts
 // drives `advance` from its timer, so tests step it by hand. A life that ends (out, or its player
 // leaving) is handed to `onLifeEnd` as a LifeRecord; the server saves it off the tick (lives.ts).
-import { BUG_KINDS, DT, HITS_PER_LIFE, INPUT_BUFFER, INPUT_STALE_TICKS, TICK_MS } from "../../shared/arena/constants";
+import { BUG_KINDS, HITS_PER_LIFE, INPUT_BUFFER, INPUT_STALE_TICKS, TICK_MS } from "../../shared/arena/constants";
 import { mult } from "../../shared/arena/combat";
 import {
   EVENT,
@@ -184,7 +184,7 @@ export class Room {
 
   /** Hands a finished life on to be saved, and tells its player (if still connected) it is over. */
   private lifeEnded(m: Member, life: LifeEnd, nowMs: number): void {
-    const seconds = life.ticks * DT;
+    const seconds = (life.ticks * TICK_MS) / 1000; // ticks * DT would leave float noise
     this.onLifeEnd({
       playerKey: m.playerKey,
       name: m.player.name,

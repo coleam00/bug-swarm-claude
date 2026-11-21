@@ -1,17 +1,22 @@
-// `bun run bots -- --url <base url> [--count 18] [--seconds 60]`: real WebSocket clients named
-// bots-01, bots-02, ... (alternating teams) join the arena 25 ms apart, wander and sweep their aim,
-// sending one input every 50 ms, for the given time. Then it prints joins, the arenas used,
-// messages received per second, errors (error messages, failed connects, unexpected closes) and
-// the server's tick p50/p95 from /api/arena/stats, closes every socket, and exits 1 on any error.
-// Not part of `bun run check`: it needs a running server. bots-lib.ts, its pure half, is tested.
+// `bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer]`:
+// real WebSocket clients named bots-01, bots-02, ... (alternating teams) join the arena 25 ms
+// apart and play, sending one input every 50 ms, for the given time: by default with the aimer
+// policy (src/shared/arena/policies.ts), which aims, fires in bursts and respawns; `wander` walks
+// and sweeps its aim without firing. Then it prints joins, the arenas used, messages received per
+// second, lives ended and their median score, errors (error messages, failed connects, unexpected
+// closes) and the server's tick p50/p95 from /api/arena/stats, closes every socket, and exits 1 on
+// any error. Every bot life is saved like a person's: point it only at a server with a scratch
+// DATA_DIR. Not part of `bun run check`: it needs a running server. bots-lib.ts is tested.
 import { PROTOCOL_VERSION, TICK_MS } from "../src/shared/arena/constants";
+import { POLICIES, createMemory, type PolicyInput, type PolicyMemory } from "../src/shared/arena/policies";
 import { createRng } from "../src/shared/arena/rng";
-import { ERROR, SNAPSHOT, WELCOME, encodeHello, encodeInput, parseServerMessage } from "../src/shared/arena/protocol";
+import { ERROR, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, parseServerMessage } from "../src/shared/arena/protocol";
 import type { ArenaStats } from "../src/server/arena/rooms";
 import {
   USAGE,
   botName,
   botTeam,
+  createObservationTracker,
   createTally,
   createWander,
   formatSummary,
@@ -20,6 +25,7 @@ import {
   stepWander,
   wsUrl,
   type BotsArgs,
+  type ObservationTracker,
   type Wander,
 } from "./bots-lib";
 
@@ -34,7 +40,18 @@ try {
   process.exit(1);
 }
 
-type Bot = { ws: WebSocket; you: number | null; x: number; y: number; seq: number; wander: Wander; closing: boolean; closed: Promise<void> };
+type Bot = {
+  ws: WebSocket;
+  you: number | null;
+  x: number;
+  y: number;
+  seq: number;
+  wander: Wander;
+  seen: ObservationTracker;
+  memory: PolicyMemory;
+  closing: boolean;
+  closed: Promise<void>;
+};
 
 const tally = createTally();
 const bots: Bot[] = [];
@@ -44,7 +61,18 @@ const url = wsUrl(args.url);
 function open(i: number): void {
   const ws = new WebSocket(url);
   let resolveClosed: () => void = () => {};
-  const bot: Bot = { ws, you: null, x: 0, y: 0, seq: 0, wander: createWander(), closing: false, closed: new Promise((r) => (resolveClosed = r)) };
+  const bot: Bot = {
+    ws,
+    you: null,
+    x: 0,
+    y: 0,
+    seq: 0,
+    wander: createWander(),
+    seen: createObservationTracker(),
+    memory: createMemory(),
+    closing: false,
+    closed: new Promise((r) => (resolveClosed = r)),
+  };
   bots.push(bot);
   let opened = false;
   ws.addEventListener("open", () => {
@@ -61,11 +89,12 @@ function open(i: number): void {
       bot.you = m.you;
       console.log(`${botName(i)} joined arena ${m.arena} as entity ${m.you}`);
     } else if (m.t === SNAPSHOT) {
-      for (const p of m.p) {
-        if (p[0] !== bot.you) continue;
-        bot.x = p[1];
-        bot.y = p[2];
-      }
+      if (bot.you === null) return;
+      bot.seen.update(m, bot.you);
+      bot.x = bot.seen.obs.self.x;
+      bot.y = bot.seen.obs.self.y;
+    } else if (m.t === EVENT && m.kind === OVER) {
+      tally.lives.push(m.score ?? 0);
     } else if (m.t === ERROR) {
       tally.errors.push(`error ${m.code}`);
     }
@@ -82,12 +111,16 @@ for (let i = 1; i <= args.count; i++) {
   await Bun.sleep(JOIN_GAP_MS);
 }
 
-const out = { mx: 0, my: 0, aim: 0 };
+const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
 const inputs = setInterval(() => {
   for (const bot of bots) {
     if (bot.you === null || bot.ws.readyState !== WebSocket.OPEN) continue;
-    stepWander(bot.wander, rng, bot.x, bot.y, out);
-    bot.ws.send(encodeInput({ seq: ++bot.seq, mx: out.mx, my: out.my, aim: out.aim, fire: false, dash: false }));
+    if (args.policy === "wander") {
+      stepWander(bot.wander, rng, bot.x, bot.y, out);
+      out.fire = false;
+      out.dash = false;
+    } else POLICIES[args.policy](bot.seen.obs, bot.memory, rng, out);
+    bot.ws.send(encodeInput({ seq: ++bot.seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash }));
   }
 }, TICK_MS);
 
