@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   CRAWLER_SPEED,
   DT,
-  FIRST_LIFE_EASY_S,
   MAX_BUGS_PER_ARENA,
   SPAWN_BASE_PER_S,
   SPAWN_DIST_MAX,
@@ -17,6 +16,10 @@ import { POLICIES, createMemory, createObservation, observe, type PolicyInput } 
 import { createRng } from "./rng";
 import { clampInput, createArena, joinPlayer, stepArena, wave, type ArenaState, type Bug } from "./sim";
 import { arenaWith, placeBug, stepQuiet } from "./testkit";
+
+/** The item's numbers (#58), written out so a test fails if a constant drifts from them. */
+const ITEM_EASY_S = 10;
+const ITEM_PROTECT_S = 2;
 
 /** Steps with every player untouchable and standing still; returns how many bugs spawned. */
 function stepSpawning(a: ArenaState, ticks: number, onSpawn?: (bug: Bug) => void): number {
@@ -37,9 +40,9 @@ describe("personal spawn budget", () => {
     expect(spawnRate(60)).toBeGreaterThan(spawnRate(30));
     expect(spawnRate(10_000)).toBe(SPAWN_MAX_PER_S);
     const { a } = arenaWith([1200, 1200]);
-    // The integral of the rate over the first 30 s of a first life (held back FIRST_LIFE_EASY_S).
+    // The integral of the rate over the first 30 s of a first life (held back 10 s).
     let owed = 0;
-    for (let t = 0; t < 30 / DT; t++) owed += spawnRate(Math.max(0, t * DT - FIRST_LIFE_EASY_S)) * DT;
+    for (let t = 0; t < 30 / DT; t++) owed += spawnRate(Math.max(0, t * DT - ITEM_EASY_S)) * DT;
     expect(Math.abs(stepSpawning(a, 30 / DT) - owed)).toBeLessThanOrEqual(1);
   });
 
@@ -116,21 +119,24 @@ describe("crawlers", () => {
 });
 
 describe("fair drop-in: personal pacing", () => {
-  test("pressure follows the life's age, held back FIRST_LIFE_EASY_S on the first life only", () => {
+  test("pressure follows the life's age, held back 10 s on the first life only", () => {
     const first = { lifeStartTick: 100, firstLife: true };
     const later = { lifeStartTick: 100, firstLife: false };
     const at = (s: number) => 100 + Math.round(s / DT);
     expect(pressureAge(first, at(5))).toBe(0);
-    expect(pressureAge(first, at(FIRST_LIFE_EASY_S))).toBe(0);
-    expect(pressureAge(first, at(FIRST_LIFE_EASY_S + 20))).toBeCloseTo(20, 9);
+    expect(pressureAge(first, at(ITEM_EASY_S))).toBe(0);
+    expect(pressureAge(first, at(ITEM_EASY_S + 20))).toBeCloseTo(20, 9);
     expect(pressureAge(later, at(5))).toBeCloseTo(5, 9);
     expect(pressureAge(later, at(30))).toBeCloseTo(30, 9);
   });
 
-  test("a newcomer joining an arena aimer bots have played for 10 minutes meets the same pressure as one joining at the start", () => {
-    const record = (warmTicks: number): number[] => {
+  test("a newcomer joining an arena aimer bots have played for 10 minutes meets the same pressure as one joining at the start, or alone", () => {
+    // What the sim itself charges the newcomer each tick: their budget is zeroed before each step
+    // (so nothing spawns for them and the step's whole growth stays in it), and read after. They
+    // cannot be hit, so all three records run the full 30 s.
+    const record = (warmTicks: number, botCount = 3): number[] => {
       const a = createArena(21);
-      const bots = [0, 1, 2].map((i) => ({
+      const bots = Array.from({ length: botCount }, (_, i) => i).map((i) => ({
         id: joinPlayer(a, `bot ${i}`, "tabs").id,
         rng: createRng(100 + i),
         mem: createMemory(),
@@ -152,16 +158,26 @@ describe("fair drop-in: personal pacing", () => {
       const rates: number[] = [];
       for (let t = 0; t < 600 && p.alive; t++) {
         drive();
+        p.budget = 0;
+        p.invulnTicks = 1e9; // kept alive by the hit timer, which neither pressure nor targeting reads
         stepArena(a);
-        rates.push(spawnRate(pressureAge(p, a.tick)));
+        rates.push(p.budget);
       }
       return rates;
     };
     const early = record(0);
     const late = record(Math.round(600 / DT));
-    // The late arena is busy, but the newcomer's own pressure is the same, tick by tick.
-    expect(late.length).toBeGreaterThan(Math.round(FIRST_LIFE_EASY_S / DT));
+    const alone = record(0, 0);
+    const easy = Math.round(ITEM_EASY_S / DT);
+    // The late arena is busy, but the newcomer's own pressure is the same, tick by tick: no boost
+    // from the arena's age, its crowd or its bugs.
+    expect([early.length, late.length, alone.length]).toEqual([600, 600, 600]);
     expect(late).toEqual(early.slice(0, late.length));
+    expect(early).toEqual(alone.slice(0, early.length));
+    // And it is the curve: the base rate through the first life's easy 10 s, rising after.
+    expect(late[0]).toBeCloseTo(spawnRate(0) * DT, 12);
+    expect(late.slice(0, easy)).toEqual(Array(easy).fill(late[0]));
+    expect(late[late.length - 1]).toBeGreaterThan(late[0]!);
   });
 
   test("bugs chasing someone else are not redirected at a protected newcomer, until protection ends", () => {
@@ -173,7 +189,7 @@ describe("fair drop-in: personal pacing", () => {
     const B = joinPlayer(a, "new", "spaces");
     B.x = b.x + 50;
     B.y = 1200;
-    const protect = Math.round(SPAWN_PROTECT_S / DT);
+    const protect = Math.round(ITEM_PROTECT_S / DT);
     for (let t = 0; t < protect; t++) {
       stepQuiet(a);
       expect(b.target).toBe(A.id);

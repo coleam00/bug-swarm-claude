@@ -10,11 +10,15 @@ import {
   SPAWN_CANDIDATES,
   SPAWN_MARGIN,
   SPAWN_NEAR_DIST,
-  SPAWN_PROTECT_S,
   WORLD_H,
   WORLD_W,
 } from "./constants";
 import { createRng, nextRandom } from "./rng";
+
+/** The item's numbers (#58), written out so a test fails if a constant drifts below them. */
+const ITEM_WALL_MIN = 450;
+const ITEM_BUG_MIN = 500;
+const ITEM_PROTECT_S = 2;
 import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
 import {
   canBeHit,
@@ -151,10 +155,10 @@ describe("arena", () => {
     }
     expect(new Set(a.players.map((p) => p.id)).size).toBe(20);
     for (const p of a.players) {
-      expect(p.x).toBeGreaterThanOrEqual(SPAWN_MARGIN);
-      expect(p.x).toBeLessThanOrEqual(WORLD_W - SPAWN_MARGIN);
-      expect(p.y).toBeGreaterThanOrEqual(SPAWN_MARGIN);
-      expect(p.y).toBeLessThanOrEqual(WORLD_H - SPAWN_MARGIN);
+      expect(p.x).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+      expect(p.x).toBeLessThanOrEqual(WORLD_W - ITEM_WALL_MIN);
+      expect(p.y).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+      expect(p.y).toBeLessThanOrEqual(WORLD_H - ITEM_WALL_MIN);
     }
     expect(a.players).toEqual(b.players);
     expect(createArena(43).players).toEqual([]);
@@ -305,7 +309,7 @@ const nearestOther = (a: ArenaState, id: number, s: Spot) =>
   Math.min(...a.players.filter((q) => q.alive && q.id !== id).map((q) => Math.hypot(q.x - s.x, q.y - s.y)));
 
 describe("fair drop-in: safe spawns", () => {
-  test("every join and respawn lands at least SPAWN_MARGIN from every wall", () => {
+  test("every join and respawn lands at least 450 from every wall", () => {
     for (let seed = 0; seed < 50; seed++) {
       const a = createArena(seed);
       for (let i = 0; i < 4; i++) joinPlayer(a, `p${i}`, "tabs");
@@ -317,10 +321,10 @@ describe("fair drop-in: safe spawns", () => {
         stepQuiet(a);
         expect(p.alive).toBe(true);
         for (const q of a.players) {
-          expect(q.x).toBeGreaterThanOrEqual(SPAWN_MARGIN);
-          expect(q.x).toBeLessThanOrEqual(WORLD_W - SPAWN_MARGIN);
-          expect(q.y).toBeGreaterThanOrEqual(SPAWN_MARGIN);
-          expect(q.y).toBeLessThanOrEqual(WORLD_H - SPAWN_MARGIN);
+          expect(q.x).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+          expect(q.x).toBeLessThanOrEqual(WORLD_W - ITEM_WALL_MIN);
+          expect(q.y).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+          expect(q.y).toBeLessThanOrEqual(WORLD_H - ITEM_WALL_MIN);
         }
       }
     }
@@ -362,6 +366,36 @@ describe("fair drop-in: safe spawns", () => {
     expect(preferred).toBeGreaterThan(10);
   });
 
+  test("in a crowded arena with one clear pocket, every join and respawn is at least 500 from every bug", () => {
+    let missedByDraws = 0;
+    for (let seed = 0; seed < 30; seed++) {
+      const a = createArena(seed);
+      // Bugs every 150 units over the whole world, except a pocket around (1700, 800): only spots
+      // within about 80 of its centre are 500 from every bug, so the 16 random draws usually miss it.
+      for (let x = 0; x <= WORLD_W; x += 150) {
+        for (let y = 0; y <= WORLD_H; y += 150) if (Math.hypot(x - 1700, y - 800) > 580) placeBug(a, x, y);
+      }
+      const other = joinPlayer(a, "other", "spaces");
+      if (candidates(a).every((s) => nearestBug(a, s) < ITEM_BUG_MIN)) missedByDraws++;
+      const p = joinPlayer(a, "new", "tabs");
+      expect(nearestBug(a, p)).toBeGreaterThanOrEqual(ITEM_BUG_MIN);
+      expect(nearestBug(a, other)).toBeGreaterThanOrEqual(ITEM_BUG_MIN);
+      for (let r = 0; r < 3; r++) {
+        p.alive = false;
+        p.outTick = -100;
+        hold(p, { dash: true });
+        for (const q of a.players) q.budget = 0;
+        const bugsBefore = a.bugs.map((b) => ({ ...b }));
+        stepArena(a); // the bugs step after the respawn: judge the spot against where they stood
+        expect(p.alive).toBe(true);
+        expect(nearestBug({ ...a, bugs: bugsBefore }, p)).toBeGreaterThanOrEqual(ITEM_BUG_MIN);
+        a.bugs = bugsBefore; // put the lattice back for the next respawn
+      }
+    }
+    // The pocket was found by the grid search, not by luck in the draws.
+    expect(missedByDraws).toBeGreaterThan(20);
+  });
+
   test("with no one else alive and no bugs, a join takes the first spot", () => {
     const a = createArena(5);
     const spots = candidates(a);
@@ -371,9 +405,9 @@ describe("fair drop-in: safe spawns", () => {
 });
 
 describe("fair drop-in: spawn protection", () => {
-  const PROTECT = Math.round(SPAWN_PROTECT_S / DT);
+  const PROTECT = Math.round(ITEM_PROTECT_S / DT);
 
-  test("a bug touching a newly joined player costs nothing for SPAWN_PROTECT_S, then a hit", () => {
+  test("a bug touching a newly joined player costs nothing for 2 s, then a hit", () => {
     const a = createArena(1);
     const p = joinPlayer(a, "new", "tabs");
     expect(canBeHit(p)).toBe(false);
@@ -389,7 +423,7 @@ describe("fair drop-in: spawn protection", () => {
     expect(a.events.hitsTaken).toEqual([p.id]);
   });
 
-  test("a respawn is protected for the same SPAWN_PROTECT_S of steps", () => {
+  test("a respawn is protected for the same 2 s of steps", () => {
     const a = createArena(2);
     const p = joinPlayer(a, "back", "tabs");
     p.alive = false;

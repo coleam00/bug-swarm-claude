@@ -16,7 +16,9 @@ import {
   PLAYER_RADIUS,
   RESPAWN_DELAY_S,
   SPAWN_BUG_CLEAR,
+  SPAWN_BUG_FLOOR,
   SPAWN_CANDIDATES,
+  SPAWN_GRID_STEP,
   SPAWN_MARGIN,
   SPAWN_NEAR_DIST,
   SPAWN_PROTECT_S,
@@ -221,7 +223,9 @@ function nearestOtherD(state: ArenaState, selfId: number, x: number, y: number):
  * uniformly at least SPAWN_MARGIN from every wall. Among those at least SPAWN_BUG_CLEAR from every
  * bug it takes the one whose nearest other alive player is closest to SPAWN_NEAR_DIST away (help
  * nearby, not on top of them), or the first when no one else is alive. When none is clear, the one
- * farthest from any bug. Ties go to the earlier spot.
+ * farthest from any bug; and when even that is under SPAWN_BUG_FLOOR, a grid of spots SPAWN_GRID_STEP
+ * apart over the same square is searched for the one farthest from any bug, so the floor holds
+ * whenever the grid has a spot that meets it. Ties go to the earlier spot.
  */
 function safeSpot(state: ArenaState, selfId: number): { x: number; y: number } {
   const clear2 = SPAWN_BUG_CLEAR * SPAWN_BUG_CLEAR;
@@ -250,6 +254,19 @@ function safeSpot(state: ArenaState, selfId: number): { x: number; y: number } {
     }
   }
   if (!haveClear) {
+    if (farthest < SPAWN_BUG_FLOOR * SPAWN_BUG_FLOOR) {
+      // Rare (a crowded arena): a deterministic search, so the generator's use stays fixed.
+      for (let x = SPAWN_MARGIN; x <= WORLD_W - SPAWN_MARGIN; x += SPAWN_GRID_STEP) {
+        for (let y = SPAWN_MARGIN; y <= WORLD_H - SPAWN_MARGIN; y += SPAWN_GRID_STEP) {
+          const d = nearestBugD2(state, x, y);
+          if (d > farthest) {
+            farthest = d;
+            fx = x;
+            fy = y;
+          }
+        }
+      }
+    }
     spot.x = fx;
     spot.y = fy;
   }

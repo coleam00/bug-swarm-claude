@@ -30,12 +30,16 @@ export const FRICTION = 1800;
 
 /** Every spawn (a join or a respawn) lands at least this far from every wall. */
 export const SPAWN_MARGIN = 450;
-/** A spawn lands at least this far from every bug, when any of the candidate spots is. */
-export const SPAWN_BUG_CLEAR = 1100;
+/** The item's floor: a spawn lands at least this far from every bug whenever the arena has such a spot. */
+export const SPAWN_BUG_FLOOR = 500;
+/** Preferred clearance: among candidates at least this far from every bug, the near-player rule picks. */
+export const SPAWN_BUG_CLEAR = 900;
+/** When no candidate meets SPAWN_BUG_FLOOR, a grid of spots this far apart is searched (no random draws). */
+export const SPAWN_GRID_STEP = 50;
 /** Spots tried per spawn (always all drawn, so the generator's use is fixed). */
 export const SPAWN_CANDIDATES = 16;
 /** Among spots clear of bugs, a spawn prefers this distance to the nearest other alive player, units. */
-export const SPAWN_NEAR_DIST = 1000;
+export const SPAWN_NEAR_DIST = 250;
 /** Spawn protection, seconds: bugs cannot hurt you; holding fire ends it early. */
 export const SPAWN_PROTECT_S = 2;
 /** A player's first life in a session counts its pressure this many seconds late (an easier start). */
