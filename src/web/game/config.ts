@@ -1,5 +1,5 @@
 // Every tuning number in the game, in one place. Distances are arena units, times seconds.
-// The simulation (sim.ts), the arena (arena.ts) and the drawing (loop.ts) import from here.
+// The simulation (sim.ts), the arena (arena.ts) and the drawing (look.ts, render.ts, sprites.ts) import from here.
 
 // The arena: the same area on every screen, in the screen's ratio between 9:16 and 16:9.
 export const ARENA_AREA = 360_000;
