@@ -12,6 +12,7 @@ import {
   checkName,
   checkScore,
   entryPattern,
+  isBotName,
   isShownName,
   isTeam,
   isUpgradeId,
@@ -301,5 +302,20 @@ describe("teams", () => {
   test("only the listed teams are teams", () => {
     for (const t of TEAMS) expect(isTeam(t)).toBe(true);
     for (const v of ["Tabs", "SPACES", "", "tab", 1, null, undefined]) expect(isTeam(v)).toBe(false);
+  });
+});
+
+describe("bot names", () => {
+  test("names starting with 'bot ' are reserved for the server's bots, in any case and spacing", () => {
+    for (const name of ["bot alice", "Bot  Bob", "  BOT x", "bot 7"]) expect(isBotName(name)).toBe(true);
+    for (const name of ["bots-01", "robot x", "bot", "abbot y", "bot_x", "bot-x", "Robo"]) expect(isBotName(name)).toBe(false);
+  });
+
+  test("the bots script's names pass the name rules and are not bot names", () => {
+    for (let i = 1; i <= 200; i++) {
+      const name = `bots-${String(i).padStart(2, "0")}`;
+      expect(checkName(name)).toEqual({ ok: true, name });
+      expect(isBotName(name)).toBe(false);
+    }
   });
 });
