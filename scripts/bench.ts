@@ -6,9 +6,12 @@
 // PASS needs avg and worst 1 s at 58 fps or more at both sizes; FAIL exits 1.
 //
 // Chrome: CHROME_PATH, or the standard install location. `--shots <dir>` keeps a screenshot of
-// each run (mid-run, readout showing) and each game-over layout. No dependencies: CDP over
-// Bun's WebSocket. Needs a browser, so it isn't part of `bun run check`.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// each run (mid-run, readout showing) and each game-over layout. `--look <dir>` measures nothing:
+// it takes the screenshots a pull request about how the swarm looks needs, at 1280x720 and
+// 390x844 @3x: mid-run, the same shrunk to a quarter (the stream shown small), and two as the
+// refactor bomb goes off at 15 s. No dependencies: CDP over Bun's WebSocket. Needs a browser, so
+// it isn't part of `bun run check`.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize, sep } from "node:path";
 import { saveNotice } from "../src/web/over";
@@ -35,7 +38,17 @@ const RUNS: { run: Viewport; layouts: Viewport[] }[] = [
 ];
 
 const shotsArg = process.argv.indexOf("--shots");
-const shotsDir = shotsArg > 0 ? process.argv[shotsArg + 1] : undefined;
+const lookArg = process.argv.indexOf("--look");
+const lookDir = lookArg > 0 ? process.argv[lookArg + 1] : undefined;
+const shotsDir = lookDir ?? (shotsArg > 0 ? process.argv[shotsArg + 1] : undefined);
+if (shotsDir) mkdirSync(shotsDir, { recursive: true });
+/** The `--look` sizes: the issue's desktop and phone. */
+const LOOKS: Viewport[] = [
+  { label: "Desktop 1280x720", width: 1280, height: 720, dpr: 1, mobile: false },
+  { label: "Phone 390x844 @3x", width: 390, height: 844, dpr: 3, mobile: true },
+];
+/** The stress run's frame (one sim step each at 60 fps) the bomb's 15 s recharge ends on. */
+const BOMB_FRAME = 15 * 60;
 
 function findChrome(): string | null {
   const fromEnv = process.env.CHROME_PATH;
@@ -100,9 +113,9 @@ async function until<T>(what: string, timeoutMs: number, probe: () => Promise<T 
   }
 }
 
-async function screenshot(cdp: Session, name: string) {
+async function screenshot(cdp: Session, name: string, clip?: { width: number; height: number; scale: number }) {
   if (!shotsDir) return;
-  const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
+  const { data } = await cdp.send("Page.captureScreenshot", { format: "png", ...(clip ? { clip: { x: 0, y: 0, ...clip } } : {}) });
   const file = join(shotsDir, `${name}.png`);
   writeFileSync(file, Buffer.from(data, "base64"));
   console.log(`  screenshot: ${file}`);
@@ -204,6 +217,15 @@ async function measureLayout(cdp: Session, v: Viewport) {
   })()`);
 }
 
+/** Opens a stress run at `v` with the F readout on (so its cost is in the numbers). */
+async function startStress(cdp: Session, base: string, v: Viewport) {
+  // The arena is fixed when the run starts, so the size comes first.
+  await setViewport(cdp, v);
+  await cdp.send("Page.navigate", { url: `${base}/?stress=${BUGS}` });
+  await until("the stress run to start", 20_000, () => cdp.evaluate("!!window.bugSwarmBench"));
+  for (const type of ["keyDown", "keyUp"]) await cdp.send("Input.dispatchKeyEvent", { type, code: "KeyF", key: "f", windowsVirtualKeyCode: 70 });
+}
+
 const work = mkdtempSync(join(tmpdir(), "bug-swarm-bench-"));
 const outDir = join(work, "dist");
 const profile = join(work, "chrome");
@@ -269,61 +291,72 @@ try {
   await cdp.send("Runtime.enable");
   await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
-  const rows: Row[] = [];
-  const layouts: { label: string; m: any }[] = [];
-  for (const { run, layouts: sizes } of RUNS) {
-    console.log(`${run.label}: 60 s stress run...`);
-    // The arena is fixed when the run starts, so the size comes first.
-    await setViewport(cdp, run);
-    await cdp.send("Page.navigate", { url: `http://127.0.0.1:${server.port}/?stress=${BUGS}` });
-    await until("the stress run to start", 20_000, () => cdp!.evaluate("!!window.bugSwarmBench"));
-    // F: the readout is on for the whole measurement, so its cost is in the numbers.
-    for (const type of ["keyDown", "keyUp"]) await cdp.send("Input.dispatchKeyEvent", { type, code: "KeyF", key: "f", windowsVirtualKeyCode: 70 });
-    // Inside the skipped first SKIP_MS: a screenshot takes long enough to cost a frame.
-    await wait(3000);
-    await screenshot(cdp, `run-${run.width}x${run.height}`);
-    await until("the stress run to end", RUN_TIMEOUT_MS, () => cdp!.evaluate("window.bugSwarmBench.done"));
-    const rec = await cdp.evaluate(`(() => {
-      const b = window.bugSwarmBench;
-      const take = (a) => Array.from(a.subarray(0, b.count));
-      return { frames: take(b.frames), draws: take(b.draws), bugs: take(b.bugs), fx: take(b.fx) };
-    })()`);
-    rows.push(summarise(run.label, rec));
-    await until("the game-over screen", 20_000, () => cdp!.evaluate("!!document.querySelector('.over-board li')"));
-    for (const v of sizes) {
-      const m = await measureLayout(cdp, v);
-      layouts.push({ label: v.label, m });
-      await screenshot(cdp, `over-${v.width}x${v.height}`);
+  const base = `http://127.0.0.1:${server.port}`;
+  if (lookDir) {
+    for (const v of LOOKS) {
+      console.log(`${v.label}: look screenshots...`);
+      await startStress(cdp, base, v);
+      await wait(3000);
+      await screenshot(cdp, `look-${v.width}x${v.height}`);
+      await screenshot(cdp, `look-${v.width}x${v.height}-quarter`, { width: v.width, height: v.height, scale: 0.25 });
+      // The page waits for the frame itself, so the shot lands within a frame or two of it.
+      await cdp.evaluate(`new Promise((done) => { const f = () => (window.bugSwarmBench.count >= ${BOMB_FRAME + 4} ? done(true) : requestAnimationFrame(f)); f(); })`);
+      await screenshot(cdp, `look-${v.width}x${v.height}-bomb-1`);
+      await screenshot(cdp, `look-${v.width}x${v.height}-bomb-2`);
     }
-  }
+    console.log("look: done, nothing measured");
+  } else {
+    const rows: Row[] = [];
+    const layouts: { label: string; m: any }[] = [];
+    for (const { run, layouts: sizes } of RUNS) {
+      console.log(`${run.label}: 60 s stress run...`);
+      await startStress(cdp, base, run);
+      // Inside the skipped first SKIP_MS: a screenshot takes long enough to cost a frame.
+      await wait(3000);
+      await screenshot(cdp, `run-${run.width}x${run.height}`);
+      await until("the stress run to end", RUN_TIMEOUT_MS, () => cdp!.evaluate("window.bugSwarmBench.done"));
+      const rec = await cdp.evaluate(`(() => {
+        const b = window.bugSwarmBench;
+        const take = (a) => Array.from(a.subarray(0, b.count));
+        return { frames: take(b.frames), draws: take(b.draws), bugs: take(b.bugs), fx: take(b.fx) };
+      })()`);
+      rows.push(summarise(run.label, rec));
+      await until("the game-over screen", 20_000, () => cdp!.evaluate("!!document.querySelector('.over-board li')"));
+      for (const v of sizes) {
+        const m = await measureLayout(cdp, v);
+        layouts.push({ label: v.label, m });
+        await screenshot(cdp, `over-${v.width}x${v.height}`);
+      }
+    }
 
-  const f1 = (n: number) => n.toFixed(1);
-  const f2 = (n: number) => n.toFixed(2);
-  console.log(`\n${version.Browser}, headless (new), ${BUGS} bugs, every upgrade at L2, F readout on; stats from ${SKIP_MS / 1000} s to the end of the 60 s run\n`);
-  console.log("| Run | Bugs | Avg fps | Worst 1 s | Frames > 20 ms | Effects max | `draw()` avg / p99 / max |");
-  console.log("|---|---|---|---|---|---|---|");
-  for (const r of rows) {
-    console.log(`| ${r.label} | ${r.bugs} | ${f1(r.avg)} | ${r.worst} | ${r.slow} | ${r.fxMax} | ${f2(r.draw.avg)} / ${f1(r.draw.p99)} / ${f1(r.draw.max)} ms |`);
-  }
-  for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
-  console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the too-many-runs alert added):\n");
-  console.log("| Viewport | Upgrade chips | Top-10 rows | Race bar height | Hint bottom | Last row bottom | Page height | Fits |");
-  console.log("|---|---|---|---|---|---|---|---|");
-  const fit = (m: any) => m.race !== null && m.hintBottom <= m.innerHeight && m.scrollHeight <= m.innerHeight && m.scrollWidth <= m.innerWidth;
-  for (const { label, m } of layouts) {
-    const fits = fit(m);
-    if (!fits) failed = true;
+    const f1 = (n: number) => n.toFixed(1);
+    const f2 = (n: number) => n.toFixed(2);
+    console.log(`\n${version.Browser}, headless (new), ${BUGS} bugs, every upgrade at L2, F readout on; stats from ${SKIP_MS / 1000} s to the end of the 60 s run\n`);
+    console.log("| Run | Bugs | Avg fps | Worst 1 s | Frames > 20 ms | Effects max | `draw()` avg / p99 / max |");
+    console.log("|---|---|---|---|---|---|---|");
+    for (const r of rows) {
+      console.log(`| ${r.label} | ${r.bugs} | ${f1(r.avg)} | ${r.worst} | ${r.slow} | ${r.fxMax} | ${f2(r.draw.avg)} / ${f1(r.draw.p99)} / ${f1(r.draw.max)} ms |`);
+    }
+    for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
+    console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the too-many-runs alert added):\n");
+    console.log("| Viewport | Upgrade chips | Top-10 rows | Race bar height | Hint bottom | Last row bottom | Page height | Fits |");
+    console.log("|---|---|---|---|---|---|---|---|");
+    const fit = (m: any) => m.race !== null && m.hintBottom <= m.innerHeight && m.scrollHeight <= m.innerHeight && m.scrollWidth <= m.innerWidth;
+    for (const { label, m } of layouts) {
+      const fits = fit(m);
+      if (!fits) failed = true;
+      console.log(
+        `| ${label} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.hintBottom} | ${m.boardBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${fits ? "yes" : "NO"} |`,
+      );
+    }
+    const slow = rows.filter((r) => r.avg < TARGET_FPS || r.worst < TARGET_FPS);
+    if (slow.length) failed = true;
     console.log(
-      `| ${label} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.hintBottom} | ${m.boardBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${fits ? "yes" : "NO"} |`,
+      `\n${failed ? "FAIL" : "PASS"}: ${slow.length ? `under ${TARGET_FPS} fps at ${slow.map((r) => r.label).join(", ")}` : `${TARGET_FPS}+ fps avg and worst 1 s at both sizes`}${
+        layouts.some((l) => !fit(l.m)) ? "; the game-over screen doesn't fit (or has no race bar)" : ""
+      }`,
     );
   }
-  const slow = rows.filter((r) => r.avg < TARGET_FPS || r.worst < TARGET_FPS);
-  if (slow.length) failed = true;
-  console.log(
-    `\n${failed ? "FAIL" : "PASS"}: ${slow.length ? `under ${TARGET_FPS} fps at ${slow.map((r) => r.label).join(", ")}` : `${TARGET_FPS}+ fps avg and worst 1 s at both sizes`}${
-      layouts.some((l) => !fit(l.m)) ? "; the game-over screen doesn't fit (or has no race bar)" : ""
-    }`,
-  );
 } catch (err) {
   failed = true;
   console.error(`bench: ${err instanceof Error ? err.message : err}`);

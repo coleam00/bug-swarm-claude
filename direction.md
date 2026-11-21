@@ -20,10 +20,10 @@ Bug Swarm is a 2-minute browser survival game for a livestream audience: steer a
 ## The look
 A step above simple shapes, drawn entirely in code on the canvas (no image files, no art pipeline):
 - **Arena:** a dark floor with a faint glowing grid and a soft vignette at the edges.
-- **Robot:** a small rounded body with a glowing core and a short light trail when it moves; flashes white when hit.
+- **Robot:** a small rounded body with a glowing core and a short light trail when it moves; flashes white when hit. Drawn above everything in the arena with a white ring and a soft halo that never blink, so it is found in a full swarm.
 - **Bugs:** beetle-like bodies with animated legs that turn to face the robot; each kind has its own color and size (the fast bug is small, bright and twitchy).
 - **Shots:** bright streaks with a glow; the review laser is a longer beam.
-- **Feedback:** a squash pops into a burst of particles with a floating "+10"; a hit shakes the screen briefly; the refactor bomb is an expanding ring; the test shield is a visible bubble; the CI drone orbits with its own small glow.
+- **Feedback:** a squash pops into a burst of particles with a floating "+10" (squashes close together merge into one label, "+30"); a hit shakes the screen briefly; the refactor bomb is an expanding ring; the test shield is a visible bubble; the CI drone orbits with its own glow and violet shots.
 - **Text:** big, bold, readable on a phone and on a stream shown small.
 The look never costs frames: if an effect drops below 58 fps with 150 bugs, it gets simpler.
 
