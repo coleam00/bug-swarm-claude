@@ -87,20 +87,31 @@ export function startBody(i: number): { playerId: string; name: string; team: Te
 
 /**
  * Every request the load test makes, by kind. `label` is the route pattern the report groups by
- * (all ends are one route); `path` builds the concrete URL. The team totals route and `/board`
- * join this table once the server has them; until then they are not polled.
+ * (all ends are one route); `path` builds the concrete URL. Players start and end runs, poll the
+ * top 10 and team totals, and read their best as the game-over screen does; board watchers poll
+ * the stream board's one read. `load.ts` calls every route here, so no row prints empty.
  */
 export const ROUTES = {
   start: { label: "POST /api/runs", method: "POST", path: () => "/api/runs" },
   end: { label: "POST /api/runs/:id/end", method: "POST", path: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/end` },
   top: { label: "GET /api/top", method: "GET", path: () => "/api/top" },
+  teams: { label: "GET /api/teams", method: "GET", path: () => "/api/teams" },
   best: {
     label: "GET /api/players/:id/best",
     method: "GET",
     path: (playerId: string) => `/api/players/${encodeURIComponent(playerId)}/best`,
   },
+  board: { label: "GET /api/board", method: "GET", path: () => "/api/board" },
 } as const;
 export type RouteKind = keyof typeof ROUTES;
+
+/**
+ * How many /board tabs poll alongside the players: one per 50 players, at least one. The owner
+ * runs one for the stream, and some viewers may open it too.
+ */
+export function boardWatchers(players: number): number {
+  return Math.max(1, Math.round(players / 50));
+}
 
 export type Sample = { route: string; status: number | "error"; ms: number };
 

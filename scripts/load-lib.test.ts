@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { checkName, checkScore, isTeam, isUpgradeId, MAX_UPGRADES } from "../src/server/rules";
 import {
   ROUTES,
+  boardWatchers,
   claimFor,
   formatSummary,
   loadName,
@@ -74,6 +75,12 @@ describe("load players", () => {
     for (const t of teams) expect(isTeam(t)).toBe(true);
     expect(new Set(teams).size).toBe(2); // both teams get load
   });
+});
+
+test("one board watcher per 50 players, and always at least one", () => {
+  expect(boardWatchers(1)).toBe(1);
+  expect(boardWatchers(500)).toBe(10);
+  expect(boardWatchers(5000)).toBe(100);
 });
 
 describe("claimFor", () => {

@@ -44,7 +44,7 @@ export const SPAWN_PLATEAU = 0.25;
 export const SURGE_FROM = 60;
 /** The surge: seconds the spawn interval loses for every second survived past SURGE_FROM. */
 export const SURGE_SPAWN_RAMP = 0.003;
-/** The last floor, reached at about 83 s. Its inverse bounds squashes a second (sim.ts). */
+/** The last floor, reached at about 83 s. The server's squash cap rests on the whole schedule (sim.ts, sim.test.ts). */
 export const SPAWN_MIN = 0.18;
 /** The surge: the part of its base speed every bug gains for every second survived past SURGE_FROM. */
 export const SURGE_SPEED = 0.035;
@@ -121,7 +121,7 @@ export const DRONE_ORBIT = 34;
 /** CI drone: radians a second around the orbit. */
 export const DRONE_SPIN = 3;
 /** CI drone: the drone's drawn radius. */
-export const DRONE_RADIUS = 5;
+export const DRONE_RADIUS = 8;
 /**
  * CI drone: seconds between a drone's shots while the robot moves. It doesn't reload faster for
  * moving, but slower for standing still (DRONE_STILL_RATE).
