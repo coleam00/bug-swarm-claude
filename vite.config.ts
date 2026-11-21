@@ -1,9 +1,20 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // In development the UI runs on Vite (5173) and calls the API server on PORT (3000).
+// Two pages: the game (index.html) and the stream board (board.html, served at /board).
+// board.html sits at the root because that is where Vite's dev server looks for /board.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        board: fileURLToPath(new URL("./board.html", import.meta.url)),
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

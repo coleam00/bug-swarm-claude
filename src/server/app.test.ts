@@ -308,6 +308,69 @@ describe("team totals", () => {
   });
 });
 
+describe("the stream board's read", () => {
+  async function play(a: App, playerId: string, name: string, score: number, team: Team) {
+    const runId = await startRun(a, playerId, name, team);
+    clock += 10_000;
+    const res = await post(a, `/api/runs/${runId}/end`, endBody(score, Math.floor(score / 10), 1));
+    expect(res.status).toBe(200);
+  }
+
+  type Board = { top: { name: string; score: number }[]; teams: Record<Team, number> };
+  async function board(a: App): Promise<Board> {
+    const res = await a.request("/api/board");
+    expect(res.status).toBe(200);
+    return (await res.json()) as Board;
+  }
+
+  test("returns the top 10 and both team totals together", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ann", 50, TABS);
+    await play(a, "player-0002", "Bob", 30, SPACES);
+    await play(a, "player-0001", "Ann", 20, TABS);
+    expect(await board(a)).toEqual({
+      top: [
+        { name: "Ann", score: 50 },
+        { name: "Bob", score: 30 },
+      ],
+      teams: { tabs: 70, spaces: 30 },
+    });
+  });
+
+  test("a hidden name is in neither the top 10 nor the team totals", async () => {
+    const a = app();
+    await play(a, "player-0001", "Bad Name", 50, TABS);
+    await play(a, "player-0002", "Good", 40, SPACES);
+    hideName(db, "bad name", new Date(clock));
+    expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 } });
+  });
+
+  test("is cached for 1 second, like the routes it combines", async () => {
+    const a = app();
+    await play(a, "player-0001", "First", 30, TABS);
+    const before = await board(a);
+    const runId = await startRun(a, "player-0002", "Second", SPACES);
+    clock += 500;
+    expect((await post(a, `/api/runs/${runId}/end`, endBody(0, 0, 0))).status).toBe(200);
+    expect(await board(a)).toEqual(before);
+    clock += 500;
+    expect((await board(a)).top).toEqual([
+      { name: "First", score: 30 },
+      { name: "Second", score: 0 },
+    ]);
+  });
+
+  test("agrees with /api/top and /api/teams at the same moment", async () => {
+    const a = app();
+    for (let i = 0; i < 12; i++) await play(a, `player-${1000 + i}`, `P${i}`, 10 * i, TEAMS[i % 2]!);
+    const b = await board(a);
+    const top = ((await (await a.request("/api/top")).json()) as { top: unknown }).top;
+    const teams = ((await (await a.request("/api/teams")).json()) as { teams: unknown }).teams;
+    expect(b).toEqual({ top, teams } as Board);
+    expect(b.top.length).toBe(10);
+  });
+});
+
 test("reopening the same database file keeps its data", async () => {
   const runId = await startRun(app());
   db.close();

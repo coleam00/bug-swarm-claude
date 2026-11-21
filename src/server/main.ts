@@ -4,8 +4,9 @@ import { RUN_STARTS_PER_WINDOW, createApp, forwardedClientIp } from "./app";
 import { openDb } from "./db";
 import { startLimit } from "./limits";
 import { listenConfig } from "./listen";
+import { serveBoard } from "./ui";
 
-// Production mode: one process serves the API and the built UI from dist/.
+// Production mode: one process serves the API, the built UI from dist/, and the stream board at /board.
 const { port, hostname } = listenConfig(process.env);
 const dataDir = process.env.DATA_DIR ?? "data";
 const runStartsPerWindow = startLimit(process.env);
@@ -26,6 +27,7 @@ const app = createApp(db, {
     }
   },
 });
+serveBoard(app, "dist");
 app.use("/*", serveStatic({ root: "./dist" }));
 app.get("*", serveStatic({ path: "./dist/index.html" }));
 
