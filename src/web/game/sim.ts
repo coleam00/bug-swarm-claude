@@ -3,28 +3,28 @@
 // play it with fixed inputs and the same seed always plays the same run.
 import { POINTS_PER_SECOND, POINTS_PER_SQUASH } from "../../server/rules";
 import type { Arena } from "./arena";
+import {
+  BASE_BUG,
+  FIRE_INTERVAL,
+  INVULN_SECONDS,
+  MAX_BUGS,
+  MAX_HITS,
+  ROBOT_RADIUS,
+  ROBOT_SPEED,
+  SHOT_LIFETIME,
+  SHOT_SPEED,
+  SPAWN_INTERVAL,
+  type BugKind,
+} from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
 
-// Tuning (Phase 2 adds the ramp). Distances are arena units, times seconds.
-export const ROBOT_RADIUS = 14;
-export const ROBOT_SPEED = 260;
-export const BUG_RADIUS = 12;
-export const BUG_SPEED = 90;
-export const BUG_HP = 2;
-export const FIRE_INTERVAL = 0.25;
-export const SHOT_SPEED = 700;
-export const SHOT_LIFETIME = 1.0;
-export const SPAWN_INTERVAL = 0.48;
-export const INVULN_SECONDS = 1.0;
-export const MAX_HITS = 3;
-export const MAX_BUGS = 200;
-// The robot kills at most 1 / (FIRE_INTERVAL * BUG_HP) bugs a second. That must stay below the
-// spawn rate (1 / SPAWN_INTERVAL), or an idle player never dies; it also stays far under the
-// server's plausibility cap of 6 squashes a second.
+// A shot squashes at most one bug, so the robot squashes at most 1 / FIRE_INTERVAL bugs a
+// second. That must stay under the server's plausibility cap (MAX_SQUASHES_PER_SECOND in
+// rules.ts); a test in sim.test.ts holds it there.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
-export type Bug = { x: number; y: number; hp: number };
+export type Bug = { x: number; y: number; hp: number; kind: BugKind };
 export type Shot = { x: number; y: number; vx: number; vy: number; life: number };
 
 export type State = {
@@ -116,17 +116,19 @@ function spawnBugs(state: State, dt: number): void {
     const edge = Math.floor(nextRandom(state.rng) * 4);
     const along = nextRandom(state.rng);
     // Just outside the chosen edge: 0 top, 1 right, 2 bottom, 3 left.
-    const x = edge === 1 ? w + BUG_RADIUS : edge === 3 ? -BUG_RADIUS : along * w;
-    const y = edge === 0 ? -BUG_RADIUS : edge === 2 ? h + BUG_RADIUS : along * h;
-    state.bugs.push({ x, y, hp: BUG_HP });
+    const kind = BASE_BUG;
+    const r = kind.radius;
+    const x = edge === 1 ? w + r : edge === 3 ? -r : along * w;
+    const y = edge === 0 ? -r : edge === 2 ? h + r : along * h;
+    state.bugs.push({ x, y, hp: kind.hp, kind });
     state.spawned++;
   }
 }
 
 function moveBugs(state: State, dt: number): void {
   const { x: rx, y: ry } = state.robot;
-  const reach = BUG_SPEED * dt;
   for (const b of state.bugs) {
+    const reach = b.kind.speed * dt;
     const dx = rx - b.x;
     const dy = ry - b.y;
     const dist = Math.hypot(dx, dy);
@@ -177,12 +179,11 @@ function moveShots(state: State, dt: number): void {
 
 function hitBugs(state: State): void {
   const { shots, bugs } = state;
-  const reach2 = BUG_RADIUS * BUG_RADIUS;
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i]!;
     for (let j = 0; j < bugs.length; j++) {
       const b = bugs[j]!;
-      if ((b.x - s.x) ** 2 + (b.y - s.y) ** 2 > reach2) continue;
+      if ((b.x - s.x) ** 2 + (b.y - s.y) ** 2 > b.kind.radius ** 2) continue;
       removeAt(shots, i);
       b.hp--;
       if (b.hp <= 0) {
@@ -200,11 +201,10 @@ function hitRobot(state: State, dt: number): void {
     return;
   }
   const { x: rx, y: ry } = state.robot;
-  const reach = ROBOT_RADIUS + BUG_RADIUS;
   const bugs = state.bugs;
   for (let j = 0; j < bugs.length; j++) {
     const b = bugs[j]!;
-    if ((b.x - rx) ** 2 + (b.y - ry) ** 2 > reach * reach) continue;
+    if ((b.x - rx) ** 2 + (b.y - ry) ** 2 > (ROBOT_RADIUS + b.kind.radius) ** 2) continue;
     removeAt(bugs, j);
     state.hits++;
     state.invuln = INVULN_SECONDS;

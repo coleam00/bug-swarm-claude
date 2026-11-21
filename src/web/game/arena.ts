@@ -1,13 +1,10 @@
 // The arena, in game units. Every arena has the same area, so a run is as crowded on a phone as
 // on a desktop, and takes the screen's aspect ratio, clamped between 9:16 and 16:9, so a phone
-// in portrait or landscape fills its screen. It is fixed for a run; a resize during the run only
+// in portrait or landscape plays across its screen rather than in a strip. It is fixed for a run; a resize during the run only
 // rescales and letterboxes it.
-export type Arena = { w: number; h: number };
+import { ARENA_AREA, ARENA_RATIO_MAX, ARENA_RATIO_MIN } from "./config";
 
-export const ARENA_AREA = 360_000;
-/** Width over height: the tallest arena (9:16) and the widest (16:9). */
-export const ARENA_RATIO_MIN = 9 / 16;
-export const ARENA_RATIO_MAX = 16 / 9;
+export type Arena = { w: number; h: number };
 
 export function arenaForViewport(cssW: number, cssH: number): Arena {
   const ratio = Math.min(Math.max(Math.max(1, cssW) / Math.max(1, cssH), ARENA_RATIO_MIN), ARENA_RATIO_MAX);

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { ARENA_AREA, arenaForViewport } from "./arena";
+import { arenaForViewport } from "./arena";
+import { MAX_SQUASHES_PER_SECOND } from "../../server/rules";
+import { ARENA_AREA, BASE_BUG, FIRE_INTERVAL } from "./config";
 import { createState, score, step, type Bug, type Input, type State } from "./sim";
 
 const DT = 1 / 60;
@@ -66,22 +68,22 @@ describe("bugs", () => {
 
   test("chase the robot", () => {
     const s = quiet();
-    s.bugs.push({ x: 225, y: 50, hp: 1000 });
+    s.bugs.push({ x: 225, y: 50, hp: 1000, kind: BASE_BUG });
     step(s, NONE, DT);
-    expect(s.bugs[0]!.y).toBeCloseTo(51.5, 5); // 90 units/s toward the robot at (225, 400)
+    expect(s.bugs[0]!.y).toBeCloseTo(50 + BASE_BUG.speed * DT, 5); // straight toward the robot at (225, 400)
     s.robot.x = 450 - 14;
     const before = Math.hypot(s.bugs[0]!.x - s.robot.x, s.bugs[0]!.y - s.robot.y);
     step(s, NONE, DT);
     const after = Math.hypot(s.bugs[0]!.x - s.robot.x, s.bugs[0]!.y - s.robot.y);
-    expect(before - after).toBeCloseTo(1.5, 5);
+    expect(before - after).toBeCloseTo(BASE_BUG.speed * DT, 5);
   });
 });
 
 describe("auto-fire", () => {
   test("fires at the nearest bug", () => {
     const s = quiet();
-    s.bugs.push({ x: 425, y: 400, hp: 2 }); // 200 to the right
-    s.bugs.push({ x: 225, y: 300, hp: 2 }); // 100 above: nearer
+    s.bugs.push({ x: 425, y: 400, hp: 2, kind: BASE_BUG }); // 200 to the right
+    s.bugs.push({ x: 225, y: 300, hp: 2, kind: BASE_BUG }); // 100 above: nearer
     step(s, NONE, DT);
     expect(s.shots).toHaveLength(1);
     expect(s.shots[0]!.vx).toBeCloseTo(0, 5);
@@ -92,7 +94,7 @@ describe("auto-fire", () => {
     const s = quiet();
     run(s, NONE, 60);
     expect(s.shots).toHaveLength(0);
-    s.bugs.push({ x: 225, y: 100, hp: 1000 });
+    s.bugs.push({ x: 225, y: 100, hp: 1000, kind: BASE_BUG });
     run(s, NONE, 60); // shots at 0, 0.25, 0.5 and 0.75 s, each either in flight or spent on the bug
     expect(s.shots.length + (1000 - s.bugs[0]!.hp)).toBe(4);
   });
@@ -101,7 +103,7 @@ describe("auto-fire", () => {
 describe("scoring", () => {
   test("a squash scores 10 and each whole second survived scores 1", () => {
     const s = quiet();
-    s.bugs.push({ x: 225, y: 250, hp: 2 });
+    s.bugs.push({ x: 225, y: 250, hp: 2, kind: BASE_BUG });
     run(s, NONE, 30); // two shots hit it within half a second
     expect(s.squashes).toBe(1);
     expect(s.bugs).toHaveLength(0);
@@ -116,12 +118,12 @@ describe("scoring", () => {
 describe("hits", () => {
   test("a touching bug costs one hit, invulnerability blocks the next, the third hit ends the run", () => {
     const s = quiet();
-    s.bugs.push({ x: 225, y: 400, hp: 1000 });
+    s.bugs.push({ x: 225, y: 400, hp: 1000, kind: BASE_BUG });
     step(s, NONE, DT);
     expect(s.hits).toBe(1);
     expect(s.bugs).toHaveLength(0);
 
-    s.bugs.push({ x: 225, y: 400, hp: 1000 });
+    s.bugs.push({ x: 225, y: 400, hp: 1000, kind: BASE_BUG });
     run(s, NONE, 30); // half a second: still invulnerable
     expect(s.hits).toBe(1);
     expect(s.bugs).toHaveLength(1);
@@ -129,7 +131,7 @@ describe("hits", () => {
     expect(s.hits).toBe(2);
     expect(s.over).toBe(false);
 
-    s.bugs.push({ x: 225, y: 400, hp: 1000 });
+    s.bugs.push({ x: 225, y: 400, hp: 1000, kind: BASE_BUG });
     run(s, NONE, 62);
     expect(s.hits).toBe(3);
     expect(s.over).toBe(true);
@@ -182,4 +184,10 @@ test("the arena keeps 360,000 units² and the screen's ratio, clamped to 9:16..1
     expect(arenaForViewport(w, h)).toEqual(arena);
     expect(Math.abs(arena.w * arena.h - ARENA_AREA) / ARENA_AREA).toBeLessThan(0.005);
   }
+});
+
+describe("the server's squash cap", () => {
+  test("a shot squashes at most one bug, so the fire rate bounds squashes under the cap", () => {
+    expect(1 / FIRE_INTERVAL).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
+  });
 });

@@ -2,7 +2,8 @@
 // this file only feeds it input and real time, and draws its state.
 import { arenaForViewport, type Arena } from "./arena";
 import { STEERING_KEYS, keysToInput } from "./keys";
-import { BUG_RADIUS, MAX_HITS, ROBOT_RADIUS, createState, score, step, type Input, type State } from "./sim";
+import { BUG_KINDS, MAX_HITS, ROBOT_RADIUS } from "./config";
+import { createState, score, step, type Input, type State } from "./sim";
 
 export type RunResult = { score: number; squashes: number; seconds: number; touch: boolean };
 
@@ -116,13 +117,17 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
     ctx.fillStyle = "#111827";
     ctx.fillRect(0, 0, arena.w, arena.h);
 
-    ctx.fillStyle = "#f97316";
-    ctx.beginPath();
-    for (const b of state.bugs) {
-      ctx.moveTo(b.x + BUG_RADIUS, b.y);
-      ctx.arc(b.x, b.y, BUG_RADIUS, 0, Math.PI * 2);
+    // One path and one fill per kind of bug.
+    for (const kind of BUG_KINDS) {
+      ctx.fillStyle = kind.color;
+      ctx.beginPath();
+      for (const b of state.bugs) {
+        if (b.kind !== kind) continue;
+        ctx.moveTo(b.x + kind.radius, b.y);
+        ctx.arc(b.x, b.y, kind.radius, 0, Math.PI * 2);
+      }
+      ctx.fill();
     }
-    ctx.fill();
 
     ctx.fillStyle = "#fde047";
     for (const s of state.shots) ctx.fillRect(s.x - 3, s.y - 3, 6, 6);
