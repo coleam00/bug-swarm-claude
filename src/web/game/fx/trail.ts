@@ -45,9 +45,3 @@ export function trailSlot(t: Trail, k: number): number {
   return (t.head - k + TRAIL_POINTS) % TRAIL_POINTS;
 }
 
-/** Points still young enough to draw. */
-export function visibleTrailPoints(t: Trail): number {
-  let n = 0;
-  for (let k = 0; k < t.count; k++) if (t.age[trailSlot(t, k)]! < TRAIL_SECONDS) n++;
-  return n;
-}
