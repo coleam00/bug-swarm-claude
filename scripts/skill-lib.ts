@@ -1,8 +1,9 @@
 // `bun run skill`'s pure half: plays lives in-process on the real arena simulation and checks the
 // three skill gates (PRD.md, "Skill is measured"): the aimer's median score at least 2x the mover's
-// (one life per policy per seed, alone); late joiners living at least 0.8x as long as early ones;
-// and an idle newcomer living at least 10 s at every arena age (newcomers joining seeded arenas
-// that aimer bots have played in). Tested in skill-lib.test.ts on a few seeds.
+// (one life per policy per seed, alone); aiming late joiners living at least 0.8x as long as early
+// ones (the mover's ratio is reported, not gated); and an idle newcomer living at least 10 s at
+// every arena age (newcomers joining seeded arenas that aimer bots have played in). Tested in
+// skill-lib.test.ts on a few seeds.
 import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
@@ -152,8 +153,17 @@ export const JOIN_AGES_MIN = [0, 5, 10, 20] as const;
 export const LATE_AGE_MIN = 10;
 /** The background: aimer bots that join the arena at tick 0 (PRD.md tops arenas up to 4). */
 export const BACKGROUND_BOTS = 3;
-/** The policies the late gate measures: every skill level joins late, so both are gated. */
-export const LATE_POLICIES = ["mover", "aimer"] as const satisfies readonly PolicyName[];
+/**
+ * The policies the late gate gates (owner ruling, 2026-11-21): the aimer. The mover's late ratio is
+ * measured and printed but not gated: an early mover lives long only because the fresh aimer bots
+ * beside it clear its bugs, which says nothing about pacing (that is proven tick for tick in
+ * bugs.test.ts). Re-measure once fill bots and revive land.
+ */
+export const LATE_POLICIES = ["aimer"] as const satisfies readonly PolicyName[];
+/** Policies whose late ratio is reported alongside the gate, not gated. */
+export const LATE_REPORTED = ["mover"] as const satisfies readonly PolicyName[];
+/** Seeds the late gate plays by default: more than the other gates, so its median is not noise. */
+export const LATE_SEEDS = 60;
 
 /** The late gate: a late joiner's median life is at least LATE_RATIO of an early joiner's (above 0). */
 export function lateGate(late: number, early: number): boolean {
@@ -248,10 +258,14 @@ function summarizeAge(ageMin: number, lives: readonly LifeResult[], bugs: readon
   };
 }
 
-export type LateRow = { policy: PolicyName; early: AgeSummary; late: AgeSummary; ratio: number; pass: boolean };
+/** One policy's late ratio. `gated` false: reported only, and `pass` does not count. */
+export type LateRow = { policy: PolicyName; gated: boolean; early: AgeSummary; late: AgeSummary; ratio: number; pass: boolean };
 
 export type DropInReport = {
+  /** Seeds of the idle gate. */
   seeds: number;
+  /** Seeds of the late gate. */
+  lateSeeds: number;
   maxSeconds: number;
   late: LateRow[];
   latePass: boolean;
@@ -260,12 +274,14 @@ export type DropInReport = {
 };
 
 /**
- * The drop-in gates on seeds 0 to seeds-1: each seed's arena is warmed once to the oldest age in
- * `agesMin`, and newcomers join copies of it. Late: each LATE_POLICIES policy at `lateAgeMin` against
- * 0. Idle: the idle policy at every age.
+ * The drop-in gates: each seed's arena is warmed once to the oldest age it needs, and newcomers
+ * join copies of it. Idle, on seeds 0 to seeds-1: the idle policy at every age in `agesMin`.
+ * Late, on seeds 0 to lateSeeds-1: each LATE_POLICIES (gated) and LATE_REPORTED (reported) policy
+ * at `lateAgeMin` against 0.
  */
 export function runDropIn(
   seeds: number,
+  lateSeeds: number,
   maxSeconds: number,
   agesMin: readonly number[] = JOIN_AGES_MIN,
   lateAgeMin: number = LATE_AGE_MIN,
@@ -277,30 +293,44 @@ export function runDropIn(
     if (l) l.push(r);
     else lives.set(k, [r]);
   };
-  for (let s = 0; s < seeds; s++) {
-    for (const aged of warmArenas(s, agesMin)) {
+  const latePolicies: readonly PolicyName[] = [...LATE_REPORTED, ...LATE_POLICIES];
+  const lateAges = [0, lateAgeMin];
+  for (let s = 0; s < Math.max(seeds, lateSeeds); s++) {
+    const idleHere = s < seeds;
+    const ages = idleHere ? [...new Set([...agesMin, ...lateAges])].sort((a, b) => a - b) : lateAges;
+    for (const aged of warmArenas(s, ages)) {
       const b = bugs.get(aged.ageMin) ?? [];
       b.push(aged.state.bugs.length);
       bugs.set(aged.ageMin, b);
-      add(`idle@${aged.ageMin}`, playNewcomer(aged, "idle", s, maxSeconds));
-      if (aged.ageMin === 0 || aged.ageMin === lateAgeMin) {
-        for (const pol of LATE_POLICIES) add(`${pol}@${aged.ageMin}`, playNewcomer(aged, pol, s, maxSeconds));
+      if (idleHere && agesMin.includes(aged.ageMin)) add(`idle@${aged.ageMin}`, playNewcomer(aged, "idle", s, maxSeconds));
+      if (s < lateSeeds && lateAges.includes(aged.ageMin)) {
+        for (const pol of latePolicies) add(`${pol}@${aged.ageMin}`, playNewcomer(aged, pol, s, maxSeconds));
       }
     }
   }
   const at = (k: string, age: number) => summarizeAge(age, lives.get(`${k}@${age}`) ?? [], bugs.get(age) ?? []);
-  const late = LATE_POLICIES.map((policy): LateRow => {
+  const late = latePolicies.map((policy): LateRow => {
     const early = at(policy, 0);
     const lateS = at(policy, lateAgeMin);
-    return { policy, early, late: lateS, ratio: early.median > 0 ? lateS.median / early.median : 0, pass: lateGate(lateS.median, early.median) };
+    const gated = (LATE_POLICIES as readonly PolicyName[]).includes(policy);
+    return { policy, gated, early, late: lateS, ratio: early.median > 0 ? lateS.median / early.median : 0, pass: lateGate(lateS.median, early.median) };
   });
   const idle = agesMin.map((age) => at("idle", age));
-  return { seeds, maxSeconds, late, latePass: late.every((r) => r.pass), idle, idlePass: idleGate(idle.map((r) => r.median)) };
+  const gated = late.filter((r) => r.gated);
+  return {
+    seeds,
+    lateSeeds,
+    maxSeconds,
+    late,
+    latePass: gated.length > 0 && gated.every((r) => r.pass),
+    idle,
+    idlePass: idleGate(idle.map((r) => r.median)),
+  };
 }
 
 export function formatDropIn(r: DropInReport): string[] {
   const lines = [
-    `drop-in: ${r.seeds} seeds, ${BACKGROUND_BOTS} aimer bots from tick 0, newcomer's first life, capped at ${r.maxSeconds} s`,
+    `drop-in: ${BACKGROUND_BOTS} aimer bots from tick 0, newcomer's first life, capped at ${r.maxSeconds} s; late on ${r.lateSeeds} seeds, idle on ${r.seeds}`,
     `${"late".padEnd(8)}${pad("join", 6)}${pad("bugs", 6)}${pad("life p25", 10)}${pad("median", 8)}${pad("p75", 7)}${pad("capped", 8)}`,
   ];
   const row = (label: string, a: AgeSummary) =>
@@ -310,7 +340,8 @@ export function formatDropIn(r: DropInReport): string[] {
     lines.push(row(l.policy, l.late));
   }
   for (const l of r.late) {
-    lines.push(`gate: ${l.policy} late (${l.late.ageMin}m) median life >= ${LATE_RATIO}x early (0m): ${l.ratio.toFixed(2)}x ${l.pass ? "PASS" : "FAIL"}`);
+    const verdict = l.gated ? (l.pass ? "PASS" : "FAIL") : "(reported, not gated)";
+    lines.push(`${l.gated ? "gate" : "info"}: ${l.policy} late (${l.late.ageMin}m) median life >= ${LATE_RATIO}x early (0m): ${l.ratio.toFixed(2)}x ${verdict}`);
   }
   lines.push(`${"idle".padEnd(8)}${pad("join", 6)}${pad("bugs", 6)}${pad("life p25", 10)}${pad("median", 8)}${pad("p75", 7)}${pad("capped", 8)}`);
   for (const a of r.idle) lines.push(row("idle", a));
@@ -319,16 +350,17 @@ export function formatDropIn(r: DropInReport): string[] {
   return lines;
 }
 
-export type SkillArgs = { seeds: number; max: number };
+export type SkillArgs = { seeds: number; lateSeeds: number; max: number };
 
-export const USAGE = "usage: bun run skill [--seeds 30] [--max 300]";
+export const USAGE = `usage: bun run skill [--seeds 30] [--late-seeds ${LATE_SEEDS}] [--max 300]`;
 
 export function parseSkillArgs(argv: readonly string[]): SkillArgs | string {
-  const args: SkillArgs = { seeds: 30, max: 300 };
+  const args: SkillArgs = { seeds: 30, lateSeeds: LATE_SEEDS, max: 300 };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const v = Number(argv[i + 1]);
     if (flag === "--seeds" && Number.isInteger(v) && v >= 1) args.seeds = v;
+    else if (flag === "--late-seeds" && Number.isInteger(v) && v >= 1) args.lateSeeds = v;
     else if (flag === "--max" && Number.isFinite(v) && v > 0) args.max = v;
     else return USAGE;
     i++;

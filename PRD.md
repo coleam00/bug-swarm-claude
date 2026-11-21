@@ -11,7 +11,7 @@ Release 1 played well alone, but the robot fired by itself, so there was little 
 - **Hypothesis:** If viewers drop into shared arenas where they aim, dodge, revive each other and race for their team, at least 150 viewers will play during the stream and the median player will play at least 3 lives, because skill, other people and the team race make "one more life" compelling.
 - **Command:** `bun run stats -- --since <ISO> --until <ISO>` prints the same four lines as release 1, where a **run is one life** in the arena (spawn to out): `players`, `finished_runs`, `median_runs_per_player`, `touch_share` (share of lives played with touch controls). Bot lives never count.
 - **Threshold:** `players` ≥ 150 and `median_runs_per_player` ≥ 3.0 during the stream window (Sat 11/28 9:00 to 11:00 AM CT).
-- **Skill is measured:** `bun run skill` plays seeded arenas with scripted policies and must show an aiming player out-scoring a player who only moves and fires straight ahead by at least 2x (median), late joiners living at least 0.8x as long as early joiners, and an idle newcomer surviving at least 10 s.
+- **Skill is measured:** `bun run skill` plays seeded arenas with scripted policies and must show an aiming player out-scoring a player who only moves and fires straight ahead by at least 2x (median), aiming late joiners living at least 0.8x as long as early joiners (the mover's ratio is reported, not gated), and an idle newcomer surviving at least 10 s.
 
 ## Outcome
 

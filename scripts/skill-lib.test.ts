@@ -35,18 +35,21 @@ describe("bun run skill: fair drop-in", () => {
   });
 
   test("a reduced run produces lives and numbers at every join age", () => {
-    const r = runDropIn(3, 60, [0, 1], 1);
-    expect(r.idle.map((a) => a.lives)).toEqual([3, 3]);
-    expect(r.late.map((l) => [l.early.lives, l.late.lives])).toEqual([
-      [3, 3],
-      [3, 3],
+    const r = runDropIn(2, 3, 60, [0, 1], 1);
+    expect(r.idle.map((a) => a.lives)).toEqual([2, 2]);
+    // The late gate plays its own seed count; the mover is reported, only the aimer gated.
+    expect(r.late.map((l) => [l.policy, l.gated, l.early.lives, l.late.lives])).toEqual([
+      ["mover", false, 3, 3],
+      ["aimer", true, 3, 3],
     ]);
+    expect(r.latePass).toBe(r.late[1]!.pass);
     for (const a of [...r.idle, ...r.late.flatMap((l) => [l.early, l.late])]) {
       for (const v of [a.median, a.p25, a.p75, a.bugsAtJoin]) expect(Number.isFinite(v)).toBe(true);
       expect(a.median).toBeGreaterThan(0);
     }
     const lines = formatDropIn(r);
-    expect(lines.filter((l) => l.startsWith("gate:"))).toHaveLength(3);
+    expect(lines.filter((l) => l.startsWith("gate:"))).toHaveLength(2);
+    expect(lines.filter((l) => l.startsWith("info: mover late"))).toHaveLength(1);
   });
 });
 
@@ -88,8 +91,9 @@ describe("bun run skill", () => {
   test("quantiles and arguments", () => {
     expect(quantile([1, 2, 3, 4], 0.5)).toBe(2.5);
     expect(quantile([], 0.5)).toBe(0);
-    expect(parseSkillArgs([])).toEqual({ seeds: 30, max: 300 });
-    expect(parseSkillArgs(["--seeds", "8", "--max", "60"])).toEqual({ seeds: 8, max: 60 });
+    expect(parseSkillArgs([])).toEqual({ seeds: 30, lateSeeds: 60, max: 300 });
+    expect(parseSkillArgs(["--seeds", "8", "--late-seeds", "12", "--max", "60"])).toEqual({ seeds: 8, lateSeeds: 12, max: 60 });
+    expect(parseSkillArgs(["--late-seeds", "0"])).toBe(USAGE);
     expect(parseSkillArgs(["--seeds", "0"])).toBe(USAGE);
     expect(parseSkillArgs(["--nope"])).toBe(USAGE);
   });
