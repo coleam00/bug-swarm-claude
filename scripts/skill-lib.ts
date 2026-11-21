@@ -221,7 +221,7 @@ export const BACKGROUND_BOTS = 3;
  * The policies the late gate gates (owner ruling, 2026-11-21): the aimer. The mover's late ratio is
  * measured and printed but not gated: an early mover lives long only because the fresh aimer bots
  * beside it clear its bugs, which says nothing about pacing (that is proven tick for tick in
- * bugs.test.ts). Re-measure once fill bots and revive land.
+ * src/shared/arena/bugs/index.test.ts). Re-measure once fill bots and revive land.
  */
 export const LATE_POLICIES = ["aimer"] as const satisfies readonly PolicyName[];
 /** Policies whose late ratio is reported alongside the gate, not gated. */
