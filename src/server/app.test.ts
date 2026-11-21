@@ -105,6 +105,13 @@ describe("run start", () => {
     await startRun(a);
   });
 
+  test("runStartsPerWindow sets the limit: with 2, the 3rd start is 429", async () => {
+    const a = createApp(db, { now: () => clock, clientIp: () => ip, runStartsPerWindow: 2 });
+    await startRun(a);
+    await startRun(a);
+    expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" })).status).toBe(429);
+  });
+
   test("by default the client is X-Real-IP, else the rightmost X-Forwarded-For entry", async () => {
     const a = createApp(db, { now: () => clock });
     const start = (headers: Record<string, string>) =>

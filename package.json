@@ -10,7 +10,9 @@
     "stats": "bun scripts/stats.ts",
     "bench": "bun scripts/bench.ts",
     "hide": "bun scripts/hide.ts",
-    "pacing": "bun scripts/pacing.ts"
+    "pacing": "bun scripts/pacing.ts",
+    "load": "bun scripts/load.ts",
+    "reset": "bun scripts/reset.ts"
   },
   "dependencies": {
     "hono": "^4.6.0",

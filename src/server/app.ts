@@ -30,6 +30,8 @@ export type AppOptions = {
   now?: () => number;
   /** The address the rate limit counts by. */
   clientIp?: (c: Context) => string;
+  /** Run starts allowed per IP per window. Defaults to the real limit; only `bun run load` raises it. */
+  runStartsPerWindow?: number;
 };
 
 /**
@@ -49,6 +51,7 @@ export function forwardedClientIp(c: Context): string {
 export function createApp(db: Database, opts: AppOptions = {}): Hono {
   const now = opts.now ?? Date.now;
   const clientIp = opts.clientIp ?? forwardedClientIp;
+  const startsPerWindow = opts.runStartsPerWindow ?? RUN_STARTS_PER_WINDOW;
   const starts = new Map<string, number[]>();
   let topCache: { at: number; top: TopRow[] } | null = null;
   let teamsCache: { at: number; teams: Record<Team, number> } | null = null;
@@ -81,7 +84,7 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const t = now();
     const ip = clientIp(c);
     const recent = (starts.get(ip) ?? []).filter((at) => t - at < RATE_WINDOW_MS);
-    if (recent.length >= RUN_STARTS_PER_WINDOW) {
+    if (recent.length >= startsPerWindow) {
       starts.set(ip, recent);
       return c.json({ error: "rate" }, 429);
     }
