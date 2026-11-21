@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { arenaForViewport } from "./arena";
+import { arenaForViewport, type Arena } from "./arena";
 import { MAX_SQUASHES_PER_SECOND } from "../../server/rules";
 import {
   ARENA_AREA,
@@ -71,8 +71,8 @@ function dodge(s: State): Input {
 }
 
 /** A state with spawning switched off, for tests that place their own bugs. */
-function quiet(): State {
-  const s = createState(1, TALL);
+function quiet(arena: Arena = TALL): State {
+  const s = createState(1, arena);
   s.spawnTimer = Infinity;
   return s;
 }
@@ -94,33 +94,41 @@ describe("steering", () => {
     expect(s.robot.y).toBeCloseTo(491.924, 2);
   });
 
-  test("the robot stays inside the arena", () => {
-    const s = quiet();
-    run(s, { kind: "direction", dx: -1, dy: -1 }, 300);
-    expect(s.robot).toEqual({ x: 14, y: 14 });
-    run(s, { kind: "target", x: 5000, y: 5000 }, 600);
-    expect(s.robot).toEqual({ x: 436, y: 786 });
+  test("the robot stays inside the arena, portrait and landscape", () => {
+    for (const arena of [TALL, WIDE]) {
+      const s = quiet(arena);
+      run(s, { kind: "direction", dx: -1, dy: -1 }, 300);
+      expect(s.robot).toEqual({ x: 14, y: 14 });
+      run(s, { kind: "target", x: 5000, y: 5000 }, 600);
+      expect(s.robot).toEqual({ x: arena.w - 14, y: arena.h - 14 });
+    }
   });
 });
 
 describe("bugs", () => {
-  test("spawn just outside an edge, at the rate the ramp sets", () => {
-    const s = createState(3, WIDE);
-    let seen = new Set<Bug>();
-    let checked = 0;
-    while (s.time < 10) {
-      step(s, NONE, DT);
-      for (const b of s.bugs) {
-        if (seen.has(b)) continue;
-        checked++;
-        expect(b.x <= 0 || b.x >= 800 || b.y <= 0 || b.y >= 450).toBe(true);
+  test("spawn just outside all four edges, at the rate the ramp sets, portrait and landscape", () => {
+    for (const arena of [TALL, WIDE]) {
+      const s = createState(3, arena);
+      let seen = new Set<Bug>();
+      const edges = new Set<string>();
+      let checked = 0;
+      while (s.time < 10) {
+        step(s, NONE, DT);
+        for (const b of s.bugs) {
+          if (seen.has(b)) continue;
+          checked++;
+          const edge = b.y < 0 ? "top" : b.x > arena.w ? "right" : b.y > arena.h ? "bottom" : b.x < 0 ? "left" : "inside";
+          expect(edge).not.toBe("inside");
+          edges.add(edge);
+        }
+        seen = new Set(s.bugs);
       }
-      seen = new Set(s.bugs);
+      expect(checked).toBe(s.spawned);
+      expect([...edges].sort()).toEqual(["bottom", "left", "right", "top"]);
+      // The interval shrinks over these 10 s, so the count sits between the start's rate and the 10th second's.
+      expect(s.spawned).toBeGreaterThanOrEqual(Math.floor(10 / spawnInterval(0)));
+      expect(s.spawned).toBeLessThanOrEqual(Math.ceil(10 / spawnInterval(10)));
     }
-    expect(checked).toBe(s.spawned);
-    // The interval shrinks over these 10 s, so the count sits between the start's rate and the 10th second's.
-    expect(s.spawned).toBeGreaterThanOrEqual(Math.floor(10 / spawnInterval(0)));
-    expect(s.spawned).toBeLessThanOrEqual(Math.ceil(10 / spawnInterval(10)));
   });
 
   test("the swarm ramps: spawns come faster as the run goes on, down to a floor", () => {
