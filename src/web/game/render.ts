@@ -19,6 +19,7 @@ import {
   TEXT_STROKE,
   bugLookId,
 } from "./look";
+import { REVIEW_LASER } from "../../server/rules";
 import { LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
 import { score, type State } from "./sim";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
@@ -127,7 +128,7 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = SHOT_CORE;
     const shotGlow = s.glows[SHOT_GLOW]!;
-    const laser = state.levels["review-laser"];
+    const laser = state.levels[REVIEW_LASER];
     const beam = LASER_BEAM[laser]!;
     const glowLength = SHOT_GLOW_LENGTH * beam;
     const coreLength = SHOT_CORE_LENGTH * beam;

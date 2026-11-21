@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { arenaForViewport, type Arena } from "./arena";
-import { MAX_SQUASHES_PER_SECOND, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { MAX_SQUASHES_PER_SECOND, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import {
   ARENA_AREA,
   BASE_BUG,
@@ -9,6 +9,7 @@ import {
   CHOICE_EVERY,
   FIRE_INTERVAL,
   LASER_PIERCE,
+  MOVING_FIRE_RATE,
   ROBOT_RADIUS,
   ROBOT_SPEED,
   SPAWN_MIN,
@@ -224,7 +225,7 @@ describe("the fast bug", () => {
     s.shots = [];
     s.spawnTimer = Infinity;
     s.fireTimer = 0;
-    s.levels["review-laser"] = 0; // a plain shot, so it ends on the bug
+    s.levels[REVIEW_LASER] = 0; // a plain shot, so it ends on the bug
     fast!.x = s.robot.x;
     fast!.y = s.robot.y - 150;
     const squashes = s.squashes;
@@ -263,9 +264,9 @@ describe("auto-fire", () => {
       for (let i = 0; i < 60; i++) step(s, input(i), DT);
       return s.shots.length + (1000 - s.bugs[0]!.hp);
     };
-    // Side to side, so the robot moves every step: a shot every 0.25 / 1.4 s, 6 in the second.
+    // Side to side, so the robot moves every step: a shot every 0.25 / 1.8 s, 8 in the second.
     const jiggle = (i: number): Input => ({ kind: "direction", dx: i % 2 ? 1 : -1, dy: 0 });
-    expect(shotsInASecond(quiet(), jiggle)).toBe(6);
+    expect(shotsInASecond(quiet(), jiggle)).toBe(Math.ceil(MOVING_FIRE_RATE / FIRE_INTERVAL));
     const walled = quiet();
     walled.robot.x = 450 - 14;
     expect(shotsInASecond(walled, () => ({ kind: "direction", dx: 1, dy: 0 }))).toBe(4);
@@ -470,7 +471,7 @@ describe("review laser", () => {
   /** One shot, straight up through a column of `count` one-shot bugs. Returns the squashes. */
   function oneShot(level: number, count: number, hp: number = FAST.hp) {
     const s = quiet();
-    s.levels["review-laser"] = level;
+    s.levels[REVIEW_LASER] = level;
     s.nextChoiceAt = Infinity;
     for (let i = 0; i < count; i++) s.bugs.push({ x: 225, y: 300 - 30 * i, hp, kind: hp === FAST.hp ? FAST : BASE_BUG });
     step(s, NONE, DT); // fires once at the nearest bug, straight up
@@ -502,7 +503,7 @@ describe("review laser", () => {
       s.hits = 0;
     }
     expect(s.shots.every((sh) => sh.pierce === 0)).toBe(true);
-    s.choice = ["review-laser"];
+    s.choice = [REVIEW_LASER];
     choose(s, 0);
     while (s.shots.length === 0 || s.shots.every((sh) => sh.pierce === 0)) advance(s, NONE);
     expect(s.shots.some((sh) => sh.pierce === LASER_PIERCE[1])).toBe(true);
@@ -519,7 +520,7 @@ describe("the server's squash cap", () => {
         advance(s, player(s));
         s.hits = 0;
       }
-      expect(s.levels["review-laser"]).toBe(UPGRADE_MAX_LEVEL);
+      expect(s.levels[REVIEW_LASER]).toBe(UPGRADE_MAX_LEVEL);
       expect(s.squashes).toBeLessThanOrEqual(s.spawned);
       expect(s.squashes).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND * s.time);
     }

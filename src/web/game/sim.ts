@@ -1,7 +1,7 @@
 // The game itself: pure and time-stepped. It never reads a clock, Math.random or the DOM; time
 // comes in as `dt` and randomness from the seeded generator in the state, so `bun test` can
 // play it with fixed inputs and the same seed always plays the same run.
-import { POINTS_PER_SECOND, POINTS_PER_SQUASH, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { POINTS_PER_SECOND, POINTS_PER_SQUASH, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import type { Arena } from "./arena";
 import {
   BASE_BUG,
@@ -258,7 +258,7 @@ function fire(state: State, dt: number, moved: boolean): void {
   const dist = Math.sqrt(best) || 1;
   const vx = ((nearest.x - rx) / dist) * SHOT_SPEED;
   const vy = ((nearest.y - ry) / dist) * SHOT_SPEED;
-  const pierce = LASER_PIERCE[state.levels["review-laser"]]!;
+  const pierce = LASER_PIERCE[state.levels[REVIEW_LASER]]!;
   state.shots.push({ x: rx, y: ry, vx, vy, life: SHOT_LIFETIME, pierce, hit: [] });
   state.fireTimer += FIRE_INTERVAL;
 }

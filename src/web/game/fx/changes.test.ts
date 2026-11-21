@@ -115,7 +115,7 @@ describe("changes between frames", () => {
     const c = createChanges(createRng(1));
     let squashes = 0;
     let hits = 0;
-    for (let i = 0; i < 3600 && !s.over; i++) {
+    for (let i = 0; i < 7200 && !s.over; i++) {
       step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
       if (s.choice) choose(s, 0);
       detectChanges(c, s, () => squashes++, () => hits++);

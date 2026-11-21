@@ -21,6 +21,7 @@ export const MAX_SQUASHES_PER_SECOND = 6;
  */
 export const UPGRADE_IDS = ["review-laser"] as const;
 export type UpgradeId = (typeof UPGRADE_IDS)[number];
+export const [REVIEW_LASER] = UPGRADE_IDS;
 /** Picking an upgrade again makes it stronger, up to this level; then it leaves the pool. */
 export const UPGRADE_MAX_LEVEL = 2;
 /** The most upgrades a finished run may report. Every upgrade at its top level must fit. */

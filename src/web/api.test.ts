@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { endRun, fetchBest, fetchTop, startRun } from "./api";
 import type { RunResult } from "./game/loop";
+import { REVIEW_LASER } from "../server/rules";
 
 const realFetch = globalThis.fetch;
 let respond: () => Response | Promise<Response>;
@@ -20,7 +21,7 @@ afterEach(() => {
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const down = () => Promise.reject(new TypeError("Failed to fetch"));
-const RESULT: RunResult = { score: 10, squashes: 1, seconds: 3, touch: false, upgrades: ["review-laser", "review-laser"] };
+const RESULT: RunResult = { score: 10, squashes: 1, seconds: 3, touch: false, upgrades: [REVIEW_LASER, REVIEW_LASER] };
 
 test("startRun: a run id, a name refusal, or a failure", async () => {
   respond = () => json(200, { runId: "run-1" });
