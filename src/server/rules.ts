@@ -16,12 +16,12 @@ export const MAX_SQUASHES_PER_SECOND = 6;
 // Upgrades.
 /**
  * Every upgrade that is built, by id: the game's draw pool, and the only ids the server stores.
- * An upgrade joins this list in the pull request that builds it (refactor-bomb and ci-drone come
- * next), so nothing unbuilt is ever offered.
+ * An upgrade joins this list in the pull request that builds it (ci-drone comes next), so
+ * nothing unbuilt is ever offered.
  */
-export const UPGRADE_IDS = ["review-laser", "test-shield"] as const;
+export const UPGRADE_IDS = ["review-laser", "test-shield", "refactor-bomb"] as const;
 export type UpgradeId = (typeof UPGRADE_IDS)[number];
-export const [REVIEW_LASER, TEST_SHIELD] = UPGRADE_IDS;
+export const [REVIEW_LASER, TEST_SHIELD, REFACTOR_BOMB] = UPGRADE_IDS;
 /** Picking an upgrade again makes it stronger, up to this level; then it leaves the pool. */
 export const UPGRADE_MAX_LEVEL = 2;
 /** The most upgrades a finished run may report. Every upgrade at its top level must fit. */

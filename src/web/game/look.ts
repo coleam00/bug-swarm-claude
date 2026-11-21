@@ -23,6 +23,14 @@ export const ROBOT_RIM = "#22d3ee";
 export const ROBOT_GLOW = GLOW_CYAN;
 export const SHOT_CORE = "#fffbe6";
 export const SHOT_GLOW = GLOW_SHOT;
+/** The refactor bomb's ring: a bright stroke, drawn again wide and faint for its glow. */
+export const BOMB_RING = "#e879f9";
+export const BOMB_RING_WIDTH = 6;
+export const BOMB_RING_GLOW_WIDTH = 22;
+/** The bomb's charge indicator: an arc around the robot that fills while it recharges. */
+export const BOMB_CHARGE = "rgba(232, 121, 249, 0.85)";
+export const BOMB_CHARGE_RADIUS = 21;
+export const BOMB_CHARGE_WIDTH = 2.5;
 /** The test shield's bubble: one colour, faded with globalAlpha so no string is built per frame. */
 export const SHIELD_COLOUR = "#7dd3fc";
 /** The bubble's radius, in arena units; a second ring inside it at 2 charges. */

@@ -1,3 +1,4 @@
+import { TEST_SHIELD } from "../../../server/rules";
 import { describe, expect, test } from "bun:test";
 import { BASE_BUG } from "../config";
 import { createRng } from "../rng";
@@ -133,7 +134,8 @@ describe("changes between frames", () => {
     let blocks = 0;
     for (let i = 0; i < 7200 && !s.over; i++) {
       step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
-      if (s.choice) choose(s, 0);
+      // Take the shield whenever it is offered, so the run has blocks to report too.
+      if (s.choice) choose(s, Math.max(0, s.choice.indexOf(TEST_SHIELD)));
       detectChanges(c, s, () => squashes++, () => hits++, () => blocks++);
     }
     expect(s.squashes).toBeGreaterThan(10);

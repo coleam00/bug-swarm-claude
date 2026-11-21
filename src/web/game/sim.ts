@@ -1,10 +1,12 @@
 // The game itself: pure and time-stepped. It never reads a clock, Math.random or the DOM; time
 // comes in as `dt` and randomness from the seeded generator in the state, so `bun test` can
 // play it with fixed inputs and the same seed always plays the same run.
-import { POINTS_PER_SECOND, POINTS_PER_SQUASH, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { POINTS_PER_SECOND, POINTS_PER_SQUASH, REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import type { Arena } from "./arena";
 import {
   BASE_BUG,
+  BOMB_RECHARGE,
+  BOMB_RING_SECONDS,
   BUG_KINDS,
   CHOICE_CARDS,
   CHOICE_EVERY,
@@ -28,7 +30,7 @@ import { createRng, nextRandom, type Rng } from "./rng";
 // squashes never exceed bugs spawned, and bugs spawn at most once every SPAWN_MIN seconds of run
 // time. Run time never runs ahead of the server's clock (a choice pauses the run, which only
 // adds real time), so a run squashes at most 1 / SPAWN_MIN bugs a second whatever shots
-// pierce. A test in sim.test.ts holds that under the cap.
+// pierce or bombs clear. A test in sim.test.ts holds that under the cap.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
@@ -73,6 +75,8 @@ export type State = {
   /** Hits the bubble has blocked so far (fx/changes.ts tells a pop from a squash by it). */
   blocks: number;
   squashes: number;
+  /** Run time of the refactor bomb's last blast; -Infinity before the first, so it starts charged. */
+  bombAt: number;
   /** Bugs spawned so far (for tests and tuning). */
   spawned: number;
   over: boolean;
@@ -101,6 +105,7 @@ export function createState(seed: number, arena: Arena): State {
     shield: 0,
     blocks: 0,
     squashes: 0,
+    bombAt: -Infinity,
     spawned: 0,
     over: false,
   };
@@ -132,6 +137,8 @@ export function score(state: State): number {
  */
 export function step(state: State, input: Input, dt: number): void {
   if (state.over || state.choice) return;
+  // First, so it never clears a bug in the step that bug spawned.
+  refactorBomb(state);
   const moved = moveRobot(state, input, dt);
   spawnBugs(state, dt);
   moveBugs(state, dt);
@@ -258,6 +265,33 @@ function moveBugs(state: State, dt: number): void {
       b.y += (dy / dist) * reach;
     }
   }
+}
+
+/**
+ * The refactor bomb goes off on its own: once charged, on the first step that starts with a
+ * bug in the arena, it clears every bug (each one a squash) and starts recharging. It keeps
+ * its charge while the arena is empty. Taking it again shortens the recharge from the last blast.
+ */
+function refactorBomb(state: State): void {
+  const level = state.levels[REFACTOR_BOMB];
+  if (level === 0 || state.bugs.length === 0) return;
+  if (state.time - state.bombAt < BOMB_RECHARGE[level]! - 1e-9) return;
+  state.squashes += state.bugs.length;
+  state.bugs.length = 0;
+  state.bombAt = state.time;
+}
+
+/** The refactor bomb's charge, 0 just after a blast to 1 ready; 0 while it isn't taken. */
+export function bombCharge(state: State): number {
+  const level = state.levels[REFACTOR_BOMB];
+  if (level === 0) return 0;
+  return Math.min(1, (state.time - state.bombAt) / BOMB_RECHARGE[level]!);
+}
+
+/** How far the last blast's ring has swept, in [0, 1); -1 when no ring is showing. */
+export function bombRing(state: State): number {
+  const age = state.time - state.bombAt;
+  return age < BOMB_RING_SECONDS ? age / BOMB_RING_SECONDS : -1;
 }
 
 /** Auto-fire at the nearest bug. The gun reloads faster while the robot moves. */
