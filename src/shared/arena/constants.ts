@@ -26,8 +26,24 @@ export const ACCEL = 2400;
 /** Deceleration while no move is held, units per second squared. */
 export const FRICTION = 1800;
 
-/** New players spawn at least this far from every wall. */
-export const SPAWN_MARGIN = 300;
+// ---- Fair drop-in (#58). Safe spawns, spawn protection, a gentle first life. ----
+
+/** Every spawn (a join or a respawn) lands at least this far from every wall. */
+export const SPAWN_MARGIN = 450;
+/** The item's floor: a spawn lands at least this far from every bug whenever the arena has such a spot. */
+export const SPAWN_BUG_FLOOR = 500;
+/** Preferred clearance: among candidates at least this far from every bug, the near-player rule picks. */
+export const SPAWN_BUG_CLEAR = 900;
+/** When no candidate meets SPAWN_BUG_FLOOR, a grid of spots this far apart is searched (no random draws). */
+export const SPAWN_GRID_STEP = 50;
+/** Spots tried per spawn (always all drawn, so the generator's use is fixed). */
+export const SPAWN_CANDIDATES = 16;
+/** Among spots clear of bugs, a spawn prefers this distance to the nearest other alive player, units. */
+export const SPAWN_NEAR_DIST = 250;
+/** Spawn protection, seconds: bugs cannot hurt you; holding fire ends it early. */
+export const SPAWN_PROTECT_S = 2;
+/** A player's first life in a session counts its pressure this many seconds late (an easier start). */
+export const FIRST_LIFE_EASY_S = 10;
 
 /** The most players in one arena. */
 export const MAX_PLAYERS_PER_ARENA = 20;
@@ -40,7 +56,7 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
@@ -139,12 +155,10 @@ export const VIEW_WALL_MARGIN = 60;
 
 /** Hits that put you down (a revive brings you back with one hit left). */
 export const HITS_PER_LIFE = 3;
-/** Untouchable time after a hit, and after a spawn, seconds. */
+/** Untouchable time after a hit, seconds (a spawn has SPAWN_PROTECT_S instead). */
 export const INVULN_S = 1;
 /** A life over waits this long before a press respawns you, seconds (release 1's restart guard). */
 export const RESPAWN_DELAY_S = 0.8;
-/** A respawn lands at least this far from every bug, when it can (8 tries). */
-export const RESPAWN_CLEAR = 400;
 /** The arena's wave clock, seconds per wave. Shown, and later unlocks kinds; never spawn volume. */
 export const WAVE_S = 30;
 /** Streak multiplier steps: [hits in a row, multiplier], highest first. Below the last: x1. */

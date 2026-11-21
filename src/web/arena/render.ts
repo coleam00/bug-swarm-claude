@@ -104,6 +104,16 @@ const DASH_BUTTON_WIDTH = 4;
 const DASH_FONT = "bold 15px system-ui, sans-serif";
 /** A robot that can't be hit blinks this fast, cycles a second. */
 const BLINK_HZ = 8;
+/**
+ * A spawn-protected robot's shimmer: two white glows, half a cycle apart, each swelling between
+ * these radii (robot radii) and alphas this many times a second, so the halo ripples outward
+ * instead of blinking.
+ */
+const SHIMMER_HZ = 1.5;
+const SHIMMER_MIN = 2.2;
+const SHIMMER_MAX = 4;
+const SHIMMER_ALPHA_MIN = 0.35;
+const SHIMMER_ALPHA_MAX = 0.9;
 // The HUD.
 const SCORE_FONT = "bold 30px system-ui, sans-serif";
 const MULT_FONT = "bold 22px system-ui, sans-serif";
@@ -151,10 +161,10 @@ const DOWN_BELOW = 70;
 const DOWN_HINT = "A player next to you revives you";
 
 /**
- * One robot to draw, world units. `inv`: untouchable, so it blinks. `dashing`: in a dash now.
- * `dashAt`: when its last dash began, scene seconds (-1: never), from `dashFromX, dashFromY`.
- * `down`: waiting for a revive, with `left` seconds before bleeding out, `rev` (0 to 1) of a
- * revive by player `revBy` (0: none).
+ * One robot to draw, world units. `inv`: untouchable, so it blinks. `prot`: spawn-protected (a
+ * soft shimmer, not the blink). `dashing`: in a dash now. `dashAt`: when its last dash began,
+ * scene seconds (-1: never), from `dashFromX, dashFromY`. `down`: waiting for a revive, with
+ * `left` seconds before bleeding out, `rev` (0 to 1) of a revive by player `revBy` (0: none).
  */
 export type Robot = {
   id: number;
@@ -165,6 +175,7 @@ export type Robot = {
   name: string;
   trail: Trail;
   inv: boolean;
+  prot: boolean;
   dashing: boolean;
   dashAt: number;
   dashFromX: number;
@@ -358,6 +369,16 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const size = PLAYER_RADIUS * (0.6 + 0.9 * life);
       ctx.globalAlpha = 0.45 * life;
       ctx.drawImage(ts.glow, trail.x[i]! - size, trail.y[i]! - size, size * 2, size * 2);
+    }
+    // Spawn protection: a soft white shimmer rippling around the body, drawn under it. It never
+    // blinks the body, so it reads apart from the hit blink below.
+    if (r.prot) {
+      for (let w = 0; w < 2; w++) {
+        const k = 0.5 + 0.5 * Math.sin(t * TAU * SHIMMER_HZ + r.id + w * Math.PI);
+        const size = PLAYER_RADIUS * (SHIMMER_MIN + (SHIMMER_MAX - SHIMMER_MIN) * k);
+        ctx.globalAlpha = SHIMMER_ALPHA_MAX - (SHIMMER_ALPHA_MAX - SHIMMER_ALPHA_MIN) * k;
+        ctx.drawImage(white!, r.x - size, r.y - size, size * 2, size * 2);
+      }
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";

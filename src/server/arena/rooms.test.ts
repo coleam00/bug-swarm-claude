@@ -212,6 +212,7 @@ describe("lives", () => {
     const p = room.state.players[0]!;
     tick(30);
     p.invulnTicks = 0;
+    p.protectTicks = 0;
     p.hits = HITS_PER_LIFE - 1;
     p.score = 120;
     p.kills = 9;
@@ -267,6 +268,7 @@ describe("lives", () => {
     pb.x = pa.x + 40;
     pb.y = pa.y;
     pa.invulnTicks = 0;
+    pa.protectTicks = 0; // past spawn protection (#58)
     pa.hits = HITS_PER_LIFE - 1;
     pb.invulnTicks = 1000; // Bob can't be hit while he revives
     placeBug(room.state, pa.x - 5, pa.y);

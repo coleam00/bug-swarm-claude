@@ -136,6 +136,7 @@ function start(playerId: string, name: string, team: Team): void {
         team: t,
         trail: createTrail(),
         inv: false,
+        prot: false,
         dashing: false,
         dashAt: -1,
         dashFromX: 0,
@@ -326,7 +327,7 @@ function start(playerId: string, name: string, team: Team): void {
 
   const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false };
   const self = { x: 0, y: 0 };
-  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false };
+  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false };
   const span: BugSpan = { from: null, to: null, t: 0 };
   const bugs: BugsView = {
     x: new Float32Array(MAX_BUGS_PER_ARENA),
@@ -479,6 +480,7 @@ function start(playerId: string, name: string, team: Team): void {
         }
         setDown(r, dn);
         r.inv = row[7] === 1;
+        r.prot = row[9] === 1;
         r.dashing = !r.down && predictor.dashTicks > 0;
         selfIndex = drawn.length;
       } else if (sample(interp, row[0], rt, at) && at.alive) {
@@ -488,6 +490,7 @@ function start(playerId: string, name: string, team: Team): void {
         r.y = at.y;
         r.aim = at.aim;
         r.inv = at.inv;
+        r.prot = at.prot;
         setDown(r, downAt(interp, row[0], rt));
       } else {
         r.dashing = false;

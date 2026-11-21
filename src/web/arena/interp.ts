@@ -86,10 +86,11 @@ function lerpAngle(a: number, b: number, t: number): number {
 }
 
 /**
- * Where a player is drawn: position, aim, and whether they are in a life, untouchable and dashing
- * then. Past a snapshot, `dash` is the next one's, so a dash shows from where it starts.
+ * Where a player is drawn: position, aim, and whether they are in a life, untouchable, dashing and
+ * spawn-protected then. Past a snapshot, `dash` is the next one's, so a dash shows from where it
+ * starts.
  */
-export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; dash: boolean };
+export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; dash: boolean; prot: boolean };
 
 /**
  * Where player `id` is at server tick `at`, into `out`: between the two snapshots around it (aim
@@ -118,6 +119,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.alive = rb[6] === 1;
     out.inv = rb[7] === 1;
     out.dash = rb[8] === 1;
+    out.prot = rb[9] === 1;
     return true;
   }
   if (ra[6] !== rb[6]) {
@@ -127,6 +129,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.alive = ra[6] === 1;
     out.inv = ra[7] === 1;
     out.dash = ra[8] === 1;
+    out.prot = ra[9] === 1;
     return true;
   }
   const t = Math.min(1, Math.max(0, (at - fa.tick) / (fb.tick - fa.tick)));
@@ -136,6 +139,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
   out.alive = ra[6] === 1;
   out.inv = ra[7] === 1;
   out.dash = (t > 0 ? rb : ra)[8] === 1;
+  out.prot = ra[9] === 1;
   return true;
 }
 

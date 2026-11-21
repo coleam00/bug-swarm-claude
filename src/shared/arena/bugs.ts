@@ -8,6 +8,7 @@ import {
   CRAWLER_RADIUS,
   CRAWLER_SPEED,
   DT,
+  FIRST_LIFE_EASY_S,
   MAX_BUGS_PER_ARENA,
   PLAYER_RADIUS,
   SPAWN_BASE_PER_S,
@@ -24,7 +25,7 @@ import {
   WORLD_W,
 } from "./constants";
 import { nextRandom } from "./rng";
-import { canAct, canBeHit, hitPlayer, type ArenaState, type Player } from "./sim";
+import { canAct, canBeHit, hitPlayer, type ArenaState, type Bug, type Player } from "./sim";
 
 /**
  * A player's spawn rate, bugs per second, for a life `ageSeconds` old: SPAWN_BASE_PER_S rising by
@@ -33,6 +34,17 @@ import { canAct, canBeHit, hitPlayer, type ArenaState, type Player } from "./sim
  */
 export function spawnRate(ageSeconds: number): number {
   return Math.min(SPAWN_MAX_PER_S, SPAWN_BASE_PER_S + SPAWN_RAMP_PER_S2 * ageSeconds);
+}
+
+/**
+ * The life age, seconds, that `p`'s pressure follows at `tick`: their own life's age, held back
+ * FIRST_LIFE_EASY_S on the first life of their session (never below 0). It never reads the
+ * arena's age or wave, so a player joining an hour in meets the same pressure as one joining at
+ * the start.
+ */
+export function pressureAge(p: Pick<Player, "lifeStartTick" | "firstLife">, tick: number): number {
+  const age = (tick - p.lifeStartTick) * DT;
+  return p.firstLife ? Math.max(0, age - FIRST_LIFE_EASY_S) : age;
 }
 
 /** The view square's centre on one axis: the camera's clamp at the wall (camera.ts clampAxis). */
@@ -74,31 +86,44 @@ function trySpawn(state: ArenaState, p: Player): boolean {
   return false;
 }
 
-/** The nearest player who is up (not down) to (x, y) (ties: the earlier in the list), or null. */
-function nearestTarget(state: ArenaState, x: number, y: number): Player | null {
+/**
+ * The player bug `b` chases: the nearest player who is up (not down; ties: the earlier in the
+ * list), except that a spawn-protected player is chased only by a bug already chasing them, so
+ * bugs chasing someone else are never redirected at a newcomer. When that leaves no one (only
+ * protected players are up), the nearest player who is up, who cannot be hurt yet anyway. Null
+ * when no one is up.
+ */
+function chooseTarget(state: ArenaState, b: Bug): Player | null {
   let best: Player | null = null;
   let bestD = Infinity;
+  let any: Player | null = null;
+  let anyD = Infinity;
   for (const p of state.players) {
     if (!canAct(p)) continue;
-    const dx = p.x - x;
-    const dy = p.y - y;
+    const dx = p.x - b.x;
+    const dy = p.y - b.y;
     const d = dx * dx + dy * dy;
+    if (d < anyD) {
+      anyD = d;
+      any = p;
+    }
+    if (p.protectTicks > 0 && b.target !== p.id) continue;
     if (d < bestD) {
       bestD = d;
       best = p;
     }
   }
-  return best;
+  return best ?? any;
 }
 
 const TOUCH = PLAYER_RADIUS + CRAWLER_RADIUS;
 
 /**
  * One tick of bugs:
- * 1. each player who is up has their budget grow by their life's spawnRate times DT (capped at
- *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them while the arena has room; a
- *    downed player's budget waits;
- * 2. each bug chases the nearest player who is up at CRAWLER_SPEED (no one up: it stands);
+ * 1. each player who is up has their budget grow by spawnRate(pressureAge) times DT (capped at
+ *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them, chasing them, while the arena
+ *    has room; a downed player's budget waits;
+ * 2. each bug chases its chooseTarget at CRAWLER_SPEED (no one up: it stands);
  * 3. a bug touching a player who is up and can be hit costs them a hit and is gone, with no
  *    score; bugs pass over downed players.
  */
@@ -106,15 +131,14 @@ export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
   for (const p of state.players) {
     if (!canAct(p)) continue;
-    const age = (state.tick - p.lifeStartTick) * DT;
-    p.budget = Math.min(SPAWN_BUDGET_CAP, p.budget + spawnRate(age) * DT);
+    p.budget = Math.min(SPAWN_BUDGET_CAP, p.budget + spawnRate(pressureAge(p, state.tick)) * DT);
     while (p.budget >= 1 && bugs.length < MAX_BUGS_PER_ARENA) {
       if (!trySpawn(state, p)) break;
       p.budget -= 1;
     }
   }
   for (const b of bugs) {
-    const target = nearestTarget(state, b.x, b.y);
+    const target = chooseTarget(state, b);
     if (!target) {
       b.vx = 0;
       b.vy = 0;

@@ -108,8 +108,8 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
     tick,
     ack: 0,
     p: [
-      [1, 100, 100, 0, 0, 0, 1, 0, 0],
-      [2, 500, 600, 30, -40, 1.5, 1, 0, 0],
+      [1, 100, 100, 0, 0, 0, 1, 0, 0, 0],
+      [2, 500, 600, 30, -40, 1.5, 1, 0, 0, 0],
     ],
     b,
     s: [],

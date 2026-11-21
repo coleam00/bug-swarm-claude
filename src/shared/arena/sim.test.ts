@@ -1,7 +1,27 @@
 import { describe, expect, test } from "bun:test";
-import { DT, HITS_PER_LIFE, INVULN_S, MAX_SPEED, PLAYER_RADIUS, RESPAWN_DELAY_S, SPAWN_MARGIN, WORLD_H, WORLD_W } from "./constants";
+import {
+  DT,
+  HITS_PER_LIFE,
+  INVULN_S,
+  MAX_SPEED,
+  PLAYER_RADIUS,
+  RESPAWN_DELAY_S,
+  SPAWN_BUG_CLEAR,
+  SPAWN_CANDIDATES,
+  SPAWN_MARGIN,
+  SPAWN_NEAR_DIST,
+  WORLD_H,
+  WORLD_W,
+} from "./constants";
+import { createRng, nextRandom } from "./rng";
+
+/** The item's numbers (#58), written out so a test fails if a constant drifts below them. */
+const ITEM_WALL_MIN = 450;
+const ITEM_BUG_MIN = 500;
+const ITEM_PROTECT_S = 2;
 import { arenaWith, bleedNow, downNow, hold, placeBug, stepQuiet } from "./testkit";
 import {
+  canBeHit,
   clampInput,
   createArena,
   joinPlayer,
@@ -10,6 +30,7 @@ import {
   stepArena,
   stepPlayer,
   wrapAngle,
+  type ArenaState,
   type Input,
 } from "./sim";
 
@@ -134,10 +155,10 @@ describe("arena", () => {
     }
     expect(new Set(a.players.map((p) => p.id)).size).toBe(20);
     for (const p of a.players) {
-      expect(p.x).toBeGreaterThanOrEqual(SPAWN_MARGIN);
-      expect(p.x).toBeLessThanOrEqual(WORLD_W - SPAWN_MARGIN);
-      expect(p.y).toBeGreaterThanOrEqual(SPAWN_MARGIN);
-      expect(p.y).toBeLessThanOrEqual(WORLD_H - SPAWN_MARGIN);
+      expect(p.x).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+      expect(p.x).toBeLessThanOrEqual(WORLD_W - ITEM_WALL_MIN);
+      expect(p.y).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+      expect(p.y).toBeLessThanOrEqual(WORLD_H - ITEM_WALL_MIN);
     }
     expect(a.players).toEqual(b.players);
     expect(createArena(43).players).toEqual([]);
@@ -236,7 +257,9 @@ describe("lives", () => {
     stepQuiet(a);
     expect(p.alive).toBe(true);
     expect([p.hits, p.score, p.kills, p.streak, p.heat]).toEqual([0, 0, 0, 0, 0]);
-    expect(p.invulnTicks).toBeGreaterThan(0);
+    expect(p.protectTicks).toBeGreaterThan(0);
+    expect(p.invulnTicks).toBe(0);
+    expect(p.firstLife).toBe(false);
     expect(p.lifeStartTick).toBe(a.tick - 1);
   });
 
@@ -269,5 +292,212 @@ describe("lives", () => {
     const first = run();
     expect(run()).toBe(first);
     expect(JSON.parse(first).bugs.length + JSON.parse(first).nextBugId).toBeGreaterThan(10);
+  });
+});
+
+/** The spots safeSpot will draw next in `a`, from a copy of its generator. */
+function candidates(a: ArenaState): { x: number; y: number }[] {
+  const rng = { ...a.rng };
+  const out: { x: number; y: number }[] = [];
+  for (let i = 0; i < SPAWN_CANDIDATES; i++) {
+    const x = SPAWN_MARGIN + nextRandom(rng) * (WORLD_W - 2 * SPAWN_MARGIN);
+    const y = SPAWN_MARGIN + nextRandom(rng) * (WORLD_H - 2 * SPAWN_MARGIN);
+    out.push({ x, y });
+  }
+  return out;
+}
+
+type Spot = { x: number; y: number };
+const nearestBug = (a: ArenaState, s: Spot) => Math.min(...a.bugs.map((b) => Math.hypot(b.x - s.x, b.y - s.y)));
+const nearestOther = (a: ArenaState, id: number, s: Spot) =>
+  Math.min(...a.players.filter((q) => q.alive && q.id !== id).map((q) => Math.hypot(q.x - s.x, q.y - s.y)));
+
+describe("fair drop-in: safe spawns", () => {
+  test("every join and respawn lands at least 450 from every wall", () => {
+    for (let seed = 0; seed < 50; seed++) {
+      const a = createArena(seed);
+      for (let i = 0; i < 4; i++) joinPlayer(a, `p${i}`, "tabs");
+      const p = a.players[0]!;
+      for (let r = 0; r < 10; r++) {
+        p.alive = false;
+        p.outTick = -100;
+        hold(p, { dash: true });
+        stepQuiet(a);
+        expect(p.alive).toBe(true);
+        for (const q of a.players) {
+          expect(q.x).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+          expect(q.x).toBeLessThanOrEqual(WORLD_W - ITEM_WALL_MIN);
+          expect(q.y).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+          expect(q.y).toBeLessThanOrEqual(WORLD_H - ITEM_WALL_MIN);
+        }
+      }
+    }
+  });
+
+  test("a spawn is clear of bugs when any spot is, nearest SPAWN_NEAR_DIST to others among those, else farthest from bugs", () => {
+    let clear = 0;
+    let fallback = 0;
+    let preferred = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const a = createArena(seed);
+      const place = createRng(seed + 1000);
+      // Two others, alive, and from 1 to 120 bugs: from no spot clear to most spots clear.
+      for (let i = 0; i < 2; i++) {
+        const q = joinPlayer(a, "other", "spaces");
+        q.x = 500 + nextRandom(place) * 1400;
+        q.y = 500 + nextRandom(place) * 1400;
+      }
+      const bugs = seed % 4 === 0 ? 120 : 1 + (seed % 3);
+      for (let i = 0; i < bugs; i++) placeBug(a, nextRandom(place) * WORLD_W, nextRandom(place) * WORLD_H);
+      const spots = candidates(a);
+      const id = a.nextId;
+      const p = joinPlayer(a, "new", "tabs");
+      const clearSpots = spots.filter((s) => nearestBug(a, s) >= SPAWN_BUG_CLEAR);
+      if (clearSpots.length > 0) {
+        clear++;
+        expect(nearestBug(a, p)).toBeGreaterThanOrEqual(SPAWN_BUG_CLEAR);
+        const score = (s: Spot) => Math.abs(nearestOther(a, id, s) - SPAWN_NEAR_DIST);
+        for (const s of clearSpots) expect(score(p)).toBeLessThanOrEqual(score(s));
+        if (score(p) < score(clearSpots[0]!)) preferred++;
+      } else {
+        fallback++;
+        for (const s of spots) expect(nearestBug(a, p)).toBeGreaterThanOrEqual(nearestBug(a, s));
+      }
+    }
+    // Both branches ran, and the preference changed the pick from the first clear spot.
+    expect(clear).toBeGreaterThan(20);
+    expect(fallback).toBeGreaterThan(20);
+    expect(preferred).toBeGreaterThan(10);
+  });
+
+  test("in a crowded arena with one clear pocket, every join and respawn is at least 500 from every bug", () => {
+    let missedByDraws = 0;
+    for (let seed = 0; seed < 30; seed++) {
+      const a = createArena(seed);
+      // Bugs every 150 units over the whole world, except a pocket around (1700, 800): only spots
+      // within about 80 of its centre are 500 from every bug, so the 16 random draws usually miss it.
+      for (let x = 0; x <= WORLD_W; x += 150) {
+        for (let y = 0; y <= WORLD_H; y += 150) if (Math.hypot(x - 1700, y - 800) > 580) placeBug(a, x, y);
+      }
+      const other = joinPlayer(a, "other", "spaces");
+      if (candidates(a).every((s) => nearestBug(a, s) < ITEM_BUG_MIN)) missedByDraws++;
+      const p = joinPlayer(a, "new", "tabs");
+      expect(nearestBug(a, p)).toBeGreaterThanOrEqual(ITEM_BUG_MIN);
+      expect(nearestBug(a, other)).toBeGreaterThanOrEqual(ITEM_BUG_MIN);
+      for (let r = 0; r < 3; r++) {
+        p.alive = false;
+        p.outTick = -100;
+        hold(p, { dash: true });
+        for (const q of a.players) q.budget = 0;
+        const bugsBefore = a.bugs.map((b) => ({ ...b }));
+        stepArena(a); // the bugs step after the respawn: judge the spot against where they stood
+        expect(p.alive).toBe(true);
+        expect(nearestBug({ ...a, bugs: bugsBefore }, p)).toBeGreaterThanOrEqual(ITEM_BUG_MIN);
+        a.bugs = bugsBefore; // put the lattice back for the next respawn
+      }
+    }
+    // The pocket was found by the grid search, not by luck in the draws.
+    expect(missedByDraws).toBeGreaterThan(20);
+  });
+
+  test("when every allowed spot is crowded, the search for room never leaves the 450 margin", () => {
+    // Bugs fill the allowed square and leave the wall band empty, so the spot farthest from any
+    // bug in the whole world is in the band: the grid search must not take it.
+    for (let seed = 0; seed < 10; seed++) {
+      const a = createArena(seed);
+      for (let x = 450; x <= WORLD_W - 450; x += 150) for (let y = 450; y <= WORLD_H - 450; y += 150) placeBug(a, x, y);
+      const p = joinPlayer(a, "new", "tabs");
+      const check = () => {
+        expect(Math.min(p.x, p.y, WORLD_W - p.x, WORLD_H - p.y)).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+      };
+      check();
+      p.alive = false;
+      p.outTick = -100;
+      hold(p, { dash: true });
+      p.budget = 0;
+      const bugsBefore = a.bugs.map((b) => ({ ...b }));
+      stepArena(a);
+      expect(p.alive).toBe(true);
+      check();
+      a.bugs = bugsBefore;
+    }
+  });
+
+  test("in a fresh arena a newcomer spawns within sight of the one other player", () => {
+    // No bugs: the undisputed case. 400 is half the 800-unit view.
+    const near: number[] = [];
+    for (let seed = 0; seed < 100; seed++) {
+      const a = createArena(seed);
+      const other = joinPlayer(a, "other", "spaces");
+      const p = joinPlayer(a, "new", "tabs");
+      near.push(Math.hypot(p.x - other.x, p.y - other.y));
+    }
+    near.sort((x, y) => x - y);
+    expect(near[50]!).toBeLessThan(400);
+  });
+
+  test("with no one else alive and no bugs, a join takes the first spot", () => {
+    const a = createArena(5);
+    const spots = candidates(a);
+    const p = joinPlayer(a, "solo", "tabs");
+    expect([p.x, p.y]).toEqual([spots[0]!.x, spots[0]!.y]);
+  });
+});
+
+describe("fair drop-in: spawn protection", () => {
+  const PROTECT = Math.round(ITEM_PROTECT_S / DT);
+
+  test("a bug touching a newly joined player costs nothing for 2 s, then a hit", () => {
+    const a = createArena(1);
+    const p = joinPlayer(a, "new", "tabs");
+    expect(canBeHit(p)).toBe(false);
+    for (let t = 0; t < PROTECT; t++) {
+      placeBug(a, p.x + 5, p.y);
+      stepQuiet(a);
+      expect(a.events.hitsTaken).toEqual([]);
+      a.bugs.length = 0;
+    }
+    expect(canBeHit(p)).toBe(true);
+    placeBug(a, p.x + 5, p.y);
+    stepQuiet(a);
+    expect(a.events.hitsTaken).toEqual([p.id]);
+  });
+
+  test("a respawn is protected for the same 2 s of steps", () => {
+    const a = createArena(2);
+    const p = joinPlayer(a, "back", "tabs");
+    p.alive = false;
+    p.outTick = -100;
+    hold(p, { dash: true });
+    stepQuiet(a); // the respawn step, the first protected one
+    hold(p, {});
+    expect(p.alive).toBe(true);
+    for (let t = 1; t < PROTECT; t++) {
+      placeBug(a, p.x + 5, p.y);
+      stepQuiet(a);
+      expect(a.events.hitsTaken).toEqual([]);
+      a.bugs.length = 0;
+    }
+    placeBug(a, p.x + 5, p.y);
+    stepQuiet(a);
+    expect(a.events.hitsTaken).toEqual([p.id]);
+  });
+
+  test("holding fire ends protection at once: a touch in that very step costs a hit", () => {
+    const a = createArena(3);
+    const p = joinPlayer(a, "trigger", "tabs");
+    stepQuiet(a, 5);
+    expect(p.protectTicks).toBe(PROTECT - 5);
+    hold(p, { fire: true });
+    placeBug(a, p.x + 5, p.y);
+    stepQuiet(a);
+    expect(p.protectTicks).toBe(0);
+    expect(a.events.hitsTaken).toEqual([p.id]);
+    expect(a.events.shotsFired.length).toBe(1);
+    // Releasing fire does not bring it back; the hit's own INVULN_S applies as before.
+    expect(p.invulnTicks).toBe(Math.round(INVULN_S / DT));
+    hold(p, {});
+    stepQuiet(a);
+    expect(p.protectTicks).toBe(0);
   });
 });

@@ -1,6 +1,7 @@
 // Helpers for the arena's simulation tests (combat, bugs, lives): arenas with players placed by
 // hand, bugs placed by hand, and stepping with the personal spawn budget held at zero so only
-// the bugs a test places are in play. Test-only; nothing in the game imports it.
+// the bugs a test places are in play. Players placed by hand start without spawn protection.
+// Test-only; nothing in the game imports it.
 import { CRAWLER, CRAWLER_HP, DOWN_TICKS, HITS_PER_LIFE } from "./constants";
 import { clampInput, createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Player } from "./sim";
 
@@ -11,6 +12,7 @@ export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Pl
     p.x = x;
     p.y = y;
     p.invulnTicks = 0;
+    p.protectTicks = 0;
     p.dashCooldown = 0;
     return p;
   });
