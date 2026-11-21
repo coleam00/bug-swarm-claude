@@ -1,7 +1,8 @@
 // What happened since the last frame, worked out by comparing the bug list with the one before
-// it. The simulation only counts squashes and hits, but a bug object keeps its identity until
-// it is removed, so a bug that vanished was either squashed by a shot or hit the robot (when
-// the hit counter went up, the vanished bug closest to the robot is taken as the hit). It also
+// it. The simulation only counts squashes, hits and blocks (hits the test shield took), but a
+// bug object keeps its identity until it is removed, so a bug that vanished was squashed by a
+// shot, hit the robot or popped the shield (for each hit or block the counters gained, the
+// vanished bug closest to the robot is taken as it). It also
 // keeps a steady animation phase per bug, so the swarm's legs don't all step in time.
 // Pure (no DOM, no canvas); it reads the state and never changes it.
 import { nextRandom, type Rng } from "../rng";
@@ -15,9 +16,10 @@ export type Changes = {
   phase: Float32Array;
   /** Scratch for the next call's phases (swapped with `phase`). */
   nextPhase: Float32Array;
-  /** Per bug in `prev`: 0 vanished, 1 still alive, 2 vanished and taken as the hit. */
+  /** Per bug in `prev`: 0 vanished, 1 still alive, 2 vanished and taken as a hit or block. */
   seen: Uint8Array;
   hits: number;
+  blocks: number;
   /** fx's own generator; never the simulation's. */
   rng: Rng;
 };
@@ -25,6 +27,8 @@ export type Changes = {
 /** Gets the squashed bug itself: its position is where it was when the shot landed. */
 export type OnSquash = (bug: Bug) => void;
 export type OnHit = (x: number, y: number) => void;
+/** A hit the test shield blocked, at the robot. */
+export type OnBlock = (x: number, y: number) => void;
 
 export function createChanges(rng: Rng, capacity = MAX_BUGS): Changes {
   return {
@@ -33,15 +37,17 @@ export function createChanges(rng: Rng, capacity = MAX_BUGS): Changes {
     nextPhase: new Float32Array(capacity),
     seen: new Uint8Array(capacity),
     hits: 0,
+    blocks: 0,
     rng,
   };
 }
 
 /**
- * Calls `onSquash` with each bug squashed since the last call, and
- * `onHit` at the robot for each hit. Call once a frame, after the steps. Allocates nothing.
+ * Calls `onSquash` with each bug squashed since the last call, `onHit` at the robot for each
+ * hit and `onBlock` there for each blocked hit. Call once a frame, after the steps. Allocates
+ * nothing.
  */
-export function detectChanges(c: Changes, state: State, onSquash: OnSquash, onHit: OnHit): void {
+export function detectChanges(c: Changes, state: State, onSquash: OnSquash, onHit: OnHit, onBlock: OnBlock): void {
   const prev = c.prev;
   const bugs = state.bugs;
   const seen = c.seen;
@@ -63,18 +69,12 @@ export function detectChanges(c: Changes, state: State, onSquash: OnSquash, onHi
 
   const { x: rx, y: ry } = state.robot;
   for (let h = c.hits; h < state.hits; h++) {
-    let hit = -1;
-    let best = Infinity;
-    for (let j = 0; j < prev.length; j++) {
-      if (seen[j] !== 0) continue;
-      const d = (prev[j]!.x - rx) ** 2 + (prev[j]!.y - ry) ** 2;
-      if (d < best) {
-        best = d;
-        hit = j;
-      }
-    }
-    if (hit >= 0) seen[hit] = 2;
+    takeNearest(prev, seen, rx, ry);
     onHit(rx, ry);
+  }
+  for (let h = c.blocks; h < state.blocks; h++) {
+    takeNearest(prev, seen, rx, ry);
+    onBlock(rx, ry);
   }
 
   for (let j = 0; j < prev.length; j++) {
@@ -86,4 +86,20 @@ export function detectChanges(c: Changes, state: State, onSquash: OnSquash, onHi
   c.phase = next;
   c.nextPhase = phase;
   c.hits = state.hits;
+  c.blocks = state.blocks;
+}
+
+/** Marks the vanished bug closest to (rx, ry) as the one that touched the robot. */
+function takeNearest(prev: Bug[], seen: Uint8Array, rx: number, ry: number): void {
+  let near = -1;
+  let best = Infinity;
+  for (let j = 0; j < prev.length; j++) {
+    if (seen[j] !== 0) continue;
+    const d = (prev[j]!.x - rx) ** 2 + (prev[j]!.y - ry) ** 2;
+    if (d < best) {
+      best = d;
+      near = j;
+    }
+  }
+  if (near >= 0) seen[near] = 2;
 }

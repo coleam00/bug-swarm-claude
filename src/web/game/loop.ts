@@ -3,12 +3,13 @@
 import { arenaForViewport, type Arena } from "./arena";
 import { createChanges, detectChanges } from "./fx/changes";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "./fx/particles";
+import { createPops, spawnPop, updatePops } from "./fx/pop";
 import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import type { UpgradeId } from "../../server/rules";
 import { CHOICE_KEYS, STEERING_KEYS, keysToInput } from "./keys";
-import { BUG_LOOKS, bugLookId } from "./look";
+import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
 import { createRenderer, type Fx } from "./render";
 import { createRng } from "./rng";
 import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
@@ -145,12 +146,18 @@ export function startGame(
     texts: createTexts(),
     trail: createTrail(),
     shake: createShake(),
+    pops: createPops(),
   };
   const onSquash = (b: Bug) => {
     spawnBurst(fx.particles, b.x, b.y, BURST_COUNT, BUG_LOOKS[bugLookId(b)].glow, fxRng);
     spawnText(fx.texts, b.x, b.y);
   };
   const onHit = () => kick(fx.shake, HIT_SHAKE);
+  // A blocked hit pops the bubble, with no shake: it should feel unlike losing a life.
+  const onBlock = (x: number, y: number) => {
+    spawnPop(fx.pops, x, y);
+    spawnBurst(fx.particles, x, y, BURST_COUNT, GLOW_CYAN, fxRng);
+  };
 
   let raf = 0;
   let last: number | null = null;
@@ -174,10 +181,11 @@ export function startGame(
       acc = 0; // the pause isn't owed back as a burst of steps when play resumes
       if (state.choice !== shown) opts.onChoice((shown = state.choice));
     }
-    detectChanges(fx.changes, state, onSquash, onHit);
+    detectChanges(fx.changes, state, onSquash, onHit, onBlock);
     updateTrail(fx.trail, state.robot.x, state.robot.y, delta);
     updateParticles(fx.particles, delta);
     updateTexts(fx.texts, delta);
+    updatePops(fx.pops, delta);
     updateShake(fx.shake, delta, fxRng);
     renderer.draw(state, fx);
     if (state.over) {
