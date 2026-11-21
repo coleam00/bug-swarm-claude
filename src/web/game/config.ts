@@ -55,16 +55,15 @@ export type BugKind = {
   speed: number;
   /** Shots it takes to squash. */
   hp: number;
-  color: string;
   from: number;
   share: number;
 };
 
 /** Every kind of bug. The first is the base kind, there from the start. */
 export const BUG_KINDS = [
-  { id: "base", radius: 12, speed: 90, hp: 2, color: "#f97316", from: 0, share: 1 },
+  { id: "base", radius: 12, speed: 90, hp: 2, from: 0, share: 1 },
   // Small, quick and fragile: one shot squashes it.
-  { id: "fast", radius: 8, speed: 150, hp: 1, color: "#a3e635", from: 30, share: 0.25 },
+  { id: "fast", radius: 8, speed: 150, hp: 1, from: 30, share: 0.25 },
 ] as const satisfies readonly BugKind[];
 
 export const BASE_BUG: BugKind = BUG_KINDS[0];
