@@ -1,6 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { BUG_LOOK_IDS, BUG_LOOKS, PALETTE, bugLookId } from "./look";
-import { BUG_KINDS } from "./config";
+import {
+  BOMB_CHARGE_RADIUS,
+  BOMB_CHARGE_WIDTH,
+  BUG_LOOK_IDS,
+  BUG_LOOKS,
+  DRONE_SHOT_CORE,
+  PALETTE,
+  ROBOT_HALO_RADIUS,
+  ROBOT_MARK,
+  ROBOT_MARK_OUTLINE_WIDTH,
+  ROBOT_MARK_RADIUS,
+  ROBOT_RIM,
+  SHIELD_COLOUR,
+  SHIELD_RADIUS,
+  SHOT_CORE,
+  bugLookId,
+} from "./look";
+import { BUG_KINDS, ROBOT_RADIUS } from "./config";
 import { choose, createState, step } from "./sim";
 
 describe("bug looks", () => {
@@ -34,5 +50,24 @@ describe("bug looks", () => {
       }
     }
     expect([...seen].sort()).toEqual(BUG_KINDS.map((k) => k.id).sort());
+  });
+});
+
+describe("the robot and its upgrade effects stay apart", () => {
+  const markOuter = ROBOT_MARK_RADIUS + ROBOT_MARK_OUTLINE_WIDTH / 2;
+
+  test("the marker ring sits outside the body and inside the bomb's charge arc", () => {
+    expect(ROBOT_MARK_RADIUS - ROBOT_MARK_OUTLINE_WIDTH / 2).toBeGreaterThan(ROBOT_RADIUS);
+    expect(markOuter).toBeLessThan(BOMB_CHARGE_RADIUS - BOMB_CHARGE_WIDTH / 2);
+    expect(SHIELD_RADIUS).toBeGreaterThan(markOuter);
+    expect(ROBOT_HALO_RADIUS).toBeGreaterThan(markOuter);
+  });
+
+  test("the marker, the shield and the robot's rim are different colours", () => {
+    expect(new Set([ROBOT_MARK, SHIELD_COLOUR, ROBOT_RIM]).size).toBe(3);
+  });
+
+  test("a drone's shot is a different colour from the gun's", () => {
+    expect(DRONE_SHOT_CORE).not.toBe(SHOT_CORE);
   });
 });
