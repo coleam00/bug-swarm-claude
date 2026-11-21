@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server/rules";
-import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
+import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type Me, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
 import { restartIn } from "./game/guard";
 import { HINT_MS, hintText, takeFirstRun } from "./hint";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
-import { saveNotice, upgradeLevels, type SaveState } from "./over";
+import { fmt, rankLines, saveNotice, upgradeLevels, type SaveState } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
 import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
@@ -20,7 +20,8 @@ type Over = {
   result: RunResult;
   saved: SaveState;
   best: number | null | "loading" | "failed";
-  top: TopRow[] | "loading" | "failed";
+  /** The top 10 and, unless a stress run, where the player stands, both from the server's one ranking. */
+  top: { top: TopRow[]; me: Me | null } | "loading" | "failed";
   teams: Record<Team, number> | "loading" | "failed";
   /** When the run ended (performance.now()): restart input is ignored until RESTART_DELAY_MS after it. */
   diedAt: number;
@@ -65,7 +66,7 @@ export function App() {
       />
     );
   }
-  return <OverScreen key={phase.run} over={phase.over} team={player.team} onRestart={play} />;
+  return <OverScreen key={phase.run} over={phase.over} playerId={STRESS ? undefined : player.id} team={player.team} onRestart={play} />;
 }
 
 /**
@@ -204,7 +205,7 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
         report({ result, saved: "saving", best: "loading", top: "loading", teams: "loading", diedAt });
         void (async () => {
           const saved = await finishRun(runStart, result);
-          const [best, top, teams] = await Promise.all([STRESS ? null : fetchBest(player.id), fetchTop(), fetchTeams()]);
+          const [best, top, teams] = await Promise.all([STRESS ? null : fetchBest(player.id), fetchTop(STRESS ? undefined : player.id), fetchTeams()]);
           report({ result, saved, best, top, teams, diedAt });
         })();
       },
@@ -270,7 +271,7 @@ function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: 
   );
 }
 
-function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; onRestart: () => void }) {
+function OverScreen({ over, playerId, team, onRestart }: { over: Over; playerId: string | undefined; team: Team | null; onRestart: () => void }) {
   const [top, setTop] = useState(over.top);
   const [teams, setTeams] = useState(over.teams);
   const [ready, setReady] = useState(false);
@@ -279,17 +280,20 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
 
   const upgrades = upgradeLevels(over.result.upgrades);
   const notice = saveNotice(over.saved);
+  // The rank, the highlighted row and the rows all come from one read, so they always agree.
+  const me = typeof top === "object" ? top.me : null;
+  const ranks = rankLines(me);
 
   // The live top 10 and team totals: poll while this screen shows. Both show only what the
   // server returned; this run's score is in the totals once the server has counted it.
   useEffect(() => {
     if (over.saved === "saving") return;
     const id = setInterval(() => {
-      void fetchTop().then((t) => t !== "failed" && setTop(t));
+      void fetchTop(playerId).then((t) => t !== "failed" && setTop(t));
       void fetchTeams().then((t) => t !== "failed" && setTeams(t));
     }, TOP_POLL_MS);
     return () => clearInterval(id);
-  }, [over.saved]);
+  }, [over.saved, playerId]);
 
   // Any key, a fresh tap or "Play again" starts the next run, once RESTART_DELAY_MS has passed
   // since death. The guard decides; the timer only reveals "Play again" and the hint at that moment.
@@ -320,12 +324,19 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
     <main className="over">
       <div className="over-summary">
         <h1>Game over</h1>
-        <p className="over-score">{over.result.score}</p>
+        <p className="over-score">{fmt(over.result.score)}</p>
         {teams !== "failed" && <Race teams={teams} mine={team} />}
         {over.saved === "not-saved" ? (
           <p>Stress test: not saved</p>
         ) : (
-          over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>
+          over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : fmt(over.best)}</p>
+        )}
+        {ranks.length > 0 && (
+          <p className="over-rank">
+            {ranks.map((line) => (
+              <span key={line}>{line}</span>
+            ))}
+          </p>
         )}
         {notice && (
           <p role="alert" className="over-alert">
@@ -346,14 +357,14 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
           <p>Loading...</p>
         ) : top === "failed" ? (
           <p className="over-alert">Couldn't load the top 10</p>
-        ) : top.length === 0 ? (
+        ) : top.top.length === 0 ? (
           <p>No scores yet</p>
         ) : (
           <ol>
-            {top.map((row, i) => (
-              <li key={i}>
+            {top.top.map((row, i) => (
+              <li key={i} className={i === me?.row ? "mine" : undefined} aria-current={i === me?.row ? "true" : undefined}>
                 <span>{row.name}</span>
-                <b>{row.score}</b>
+                <b>{fmt(row.score)}</b>
               </li>
             ))}
           </ol>

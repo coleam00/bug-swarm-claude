@@ -17,7 +17,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize, sep } from "node:path";
-import { saveNotice } from "../src/web/over";
+import { MAX_SCORE, WORST_RANK_LINES, saveNotice } from "../src/web/over";
 import { UPGRADES } from "../src/web/game/config";
 
 const BUGS = 150;
@@ -250,7 +250,10 @@ async function applyInsets(cdp: Session, v: Viewport) {
 /** The longest line the game-over screen can show about saving. */
 const LONGEST_NOTICE = saveNotice("rate-limited");
 
-/** The game-over screen at `v`, with the worst case shown: the longest save alert added. */
+/**
+ * The game-over screen at `v`, with the worst case shown: the longest save alert and the longest
+ * rank lines added (a stress run fetches no best, so it shows neither), and row 0 highlighted.
+ */
 async function measureLayout(cdp: Session, v: Viewport) {
   await setViewport(cdp, v);
   await wait(300);
@@ -266,7 +269,16 @@ async function measureLayout(cdp: Session, v: Viewport) {
       alert.textContent = ${JSON.stringify(LONGEST_NOTICE)};
       summary.insertBefore(alert, again);
     }
-    const rows = document.querySelectorAll(".over-board ol li").length;
+    if (!document.querySelector(".over-rank")) {
+      const rank = document.createElement("p");
+      rank.className = "over-rank";
+      for (const line of ${JSON.stringify(WORST_RANK_LINES)}) rank.appendChild(document.createElement("span")).textContent = line;
+      summary.insertBefore(rank, document.querySelector(".over-summary [role=alert]") ?? again);
+    }
+    const items = [...document.querySelectorAll(".over-board ol li")];
+    items[0]?.classList.add("mine");
+    const rowHeight = items.length ? items[0].getBoundingClientRect().height : 0;
+    const rows = items.length;
     const chips = document.querySelectorAll("ul.over-upgrades li").length;
     const lastRow = document.querySelector(".over-board ol li:last-child");
     const race = document.querySelector(".over-race");
@@ -280,6 +292,9 @@ async function measureLayout(cdp: Session, v: Viewport) {
       scrollHeight: document.scrollingElement.scrollHeight,
       scrollWidth: document.scrollingElement.scrollWidth,
       race: race ? Math.round(race.getBoundingClientRect().height) : null,
+      // A score wider than its column, or a row taller than the first (a name that wrapped).
+      scoresClipped: items.filter((li) => { const b = li.querySelector("b"); return b && b.scrollWidth > b.clientWidth; }).length,
+      rowsWrapped: items.filter((li) => li.getBoundingClientRect().height > rowHeight + 0.5).length,
       innerWidth, innerHeight, rows, chips,
     };
   })()`);
@@ -369,11 +384,11 @@ try {
   });
   if (build.exitCode !== 0) throw new Error("vite build failed");
 
-  // The built game, plus a fake top 10 (ten of the widest names) and six-figure team totals,
+  // The built game, plus a fake top 10 (ten of the widest names at the top score) and six-figure team totals,
   // so the layout check sees the longest board and the race bar. Every other API call fails, as
   // with the server down; a stress run sends none.
   const root = normalize(outDir + sep);
-  const top = { top: Array.from({ length: 10 }, (_, i) => ({ name: TOP_NAME, score: 99999 - i })) };
+  const top = { top: Array.from({ length: 10 }, (_, i) => ({ name: TOP_NAME, score: MAX_SCORE - i })) };
   const teams = { teams: { tabs: 123456, spaces: 98765 } };
   server = Bun.serve({
     hostname: "127.0.0.1",
@@ -466,13 +481,15 @@ try {
       console.log(`| ${r.label} | ${r.bugs} | ${f1(r.avg)} | ${r.worst} | ${r.slow} | ${r.fxMax} | ${f2(r.draw.avg)} / ${f1(r.draw.p99)} / ${f1(r.draw.max)} ms |`);
     }
     for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
-    console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the too-many-runs alert added):\n");
+    console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows at the top score, the team race, the too-many-runs alert and the rank lines added):\n");
     console.log(
-      "| Viewport | Insets (t r b l) | Gate | Upgrade chips | Top-10 rows | Race bar height | Play again height | Play again bottom | Last row bottom | Chips bottom | Page height | Passes |",
+      "| Viewport | Insets (t r b l) | Gate | Upgrade chips | Top-10 rows | Race bar height | Play again height | Play again bottom | Last row bottom | Chips bottom | Page height | Scores clipped | Rows wrapped | Passes |",
     );
-    console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
+    console.log("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     // "Play again" (with its hint) is a touch target, so it must be on screen and at least 44 px tall.
-    const reachable = (m: any) => m.race !== null && m.buttonHeight >= 44 && m.againBottom <= m.innerHeight && m.scrollWidth <= m.innerWidth;
+    // Every top-10 row stays one line with its whole score, whatever the gate.
+    const reachable = (m: any) =>
+      m.race !== null && m.buttonHeight >= 44 && m.againBottom <= m.innerHeight && m.scrollWidth <= m.innerWidth && m.scoresClipped === 0 && m.rowsWrapped === 0;
     const pass = ({ v, m }: { v: Viewport; m: any }) => reachable(m) && (v.gate === "reachable" || m.scrollHeight <= m.innerHeight);
     const insetsText = (v: Viewport) => (v.insets ? `${v.insets.top} ${v.insets.right} ${v.insets.bottom} ${v.insets.left}` : "0");
     for (const l of layouts) {
@@ -480,7 +497,7 @@ try {
       const ok = pass(l);
       if (!ok) failed = true;
       console.log(
-        `| ${v.label} | ${insetsText(v)} | ${v.gate ?? "fit"} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.buttonHeight} | ${m.againBottom} | ${m.boardBottom} | ${m.chipsBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${ok ? "yes" : "NO"} |`,
+        `| ${v.label} | ${insetsText(v)} | ${v.gate ?? "fit"} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.buttonHeight} | ${m.againBottom} | ${m.boardBottom} | ${m.chipsBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${m.scoresClipped} | ${m.rowsWrapped} | ${ok ? "yes" : "NO"} |`,
       );
     }
     console.log("\nUpgrade choice (three cards with the longest name and line), inside the safe area:\n");
@@ -498,7 +515,7 @@ try {
     if (slow.length) failed = true;
     console.log(
       `\n${failed ? "FAIL" : "PASS"}: ${slow.length ? `under ${TARGET_FPS} fps at ${slow.map((r) => r.label).join(", ")}` : `${TARGET_FPS}+ fps avg and worst 1 s at both sizes`}${
-        layouts.some((l) => !pass(l)) ? "; a game-over layout fails its gate (doesn't fit, no race bar, Play again off screen or under 44 px)" : ""
+        layouts.some((l) => !pass(l)) ? "; a game-over layout fails its gate (doesn't fit, no race bar, Play again off screen or under 44 px, or a top-10 row clips or wraps)" : ""
       }${choices.some((c) => !choiceFits(c.m)) ? "; the upgrade choice leaves the safe area" : ""}`,
     );
   }

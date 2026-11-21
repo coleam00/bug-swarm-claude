@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,12 +9,14 @@ import {
   computeStats,
   hideName,
   openDb,
+  rankOf,
   recordRunEnded,
   recordRunStarted,
   resetData,
   teamTotals,
   topTen,
   upsertPlayer,
+  type RankEntry,
 } from "./db";
 
 let dir: string;
@@ -209,4 +211,24 @@ test("bun run stats, hide and reset run their scripts", () => {
   expect(pkg.scripts.stats).toBe("bun scripts/stats.ts");
   expect(pkg.scripts.hide).toBe("bun scripts/hide.ts");
   expect(pkg.scripts.reset).toBe("bun scripts/reset.ts");
+});
+
+describe("rankOf", () => {
+  const entry = (playerId: string, score: number, firstAt: string): RankEntry => ({ playerId, name: playerId, score, firstAt });
+  const entries = [entry("p-a", 100, "2026-11-28T15:00:01Z"), entry("p-b", 50, "2026-11-28T15:00:02Z"), entry("p-c", 50, "2026-11-28T15:00:03Z")];
+
+  test("a player not in the ranking yet is placed after everyone tied with them, and counted", () => {
+    expect(rankOf(entries, "p-new", 50, false)).toEqual({ rank: 4, ranked: 4, next: { rank: 3, points: 1 }, row: null });
+    expect(rankOf(entries, "p-new", 101, false)).toEqual({ rank: 1, ranked: 4, next: null, row: null });
+  });
+
+  test("a fresh best above the stale cached one ranks by the fresh score; `row` stays the cached one", () => {
+    expect(rankOf(entries, "p-c", 60, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 2 });
+  });
+
+  test("past the top 10 there is no row", () => {
+    const many = Array.from({ length: 12 }, (_, i) => entry(`p-${String(i).padStart(2, "0")}`, 100 - i, "2026-11-28T15:00:00Z"));
+    expect(rankOf(many, "p-10", 90, false)).toEqual({ rank: 11, ranked: 12, next: { rank: 10, points: 2 }, row: null });
+    expect(rankOf(many, "p-09", 91, false).row).toBe(9);
+  });
 });

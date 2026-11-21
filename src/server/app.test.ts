@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { LOGGED_STARTS, RATE_WINDOW_MS, RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW, clientIpResolver, createApp } from "./app";
-import { RUN_ENDED, computeStats, hideName, openDb, upsertPlayer } from "./db";
+import { LOGGED_STARTS, RATE_WINDOW_MS, RUN_STARTS_PER_PLAYER, RUN_STARTS_PER_WINDOW, TOP_CACHE_MS, clientIpResolver, createApp } from "./app";
+import { RUN_ENDED, computeStats, hideName, openDb, recordRunEnded, upsertPlayer } from "./db";
 import { ROBOT_RIM } from "../web/game/look";
 import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, TEAMS, TEST_SHIELD, UPGRADE_IDS, type Team } from "./rules";
 
@@ -319,6 +319,122 @@ describe("top 10 and best", () => {
       { name: "First", score: 30 },
       { name: "Second", score: 0 },
     ]);
+  });
+
+  type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
+  async function standing(a: App, playerId: string) {
+    const res = await a.request(`/api/top?player=${playerId}`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as { top: { name: string; score: number }[]; me: Me };
+  }
+
+  test("?player= adds where that player stands: rank, how many are ranked, the points to the next rank, their row", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ada", 100);
+    await play(a, "player-0002", "Bob", 50);
+    await play(a, "player-0003", "Cy", 30);
+    clock += TOP_CACHE_MS;
+    const { top, me } = await standing(a, "player-0003");
+    expect(top.map((r) => r.name)).toEqual(["Ada", "Bob", "Cy"]);
+    expect(me).toEqual({ rank: 3, ranked: 3, next: { rank: 2, points: 21 }, row: 2 });
+    expect((await standing(a, "player-0001")).me).toEqual({ rank: 1, ranked: 3, next: null, row: 0 });
+  });
+
+  test("ties: distinct ranks, the earlier first finisher ahead, and 1 point passes a tie", async () => {
+    const a = app();
+    await play(a, "player-000b", "Bee", 20); // B's first finish is earlier than A's...
+    await play(a, "player-000a", "Aye", 50);
+    await play(a, "player-000b", "Bee", 50); // ...so B is ahead at 50 each
+    clock += TOP_CACHE_MS;
+    expect((await standing(a, "player-000b")).me).toEqual({ rank: 1, ranked: 2, next: null, row: 0 });
+    expect((await standing(a, "player-000a")).me).toEqual({ rank: 2, ranked: 2, next: { rank: 1, points: 1 }, row: 1 });
+  });
+
+  test("ties inside the same millisecond still get distinct ranks, in the rows' order", async () => {
+    const a = app();
+    const ids = ["player-0003", "player-0001", "player-0002"];
+    const runs = [];
+    for (const id of ids) runs.push(await startRun(a, id, id.slice(-4)));
+    clock += 10_000;
+    for (const r of runs) expect((await post(a, `/api/runs/${r}/end`, endBody(40, 4, 10))).status).toBe(200);
+    clock += TOP_CACHE_MS;
+    for (const id of ids) {
+      const { me } = await standing(a, id);
+      expect(me.rank).toBe(me.row! + 1);
+    }
+    expect((await standing(a, "player-0001")).me.rank).toBe(1);
+  });
+
+  test("a hidden name has no rank and counts for nobody, whatever its case, from the next cache turn on", async () => {
+    const a = app();
+    await play(a, "player-0001", "Bad Name", 100);
+    await play(a, "player-0002", "Good", 50);
+    clock += TOP_CACHE_MS;
+    expect((await standing(a, "player-0002")).me).toEqual({ rank: 2, ranked: 2, next: { rank: 1, points: 51 }, row: 1 });
+    hideName(db, "  bad  NAME ", new Date(clock));
+    // Inside the cached second, the hide hasn't reached the ranking yet: the old standing stays.
+    expect((await standing(a, "player-0001")).me.rank).toBe(1);
+    clock += TOP_CACHE_MS;
+    expect((await standing(a, "player-0001")).me).toEqual({ rank: null, ranked: 1, next: null, row: null });
+    expect((await standing(a, "player-0002")).me).toEqual({ rank: 1, ranked: 1, next: null, row: 0 });
+  });
+
+  test("no finished run, or an id the server never saw: no rank, the ranked count still given", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ada", 100);
+    await startRun(a, "player-0002", "Bob"); // started, never finished
+    clock += TOP_CACHE_MS;
+    const none = { rank: null, ranked: 1, next: null, row: null };
+    expect((await standing(a, "player-0002")).me).toEqual(none);
+    expect((await standing(a, "player-9999")).me).toEqual(none);
+  });
+
+  test("a run that just finished ranks at once; the rows and `row` follow the 1 s snapshot", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ada", 100);
+    await play(a, "player-0002", "Bob", 50);
+    const runId = await startRun(a, "player-0003", "Cy");
+    clock += 10_000;
+    expect((await standing(a, "player-0003")).me).toEqual({ rank: null, ranked: 2, next: null, row: null });
+    // Same instant: inside the window the read above filled.
+    expect((await post(a, `/api/runs/${runId}/end`, endBody(60, 6, 10))).status).toBe(200);
+    const fresh = await standing(a, "player-0003");
+    expect(fresh.top.map((r) => r.name)).toEqual(["Ada", "Bob"]);
+    expect(fresh.me).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: null });
+    clock += TOP_CACHE_MS;
+    const later = await standing(a, "player-0003");
+    expect(later.top.map((r) => r.name)).toEqual(["Ada", "Cy", "Bob"]);
+    expect(later.me).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 1 });
+  });
+
+  test("a missing or malformed ?player= gives exactly { top }; no player id is ever sent back", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ada", 100);
+    clock += TOP_CACHE_MS;
+    for (const q of ["", "?player=bad!", "?player=short", "?player="]) {
+      expect(await (await a.request(`/api/top${q}`)).json()).toEqual({ top: [{ name: "Ada", score: 100 }] });
+    }
+    expect(await (await a.request("/api/top?player=player-0001")).text()).not.toContain("player-0001");
+  });
+
+  test("500 ranked players: every rank read inside the second comes from one cached ranking", async () => {
+    const a = app();
+    db.transaction(() => {
+      for (let i = 0; i < 500; i++) {
+        const id = `player-${String(i).padStart(4, "0")}`;
+        upsertPlayer(db, id, `P${i}`, TABS, new Date(clock));
+        recordRunEnded(db, { runId: `run-${i}`, playerId: id, score: i, squashes: 0, seconds: 0, touch: false, upgrades: [], team: TABS }, new Date(clock + i));
+      }
+    })();
+    expect((await standing(a, "player-0000")).me).toMatchObject({ rank: 500, ranked: 500, next: { rank: 499, points: 2 } });
+    const queries = spyOn(db, "query");
+    for (let i = 0; i < 50; i++) await standing(a, `player-${String(i * 10).padStart(4, "0")}`);
+    // Per read: the player's row and their best, both by key. The ranking isn't read again.
+    expect(queries.mock.calls.every(([sql]) => !String(sql).includes("GROUP BY"))).toBe(true);
+    clock += TOP_CACHE_MS;
+    await standing(a, "player-0000");
+    expect(queries.mock.calls.some(([sql]) => String(sql).includes("GROUP BY"))).toBe(true);
+    queries.mockRestore();
   });
 
   test("a player's best", async () => {

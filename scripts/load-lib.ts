@@ -94,7 +94,8 @@ export function startBody(i: number): { playerId: string; name: string; team: Te
 export const ROUTES = {
   start: { label: "POST /api/runs", method: "POST", path: () => "/api/runs" },
   end: { label: "POST /api/runs/:id/end", method: "POST", path: (runId: string) => `/api/runs/${encodeURIComponent(runId)}/end` },
-  top: { label: "GET /api/top", method: "GET", path: () => "/api/top" },
+  // The game-over screen asks with its player id, so every top 10 read here also ranks the player.
+  top: { label: "GET /api/top?player=", method: "GET", path: (playerId: string) => `/api/top?player=${encodeURIComponent(playerId)}` },
   teams: { label: "GET /api/teams", method: "GET", path: () => "/api/teams" },
   best: {
     label: "GET /api/players/:id/best",
