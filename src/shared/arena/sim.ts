@@ -2,11 +2,14 @@
 // the browser runs `stepMover` to predict its own robot. No clock, no Math.random, no DOM: time
 // comes in as the fixed step and randomness from the arena's seeded generator. This file holds
 // the state, players and lives, and the step's order; shots, heat and the streak live in
-// combat.ts, bugs (spawning, the mix of kinds, contact) in bugs/ with one file per kind, down, revive and bleed-out in downs.ts.
+// combat.ts, bugs (spawning, the mix of kinds, contact) in bugs/ with one file per kind, pickups
+// (drops, the floor, effects) in pickups/ with one file per pickup, down, revive and bleed-out in downs.ts.
 import type { Team } from "../../server/rules";
 import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
 import { stepDowns } from "./downs";
+import { stepPickups } from "./pickups";
+import { shieldBlocks } from "./pickups/shield";
 import {
   ACCEL,
   DASH_COOLDOWN_TICKS,
@@ -30,7 +33,9 @@ import {
   WAVE_S,
   WORLD_H,
   WORLD_W,
+  PICKUP_IDS,
   type BugKind,
+  type PickupId,
 } from "./constants";
 import { createRng, nextRandom, type Rng } from "./rng";
 
@@ -113,6 +118,11 @@ export type Player = Mover & {
   firstLife: boolean;
   /** Bugs this player's pressure owes the arena (fractional). */
   budget: number;
+  /**
+   * Ticks left of each pickup's effect, by its index in PICKUP_IDS (0: not active). Allocated once
+   * at the join, never replaced; a new life, the life ending and going down clear it (#73).
+   */
+  effect: number[];
 };
 
 /**
@@ -153,7 +163,21 @@ export type Shot = {
   dy: number;
   /** Units flown so far. */
   travelled: number;
+  /** Bugs it may still hit: 1 for a normal shot, LASER_PIERCE for a review laser shot (#73). */
+  pierce: number;
+  /** Fired under the review laser (drawn as a beam). */
+  laser: boolean;
+  /** Ids of the bugs it already hit (0: none), so a piercing shot never hits one bug twice. */
+  hitA: number;
+  hitB: number;
+  /** Bugs it has hit. */
+  hits: number;
 };
+
+/** A pickup lying on the floor (#73): `id` unique within its arena, `ticksLeft` before it goes. */
+export type FloorPickup = { id: number; kind: PickupId; x: number; y: number; ticksLeft: number };
+/** Player `player` took a pickup of `kind` this tick. */
+export type PickupTaken = { player: number; kind: PickupId };
 
 /** A shot fired this tick: where it left the barrel and its angle (spread included). */
 export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number };
@@ -181,6 +205,10 @@ export type ArenaEvents = {
   /** Ids of players who went down. */
   downs: number[];
   revives: Revive[];
+  /** Pickups taken (#73). */
+  pickups: PickupTaken[];
+  /** Ids of players whose shield blocked a hit (not in hitsTaken or touches). */
+  blocks: number[];
 };
 
 export type ArenaState = {
@@ -192,6 +220,11 @@ export type ArenaState = {
   shots: Shot[];
   nextBugId: number;
   nextShotId: number;
+  /** Pickups on the floor (#73), at most MAX_PICKUPS_PER_ARENA. */
+  floor: FloorPickup[];
+  nextPickupId: number;
+  /** Pickup drops draw from here, never from `rng`, so spawns and spread replay as with no pickups. */
+  dropRng: Rng;
   events: ArenaEvents;
 };
 
@@ -209,7 +242,11 @@ export function createArena(seed: number): ArenaState {
     shots: [],
     nextBugId: 1,
     nextShotId: 1,
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [] },
+    floor: [],
+    nextPickupId: 1,
+    // Not seed ^ 0x5bd1e995: skill-lib seeds the policies' own generators with that.
+    dropRng: createRng(seed ^ 0x68e31da4),
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [] },
   };
 }
 
@@ -239,6 +276,7 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.budget = 0;
   p.dashTicks = 0;
   p.dashCooldown = DASH_SPAWN_LOCK_TICKS;
+  p.effect.fill(0);
 }
 
 function clearDown(p: Player): void {
@@ -370,6 +408,7 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
     dashTicks: 0,
     dashCooldown: 0,
     dashWas: false,
+    effect: PICKUP_IDS.map(() => 0),
   };
   startLife(state, p, spot.x, spot.y);
   state.players.push(p);
@@ -384,6 +423,7 @@ export function endLife(state: ArenaState, p: Player): LifeEnd {
   p.vx = 0;
   p.vy = 0;
   p.dashTicks = 0;
+  p.effect.fill(0);
   return { id: p.id, score: p.score, kills: p.kills, ticks: state.tick - p.lifeStartTick };
 }
 
@@ -411,8 +451,26 @@ export function canBeHit(p: Player): boolean {
 }
 
 /**
+ * Every hit on a player enters here (bugs/index.ts contact today; a later hit source, such as a
+ * spitter's spit, must call this too, never hitPlayer). The caller checked `p` can be hit and
+ * spends whatever hit it. A test shield (#73, pickups/shield.ts) blocks the hit: the shield is
+ * spent, `p` is untouchable for INVULN_S as after a hit (so a second bug in the same contact pass
+ * does not land at once), and events.blocks gets `p` (no touch, no hit taken). Else `p` takes it:
+ * events.touches gets which kind, and hitPlayer.
+ */
+export function strikePlayer(state: ArenaState, p: Player, kind: BugKind): void {
+  if (shieldBlocks(p)) {
+    p.invulnTicks = Math.round(INVULN_S / DT);
+    state.events.blocks.push(p.id);
+    return;
+  }
+  state.events.touches.push({ player: p.id, kind });
+  hitPlayer(state, p);
+}
+
+/**
  * Takes a hit on `p` (the caller checked it can be hit): untouchable for a moment; the last hit
- * puts it down (downs.ts revives it or bleeds it out).
+ * puts it down (downs.ts revives it or bleeds it out). Only strikePlayer calls it, after a shield.
  */
 export function hitPlayer(state: ArenaState, p: Player): void {
   p.hits++;
@@ -431,6 +489,7 @@ function downPlayer(state: ArenaState, p: Player): void {
   p.vy = 0;
   p.invulnTicks = 0;
   p.dashTicks = 0;
+  p.effect.fill(0);
   state.events.downs.push(p.id);
 }
 
@@ -571,17 +630,19 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
 
 /**
  * Advances the arena one fixed step, in a fixed order (arrays in index order, every random draw
- * from state.rng), so the same seed and inputs replay exactly:
+ * from state.rng, pickup drops from state.dropRng), so the same seed and inputs replay exactly:
  * 1. players: those up move and dash (stepMover); a downed player stands still, its aim frozen
  *    and its dash ignored; an out player whose input has dash, RESPAWN_DELAY_S or more after
  *    going out, respawns at a safeSpot in a life that is no longer their first; a player who is
  *    up and holding fire loses any spawn protection left, before they fire;
  * 2. fire and heat, players who are up only (combat.ts);
- * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits; the
- *    last hit puts a player down (bugs/);
- * 4. shots: travel, hits, kills, misses (combat.ts);
- * 5. downs: revive progress, revives and bleed-outs (downs.ts);
- * 6. spawn protection counts down (after contact, so a join and a respawn are both protected for
+ * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits (a test
+ *    shield blocks one: strikePlayer); the last hit puts a player down (bugs/);
+ * 4. shots: travel, hits (a review laser shot pierces), kills, misses (combat.ts);
+ * 5. pickups: effects count down, floor pickups age, this step's kills drop, players who are up
+ *    take what they touch (pickups/);
+ * 6. downs: revive progress, revives and bleed-outs (downs.ts);
+ * 7. spawn protection counts down (after contact, so a join and a respawn are both protected for
  *    SPAWN_PROTECT_S of contact steps), and the tick counts.
  * `state.events` reports what happened in this step.
  */
@@ -595,6 +656,8 @@ export function stepArena(state: ArenaState): void {
   ev.livesEnded.length = 0;
   ev.downs.length = 0;
   ev.revives.length = 0;
+  ev.pickups.length = 0;
+  ev.blocks.length = 0;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;
@@ -618,6 +681,7 @@ export function stepArena(state: ArenaState): void {
   for (const p of state.players) if (canAct(p)) stepFire(state, p);
   stepBugs(state);
   stepShots(state);
+  stepPickups(state);
   stepDowns(state);
   for (const p of state.players) if (p.alive && p.protectTicks > 0) p.protectTicks--;
   state.tick++;
