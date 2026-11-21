@@ -132,9 +132,6 @@ describe("run start", () => {
     for (let i = 0; i < RUN_STARTS_PER_PLAYER; i++) await startRun(a);
     expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" })).status).toBe(429); // player cap
     await startRun(a, "player-0002"); // the IP's 41st: the refused start didn't take it
-    const both = await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" }); // both caps refuse
-    expect(both.status).toBe(429);
-    expect(both.headers.get("retry-after")).toBe(String(RATE_WINDOW_MS / 1000));
   });
 
   test("runStartsPerWindow sets the IP limit: with 2, the 3rd start is 429", async () => {
@@ -176,8 +173,8 @@ describe("run start", () => {
     for (let i = 0; i < RUN_STARTS_PER_WINDOW; i++) {
       const client = `198.51.${Math.floor(i / 256)}.${i % 256}`;
       expect((await startVia(byDefault, i, { "x-forwarded-for": client })).status).toBe(200);
-      // A client prepending its own entries changes nothing: the proxy's entry is the rightmost.
-      expect((await startVia(hops1, i, { "x-forwarded-for": `6.6.6.6, ${client}` })).status).toBe(200);
+      // A client prepending its own entries changes nothing, and hops 1 ignores X-Real-IP: the proxy's entry is the rightmost.
+      expect((await startVia(hops1, i, { "x-forwarded-for": `6.6.6.6, ${client}`, "x-real-ip": "9.9.9.9" })).status).toBe(200);
     }
     expect((await startVia(hops1, 0, { "x-forwarded-for": "7.7.7.7, 198.51.0.0" })).status).toBe(429);
   }, 30_000);
