@@ -240,7 +240,7 @@ function start(playerId: string, name: string, team: Team): void {
   canvas.addEventListener("pointerdown", (e) => {
     const p = local(e);
     if (canRespawn()) pressRespawn(controls);
-    pointerDown(controls, p.kind, e.pointerId, p.x, p.y, e.button);
+    pointerDown(controls, p.kind, e.pointerId, p.x, p.y, e.button, e.buttons);
     if (p.kind === "touch") {
       try {
         canvas.setPointerCapture(e.pointerId); // keep the moves if a thumb slides off the canvas
@@ -252,9 +252,9 @@ function start(playerId: string, name: string, team: Team): void {
   });
   canvas.addEventListener("pointermove", (e) => {
     const p = local(e);
-    pointerMove(controls, p.kind, e.pointerId, p.x, p.y);
+    pointerMove(controls, p.kind, e.pointerId, p.x, p.y, e.buttons);
   });
-  const end = (e: PointerEvent) => pointerUp(controls, e.pointerType as PointerKind, e.pointerId, e.button);
+  const end = (e: PointerEvent) => pointerUp(controls, e.pointerType as PointerKind, e.pointerId, e.buttons);
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());

@@ -93,18 +93,52 @@ describe("dash", () => {
     pointerDown(c, "mouse", 1, 300, 300, 2);
     readControls(c, 640, 360, o);
     expect([o.dash, o.fire]).toEqual([true, false]);
-    pointerUp(c, "mouse", 1, 2);
+    pointerUp(c, "mouse", 1, 0);
     pointerDown(c, "mouse", 1, 300, 300, 0);
     readControls(c, 640, 360, o);
     expect([o.dash, o.fire]).toEqual([false, true]);
   });
 
-  test("clicking the dash button dashes and does not fire", () => {
+  test("right while holding left (a move with buttons 3) dashes and keeps firing; either release order lets go", () => {
+    for (const leftFirst of [true, false]) {
+      const c = screen(1280, 720);
+      const o = out();
+      pointerDown(c, "mouse", 1, 300, 300, 0, 1);
+      pointerMove(c, "mouse", 1, 300, 300, 3);
+      readControls(c, 640, 360, o);
+      expect([o.dash, o.fire]).toEqual([true, true]);
+      pointerMove(c, "mouse", 1, 310, 300, 3);
+      readControls(c, 640, 360, o);
+      expect([o.dash, o.fire]).toEqual([false, true]);
+      if (leftFirst) {
+        pointerMove(c, "mouse", 1, 310, 300, 2);
+        readControls(c, 640, 360, o);
+        expect([o.dash, o.fire]).toEqual([false, false]);
+        pointerUp(c, "mouse", 1, 0);
+      } else {
+        pointerMove(c, "mouse", 1, 310, 300, 1);
+        readControls(c, 640, 360, o);
+        expect([o.dash, o.fire]).toEqual([false, true]);
+        pointerUp(c, "mouse", 1, 0);
+      }
+      readControls(c, 640, 360, o);
+      expect([o.dash, o.fire]).toEqual([false, false]);
+    }
+  });
+
+  test("clicking the dash button dashes and does not fire, even held and dragged off", () => {
     const c = screen(1280, 720);
     const o = out();
     pointerDown(c, "mouse", 1, c.dashButton.x + 10, c.dashButton.y - 10, 0);
     readControls(c, 640, 360, o);
     expect([o.dash, o.fire]).toEqual([true, false]);
+    pointerMove(c, "mouse", 1, 400, 300, 1);
+    readControls(c, 640, 360, o);
+    expect([o.dash, o.fire]).toEqual([false, false]);
+    pointerUp(c, "mouse", 1, 0);
+    pointerDown(c, "mouse", 1, 400, 300, 0);
+    readControls(c, 640, 360, o);
+    expect(o.fire).toBe(true);
   });
 
   test("two fingers: one on the move stick, one tapping the dash button: a move and a dash, and no aim stick", () => {

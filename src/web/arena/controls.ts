@@ -40,8 +40,12 @@ export type Controls = {
   aim: number;
   /** A finger has touched: the hello's touch flag. */
   touched: boolean;
-  /** The mouse's left button (or a pen's tip) is held. */
+  /** The mouse's left button (or a pen's tip) is held, and its press did not land on the dash button. */
   firing: boolean;
+  /** The mouse buttons last seen held (the DOM's `buttons`: 1 left or a pen's tip, 2 right). */
+  mouseButtons: number;
+  /** The held left button went down on the dash button, so it does not fire. */
+  leftOnDash: boolean;
   /** A respawn press waiting for the next input. */
   respawn: boolean;
   /** A dash press waiting for the next input. */
@@ -59,6 +63,8 @@ export function createControls(width: number): Controls {
     aim: 0,
     touched: false,
     firing: false,
+    mouseButtons: 0,
+    leftOnDash: false,
     respawn: false,
     dashPress: false,
     dashButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1 },
@@ -89,11 +95,27 @@ function onDashButton(c: Controls, x: number, y: number): boolean {
 
 export type PointerKind = "touch" | "mouse" | "pen";
 
+/** The DOM's `buttons` bit for a `button`: 0 (left, a pen's tip) is 1, 2 (right) is 2. */
+const BUTTON_BITS: Record<number, number> = { 0: 1, 1: 4, 2: 2 };
+
+/**
+ * The mouse's buttons (the DOM's `buttons`, on every mouse event: a second button pressed while
+ * one is held comes as a move, not a press). The left button fires while held, unless it went
+ * down on the dash button; the right button dashes as it goes down.
+ */
+function setMouseButtons(c: Controls, buttons: number): void {
+  if (buttons & 2 && !(c.mouseButtons & 2)) c.dashPress = true;
+  if (!(buttons & 1)) c.leftOnDash = false;
+  c.mouseButtons = buttons;
+  c.firing = (buttons & 1) !== 0 && !c.leftOnDash;
+}
+
 /**
  * A press. `button` is the DOM's: 0 is the left mouse button or a pen's tip, 2 the right button
- * (a dash). A press on the dash button dashes and does nothing else.
+ * (a dash); `buttons` all those held now, `button`'s alone by default. A press on the dash button
+ * dashes and does nothing else.
  */
-export function pointerDown(c: Controls, kind: PointerKind, id: number, x: number, y: number, button = 0): void {
+export function pointerDown(c: Controls, kind: PointerKind, id: number, x: number, y: number, button = 0, buttons = BUTTON_BITS[button] ?? 0): void {
   if (kind === "touch") {
     c.touched = true;
     c.mouse.on = false;
@@ -101,33 +123,40 @@ export function pointerDown(c: Controls, kind: PointerKind, id: number, x: numbe
   if (onDashButton(c, x, y)) {
     c.dashPress = true;
     if (kind === "touch") c.dashButton.id = id;
+    else {
+      if (button === 0) c.leftOnDash = true;
+      c.mouseButtons = buttons;
+      c.firing = false;
+    }
     return;
   }
   if (kind !== "touch") {
     c.mouse.on = true;
     c.mouse.x = x;
     c.mouse.y = y;
-    if (button === 0) c.firing = true;
-    else if (button === 2) c.dashPress = true;
+    setMouseButtons(c, buttons);
     return;
   }
   stickDown(x < c.width / 2 ? c.move : c.aimStick, id, x, y);
 }
 
-export function pointerMove(c: Controls, kind: PointerKind, id: number, x: number, y: number): void {
+/** A move. `buttons` (mouse and pen): the DOM's buttons held now, when the event has them. */
+export function pointerMove(c: Controls, kind: PointerKind, id: number, x: number, y: number, buttons?: number): void {
   if (kind !== "touch") {
     c.mouse.on = true;
     c.mouse.x = x;
     c.mouse.y = y;
+    if (buttons !== undefined) setMouseButtons(c, buttons);
     return;
   }
   if (id === c.dashButton.id) return;
   if (!stickMove(c.move, id, x, y)) stickMove(c.aimStick, id, x, y);
 }
 
-export function pointerUp(c: Controls, kind: PointerKind, id: number, button = 0): void {
+/** A release. `buttons` (mouse and pen): the DOM's buttons still held, none by default. */
+export function pointerUp(c: Controls, kind: PointerKind, id: number, buttons = 0): void {
   if (kind !== "touch") {
-    if (button === 0) c.firing = false;
+    setMouseButtons(c, buttons);
     return;
   }
   if (id === c.dashButton.id) {
@@ -141,6 +170,8 @@ export function pointerUp(c: Controls, kind: PointerKind, id: number, button = 0
 export function releaseAll(c: Controls): void {
   c.keys.clear();
   c.firing = false;
+  c.mouseButtons = 0;
+  c.leftOnDash = false;
   c.dashButton.id = -1;
   stickUp(c.move, c.move.id);
   stickUp(c.aimStick, c.aimStick.id);
