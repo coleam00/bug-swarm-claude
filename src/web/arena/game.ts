@@ -11,7 +11,7 @@
 // `respawn()`, which sends the respawn press once RESTART_DELAY_MS has passed. `stop()` undoes
 // everything `startArena` did: the frame loop, every listener, the probe and the socket, so a
 // remount never leaves a second socket (each one's leaving would save a life).
-import { DASH_COOLDOWN_TICKS, MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
+import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
 import {
   EVENT,
   JOIN,
@@ -36,9 +36,10 @@ import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { BUG_LOOKS, GLOW_SHOT } from "../game/look";
+import { GLOW_SHOT } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
+import { BUG_DRAW } from "./draw/bugs";
 import {
   DASH_KEYS,
   createControls,
@@ -129,7 +130,8 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   const hudFx = createHudFx();
   // Effects draw from their own generator, never the simulation's.
   const fxRng = createRng(Date.now() | 0);
-  const killGlow = BUG_LOOKS.base.glow;
+  // A kill bursts in its kind's glow, by its index in BUG_KINDS.
+  const killGlows = BUG_KINDS.map((k) => BUG_DRAW[k].look.glow);
 
   // Who is in the arena: names and teams come once, in the welcome and in join events.
   const roster = new Map<number, Robot>();
@@ -182,8 +184,8 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
 
   const isMine = (owner: number) => owner === you;
   const spark = (x: number, y: number) => spawnBurst(particles, x, y, SPARK_COUNT, GLOW_SHOT, fxRng);
-  const showKill = (x: number, y: number, points: number) => {
-    spawnBurst(particles, x, y, BURST_COUNT, killGlow, fxRng);
+  const showKill = (x: number, y: number, points: number, _by: number, kind: number) => {
+    spawnBurst(particles, x, y, BURST_COUNT, killGlows[kind] ?? killGlows[0]!, fxRng);
     if (points > 0) spawnText(texts, x, y, points);
   };
 
@@ -214,7 +216,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       wave = m.w;
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick);
       for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
-      for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1]);
+      for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       Object.assign(me, m.me);
       haveMe = true;
       if (noteMe(hudFx, m.me)) kick(shake, HIT_SHAKE);
@@ -362,8 +364,11 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     x: new Float32Array(MAX_BUGS_PER_ARENA),
     y: new Float32Array(MAX_BUGS_PER_ARENA),
     heading: new Float32Array(MAX_BUGS_PER_ARENA),
-    phase: new Float32Array(MAX_BUGS_PER_ARENA),
+    anim: new Float32Array(MAX_BUGS_PER_ARENA),
     kind: new Uint8Array(MAX_BUGS_PER_ARENA),
+    phase: new Uint8Array(MAX_BUGS_PER_ARENA),
+    angle: new Float32Array(MAX_BUGS_PER_ARENA),
+    phaseS: new Float32Array(MAX_BUGS_PER_ARENA),
     count: 0,
   };
   /** Each bug's last heading, so a bug standing still keeps facing where it was going. */
@@ -438,12 +443,26 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
           headings.set(id, heading);
         }
       }
+      // v6: a bug out of its kind's first phase carries its phase, locked angle and ticks in it.
+      const phase = row.length > 4 ? row[4]! : 0;
+      const angle = row.length > 4 ? row[5]! : 0;
+      let phaseS = 0;
+      if (phase !== 0) {
+        // It faces the angle its phase locked (standing in a tell, it has no movement to face).
+        heading = angle;
+        headings.set(id, heading);
+        const nextPhase = next && next.length > 4 ? next[4]! : 0;
+        phaseS = (row[6]! + (nextPhase === phase ? span.t : 0)) * DT;
+      }
       const i = bugs.count++;
       bugs.x[i] = x;
       bugs.y[i] = y;
       bugs.heading[i] = heading;
-      bugs.phase[i] = (id * 0.618) % 1;
+      bugs.anim[i] = (id * 0.618) % 1;
       bugs.kind[i] = row[1];
+      bugs.phase[i] = phase;
+      bugs.angle[i] = angle;
+      bugs.phaseS[i] = phaseS;
     }
     // Forget the headings of bugs long gone.
     if (headings.size > MAX_BUGS_PER_ARENA * 2) headings.clear();

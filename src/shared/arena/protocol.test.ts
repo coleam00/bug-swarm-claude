@@ -128,17 +128,24 @@ describe("server messages", () => {
     const src = {
       tick: 9,
       players,
-      bugs: [{ id: 7, kind: "crawler", x: 100.04, y: 200.06 }],
+      // Phase 0 (every crawler): four fields. Any other phase adds phase, angle and ticks in it.
+      bugs: [
+        { id: 7, kind: "crawler", x: 100.04, y: 200.06, phase: 0, phaseTicks: 9, dx: 1, dy: 0 },
+        { id: 8, kind: "other", x: 300, y: 400, phase: 2, phaseTicks: 5, dx: 0, dy: -1 },
+      ],
       events: {
         shotsFired: [{ id: 11, owner: 1, x: 30.123, y: 20.5, angle: 0.12345 }],
         shotsEnded: [
           { id: 10, hit: true, travelled: 123.456 },
           { id: 9, hit: false, travelled: 700 },
         ],
-        kills: [{ bug: 6, by: 2, x: 50.06, y: 60, points: 15 }],
+        kills: [
+          { bug: 6, by: 2, x: 50.06, y: 60, points: 15, kind: "crawler" },
+          { bug: 5, by: 0, x: 1, y: 2, points: 0, kind: "other" },
+        ],
       },
     };
-    const shared = encodeSnapshotShared(src, ["crawler"], 3);
+    const shared = encodeSnapshotShared(src, ["crawler", "other"], 3);
     const me = { sc: 120, ki: 9, st: 6, mu: 1.5, he: 0.4567, lk: 0 as const, hl: 2, al: 1 as const, dk: 2, dc: 28, dn: 0 as const };
     expect(shared.startsWith(`"p":${encodeSnapshotPlayers(players)},`)).toBe(true);
     const msg = parseServerMessage(encodeSnapshot(9, 4, me, shared));
@@ -154,13 +161,19 @@ describe("server messages", () => {
         [4, 50, 50, 0, 0, 0, 1, 0, 0, 0],
         [5, 60, 50, 0, 0, 0, 1, 0, 0, 0],
       ],
-      b: [[7, 0, 100, 200.1]],
+      b: [
+        [7, 0, 100, 200.1],
+        [8, 1, 300, 400, 2, -1.57, 5],
+      ],
       s: [[11, 1, 30.12, 20.5, 0.123]],
       e: [
         [10, 1, 123.5],
         [9, 0, 700],
       ],
-      k: [[6, 2, 50.1, 60, 15]],
+      k: [
+        [6, 2, 50.1, 60, 15, 0],
+        [5, 0, 1, 2, 0, 1],
+      ],
       d: [
         [4, 9.95, 1, 0.33],
         [5, 0, 0, 0],
@@ -168,7 +181,7 @@ describe("server messages", () => {
       w: 3,
     });
     // Nobody down: an empty list; and `dn` in your numbers.
-    const none = encodeSnapshotShared({ ...src, players: players.slice(0, 3) }, ["crawler"], 3);
+    const none = encodeSnapshotShared({ ...src, players: players.slice(0, 3) }, ["crawler", "other"], 3);
     expect(none).toContain(`"d":[],"w":3`);
     expect(parseServerMessage(encodeSnapshot(9, 4, { ...me, hl: 0, dn: 1 }, none))).toMatchObject({ me: { hl: 0, dn: 1 }, d: [] });
   });

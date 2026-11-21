@@ -1,12 +1,8 @@
-// Crawlers (#55): personal spawn pressure, spawning out of view, chasing and contact. Stepped by
-// sim.ts stepArena. Pure and deterministic. One kind for now; the per-kind seam (architecture.md,
-// "Bug kinds") is built by the item that adds the second kind, but every bug already carries
-// its kind.
+// Bugs (#55, the kind seam #65): personal spawn pressure, spawning out of view, the mix of kinds,
+// each kind's step and contact. Stepped by sim.ts stepArena. Pure and deterministic. What a kind
+// is lives in its own file (kind.ts, registry.ts); this file treats every kind the same.
 import {
-  CRAWLER,
-  CRAWLER_HP,
-  CRAWLER_RADIUS,
-  CRAWLER_SPEED,
+  BUG_KINDS,
   DT,
   FIRST_LIFE_EASY_S,
   MAX_BUGS_PER_ARENA,
@@ -23,9 +19,11 @@ import {
   VIEW_WALL_MARGIN,
   WORLD_H,
   WORLD_W,
-} from "./constants";
-import { nextRandom } from "./rng";
-import { canAct, canBeHit, hitPlayer, type ArenaState, type Bug, type Player } from "./sim";
+  type BugKind,
+} from "../constants";
+import { nextRandom } from "../rng";
+import { canAct, canBeHit, hitPlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
+import { BASE_KIND, MAX_BUG_RADIUS, bugDef } from "./registry";
 
 /**
  * A player's spawn rate, bugs per second, for a life `ageSeconds` old: SPAWN_BASE_PER_S rising by
@@ -60,7 +58,7 @@ function viewCentre(c: number, world: number): number {
  * shape's view, clamped at the walls as the camera clamps.
  */
 export function inView(p: { x: number; y: number }, x: number, y: number): boolean {
-  const half = VIEW_MAX / 2 + VIEW_PAD + CRAWLER_RADIUS;
+  const half = VIEW_MAX / 2 + VIEW_PAD + MAX_BUG_RADIUS;
   return Math.abs(x - viewCentre(p.x, WORLD_W)) < half && Math.abs(y - viewCentre(p.y, WORLD_H)) < half;
 }
 
@@ -69,18 +67,58 @@ function inAnyView(state: ArenaState, x: number, y: number): boolean {
   return false;
 }
 
+/** How many bugs of `kind` are alive in the arena. */
+function countKind(state: ArenaState, kind: BugKind): number {
+  let n = 0;
+  for (const b of state.bugs) if (b.kind === kind) n++;
+  return n;
+}
+
+/** Whether a spawn now, for a life `lifeSeconds` old, may be `kind` (never asked of the base kind). */
+function eligible(state: ArenaState, kind: BugKind, lifeSeconds: number): boolean {
+  const sp = bugDef(kind).spawn;
+  return wave(state.tick) >= sp.unlockWave && sp.share(lifeSeconds) > 0 && countKind(state, kind) < sp.maxPerArena;
+}
+
 /**
- * Tries to spawn one crawler for `p`, out of the view of every player in a life (downed ones
- * included: they still watch the screen). False if no try landed.
+ * The kind of the next spawn for a life whose pressure age (pressureAge: the life's age, held
+ * back on a session's first life) is `lifeSeconds`. Only when some kind besides the base
+ * one is eligible (unlocked by the arena's wave, a share above 0 for this life, under its cap) is
+ * one number drawn: walking the eligible kinds in BUG_KINDS order and adding up their shares, the
+ * first whose running total passes the draw is picked; else the base kind. With none eligible
+ * nothing is drawn, so a crawler-only stretch replays exactly as before there were other kinds.
+ */
+function pickKind(state: ArenaState, lifeSeconds: number): BugKind {
+  let any = false;
+  for (let i = 1; i < BUG_KINDS.length && !any; i++) any = eligible(state, BUG_KINDS[i]!, lifeSeconds);
+  if (!any) return BASE_KIND;
+  const r = nextRandom(state.rng);
+  let acc = 0;
+  for (let i = 1; i < BUG_KINDS.length; i++) {
+    const k = BUG_KINDS[i]!;
+    if (!eligible(state, k, lifeSeconds)) continue;
+    acc += bugDef(k).spawn.share(lifeSeconds);
+    if (r < acc) return k;
+  }
+  return BASE_KIND;
+}
+
+/**
+ * Tries to spawn one bug for `p`, out of the view of every player in a life (downed ones
+ * included: they still watch the screen), clamped inside the walls by the largest kind's radius,
+ * then picks its kind (pickKind). False if no try landed.
  */
 function trySpawn(state: ArenaState, p: Player): boolean {
+  const R = MAX_BUG_RADIUS;
   for (let i = 0; i < SPAWN_TRIES; i++) {
     const a = nextRandom(state.rng) * Math.PI * 2;
     const d = SPAWN_DIST_MIN + nextRandom(state.rng) * (SPAWN_DIST_MAX - SPAWN_DIST_MIN);
-    const x = Math.min(WORLD_W - CRAWLER_RADIUS, Math.max(CRAWLER_RADIUS, p.x + Math.cos(a) * d));
-    const y = Math.min(WORLD_H - CRAWLER_RADIUS, Math.max(CRAWLER_RADIUS, p.y + Math.sin(a) * d));
+    const x = Math.min(WORLD_W - R, Math.max(R, p.x + Math.cos(a) * d));
+    const y = Math.min(WORLD_H - R, Math.max(R, p.y + Math.sin(a) * d));
     if (inAnyView(state, x, y)) continue;
-    state.bugs.push({ id: state.nextBugId++, kind: CRAWLER, x, y, vx: 0, vy: 0, hp: CRAWLER_HP, target: p.id });
+    const kind = pickKind(state, pressureAge(p, state.tick));
+    const def = bugDef(kind);
+    state.bugs.push({ id: state.nextBugId++, kind, x, y, vx: 0, vy: 0, hp: def.hp, target: p.id, phase: 0, phaseTicks: 0, dx: 0, dy: 0, travel: 0 });
     return true;
   }
   return false;
@@ -116,16 +154,15 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
   return best ?? any;
 }
 
-const TOUCH = PLAYER_RADIUS + CRAWLER_RADIUS;
-
 /**
  * One tick of bugs:
  * 1. each player who is up has their budget grow by spawnRate(pressureAge) times DT (capped at
  *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them, chasing them, while the arena
- *    has room; a downed player's budget waits;
- * 2. each bug chases its chooseTarget at CRAWLER_SPEED (no one up: it stands);
- * 3. a bug touching a player who is up and can be hit costs them a hit and is gone, with no
- *    score; bugs pass over downed players.
+ *    has room; its kind is picked by the mix (pickKind); a downed player's budget waits;
+ * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one up);
+ * 3. a bug touching a player who is up and can be hit (within PLAYER_RADIUS plus its kind's
+ *    radius) costs them a hit and is gone, with no score, whatever its kind and phase; bugs pass
+ *    over downed players.
  */
 export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
@@ -139,33 +176,20 @@ export function stepBugs(state: ArenaState): void {
   }
   for (const b of bugs) {
     const target = chooseTarget(state, b);
-    if (!target) {
-      b.vx = 0;
-      b.vy = 0;
-      b.target = 0;
-      continue;
-    }
-    b.target = target.id;
-    const dx = target.x - b.x;
-    const dy = target.y - b.y;
-    const d = Math.hypot(dx, dy);
-    const step = Math.min(d, CRAWLER_SPEED * DT);
-    if (d > 0) {
-      b.vx = (dx / d) * CRAWLER_SPEED;
-      b.vy = (dy / d) * CRAWLER_SPEED;
-      b.x += (dx / d) * step;
-      b.y += (dy / d) * step;
-    }
+    b.target = target ? target.id : 0;
+    bugDef(b.kind).step(b, target);
   }
   let keep = 0;
   for (let i = 0; i < bugs.length; i++) {
     const b = bugs[i]!;
     let gone = false;
+    const touch = PLAYER_RADIUS + bugDef(b.kind).radius;
     for (const p of state.players) {
       if (!canBeHit(p)) continue;
       const dx = p.x - b.x;
       const dy = p.y - b.y;
-      if (dx * dx + dy * dy < TOUCH * TOUCH) {
+      if (dx * dx + dy * dy < touch * touch) {
+        state.events.touches.push({ player: p.id, kind: b.kind });
         hitPlayer(state, p);
         gone = true;
         break;

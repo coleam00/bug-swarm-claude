@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  CRAWLER_SPEED,
   DT,
   MAX_BUGS_PER_ARENA,
   SPAWN_BASE_PER_S,
@@ -10,12 +9,13 @@ import {
   WAVE_S,
   WORLD_H,
   WORLD_W,
-} from "./constants";
-import { inView, pressureAge, spawnRate } from "./bugs";
-import { POLICIES, createMemory, createObservation, observe, type PolicyInput } from "./policies";
-import { createRng } from "./rng";
-import { clampInput, createArena, joinPlayer, stepArena, wave, type ArenaState, type Bug } from "./sim";
-import { arenaWith, placeBug, stepQuiet } from "./testkit";
+} from "../constants";
+import { POLICIES, createMemory, createObservation, observe, type PolicyInput } from "../policies";
+import { createRng } from "../rng";
+import { clampInput, createArena, joinPlayer, stepArena, wave, type ArenaState, type Bug } from "../sim";
+import { arenaWith, placeBug, stepQuiet } from "../testkit";
+import { CRAWLER_SPEED } from "./crawler";
+import { inView, pressureAge, spawnRate } from "./index";
 
 /** The item's numbers (#58), written out so a test fails if a constant drifts from them. */
 const ITEM_EASY_S = 10;
