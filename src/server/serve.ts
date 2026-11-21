@@ -32,9 +32,56 @@ export type RunningServer = {
   url: string;
   server: ReturnType<typeof Bun.serve>;
   rooms: Rooms;
-  /** Stops every arena timer, closes every socket and the listener, and writes any queued life. */
-  stop(): Promise<void>;
+  /**
+   * Stops the server for a redeploy (or a test's end): ends and saves every life in progress with
+   * its score so far, sends every socket `error restarting` and closes it, stops the listener, and
+   * writes every queued life. Resolves to the number of lives it ended. Calling it again returns
+   * the same promise.
+   */
+  stop(): Promise<number>;
 };
+
+/** How long stop waits for the sockets to finish closing before it cuts them, ms. */
+export const SOCKET_CLOSE_WAIT_MS = 500;
+/** The shutdown's backstop: the process exits by then whatever is still running, ms (the item asks for 5 s, #69; Railway must allow at least that: architecture.md, "Hosting"). */
+export const SHUTDOWN_BUDGET_MS = 4500;
+
+export type ShutdownDeps = {
+  /** RunningServer.stop. */
+  stop: () => Promise<number>;
+  closeDb: () => void;
+  exit: (code: number) => void;
+  log: (line: string) => void;
+  budgetMs?: number;
+  setTimer?: (fn: () => void, ms: number) => unknown;
+};
+
+/**
+ * The SIGTERM / SIGINT handler's work (main.ts wires the signals): stops the server (lives saved,
+ * sockets told to reconnect), closes the database and exits 0. If that has not finished within
+ * `budgetMs` it exits 1 anyway. A second signal while it runs does nothing.
+ */
+export function gracefulShutdown(deps: ShutdownDeps): (signal: string) => Promise<void> {
+  const setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
+  let started = false;
+  return async (signal) => {
+    if (started) return;
+    started = true;
+    setTimer(() => {
+      deps.log(`shutdown (${signal}): still stopping after ${deps.budgetMs ?? SHUTDOWN_BUDGET_MS} ms, exiting`);
+      deps.exit(1);
+    }, deps.budgetMs ?? SHUTDOWN_BUDGET_MS);
+    try {
+      const saved = await deps.stop();
+      deps.closeDb();
+      deps.log(`shutdown (${signal}): ${saved} ${saved === 1 ? "life" : "lives"} saved`);
+      deps.exit(0);
+    } catch (err) {
+      deps.log(`shutdown (${signal}): failed: ${String(err)}`);
+      deps.exit(1);
+    }
+  };
+}
 
 /** The build id the arena sends: Railway's commit, else BUILD_ID, else the start time. */
 export function buildIdFrom(env: Record<string, string | undefined>, startedAt: number): string {
@@ -87,16 +134,29 @@ export function startServer(opts: ServerOptions): RunningServer {
     websocket: sockets,
   });
 
+  let stopping: Promise<number> | null = null;
+  const stop = async (): Promise<number> => {
+    // While the arenas still exist: every life in progress ends and is queued, then written at
+    // once, so the lives are on disk even if a later step hangs.
+    const ended = rooms.endAll();
+    lives.flush();
+    sockets.restart();
+    // Let the error frames and close handshakes finish before the listener cuts what is left.
+    const deadline = performance.now() + SOCKET_CLOSE_WAIT_MS;
+    while (sockets.openCount > 0 && performance.now() < deadline) await Bun.sleep(10);
+    await server.stop(true);
+    // Anything queued since (nothing should be) is written before the caller closes the database.
+    lives.flush();
+    return ended;
+  };
+
   return {
     url: `http://${opts.hostname}:${server.port}`,
     server,
     rooms,
-    async stop() {
-      sockets.stop();
-      rooms.close();
-      await server.stop(true);
-      // Lives queued before the stop are written before the caller closes the database.
-      lives.flush();
+    stop() {
+      stopping ??= stop();
+      return stopping;
     },
   };
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { TEAMS } from "../server/rules";
-import { forgetPlayerForTests, loadPlayer, setPlayerName, setPlayerTeam, takeRefusedName } from "./player";
+import { forgetPlayerForTests, loadPlayer, markUpdateReload, setPlayerName, setPlayerTeam, takeRefusedName, takeUpdateReload } from "./player";
 
 // A stand-in for the browser's localStorage.
 let store: Map<string, string>;
@@ -71,4 +71,19 @@ test("with storage unavailable, the player lasts for the page in memory", () => 
   const a = setPlayerName("Robo");
   store.clear(); // storage lost (private mode, blocked storage)
   expect(loadPlayer()).toEqual({ id: a.id, name: "Robo", team: null });
+});
+
+test("an update reload is marked for the next page load only, and only in this tab's session storage", () => {
+  const session = new Map<string, string>();
+  globalThis.sessionStorage = {
+    getItem: (k: string) => session.get(k) ?? null,
+    setItem: (k: string, v: string) => void session.set(k, v),
+    removeItem: (k: string) => void session.delete(k),
+  } as Storage;
+  expect(takeUpdateReload()).toBe(false);
+  markUpdateReload();
+  expect(store.size).toBe(0);
+  expect(takeUpdateReload()).toBe(true);
+  // A later manual reload opens on the start screen again.
+  expect(takeUpdateReload()).toBe(false);
 });

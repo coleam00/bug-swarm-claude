@@ -23,10 +23,14 @@ export const EVENT_KINDS = ["join", "leave", "over", "down", "revive"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 export const [JOIN, LEAVE, OVER, DOWN, REVIVE] = EVENT_KINDS;
 
-/** Why the server refused a hello. The socket closes after each. */
-export const ERROR_CODES = ["version", "name", "team", "hello"] as const;
+/**
+ * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
+ * rejoin from a page of another build: reload), or the server stopping for a redeploy
+ * (restarting: reconnect). The socket closes after each.
+ */
+export const ERROR_CODES = ["version", "name", "team", "hello", "restarting", "build"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
-export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO] = ERROR_CODES;
+export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO, ERROR_RESTARTING, ERROR_BUILD] = ERROR_CODES;
 
 /** The longest name a hello may carry before the server's name rules (rules.ts) even look at it. */
 export const HELLO_NAME_MAX = 64;
@@ -44,6 +48,11 @@ export type Hello = {
   /** The browser's 32-hex player id (player.ts). Never sent to other players. */
   player: string;
   touch: boolean;
+  /**
+   * The build id of the page's first welcome, on a rejoin ("" on a first join, or when absent): a
+   * server of another build refuses it with `build` before it joins, so no life is started.
+   */
+  build: string;
 };
 
 export type InputMessage = {
@@ -167,7 +176,8 @@ export type ArenaEvent = {
   seconds?: number;
 };
 
-export type ErrorMessage = { t: typeof ERROR; code: ErrorCode };
+/** With code `build`: the server's build id. */
+export type ErrorMessage = { t: typeof ERROR; code: ErrorCode; build?: string };
 
 export type ServerMessage = Welcome | Snapshot | ArenaEvent | ErrorMessage;
 
@@ -216,13 +226,14 @@ export function parseClientMessage(raw: string | ArrayBuffer | Uint8Array): Clie
     return { t: INPUT, seq: seq as number, mx, my, aim, fire, dash };
   }
   if (m.t === HELLO) {
-    const { v, name, team, player, touch } = m;
+    const { v, name, team, player, touch, build = "" } = m;
     if (!Number.isInteger(v)) return null;
     if (typeof name !== "string" || name.length > HELLO_NAME_MAX) return null;
     if (typeof team !== "string" || team.length > HELLO_NAME_MAX) return null;
     if (typeof player !== "string" || !PLAYER_ID.test(player)) return null;
     if (typeof touch !== "boolean") return null;
-    return { t: HELLO, v: v as number, name, team, player, touch };
+    if (typeof build !== "string" || build.length > HELLO_NAME_MAX) return null;
+    return { t: HELLO, v: v as number, name, team, player, touch, build };
   }
   return null;
 }
@@ -340,8 +351,8 @@ export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared
   return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dk":${me.dk},"dc":${me.dc},"dn":${me.dn}},${shared}}`;
 }
 
-export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean): string {
-  const m: Hello = { t: HELLO, v, name, team, player, touch };
+export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean, build = ""): string {
+  const m: Hello = { t: HELLO, v, name, team, player, touch, build };
   return JSON.stringify(m);
 }
 

@@ -7,7 +7,7 @@ import { startArena, type ArenaHandle, type ArenaPlayer, type LifeSummary } from
 import { restartIn } from "./game/guard";
 import { HINT_MS, hintText, takeFirstLife } from "./hint";
 import { fmt, topLine } from "./over";
-import { loadPlayer, setPlayerName, setPlayerTeam, takeRefusedName, type Player } from "./player";
+import { loadPlayer, setPlayerName, setPlayerTeam, takeRefusedName, takeUpdateReload, type Player } from "./player";
 import { changeName, nameMessage, openingNotice, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type Press, type StartView } from "./start";
 import { TEAM_LOOK } from "./teams";
 
@@ -15,10 +15,14 @@ import { TEAM_LOOK } from "./teams";
 // the page, then the arena (arena/game.ts) with the status pill, the first-life hint and the
 // life-over screen over it. No menus between lives: "Play again" (a tap or click anywhere on the
 // life-over screen, Enter or Space) respawns in the same arena, from RESTART_DELAY_MS (800 ms,
-// game/guard.ts) after the life ended. A name the server refuses (hidden by `bun run hide`, at
+// game/guard.ts) after the life ended. A reload forced by a redeploy (a new build) skips the start
+// screen and rejoins with the stored name and team. A name the server refuses (hidden by `bun run hide`, at
 // join or mid-life) brings the start screen back with "Pick a different name".
 
 type Phase = "setup" | "arena";
+
+/** Read once per page load (not in a state initializer, which StrictMode runs twice). */
+const updateReload = takeUpdateReload();
 
 /** The life-over screen's first read: the server saves the life on the next turn of its event loop. */
 const FIRST_READ_MS = 300;
@@ -28,7 +32,8 @@ const TOP_POLL_MS = 4000;
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
   const [notice, setNotice] = useState<string | null>(() => openingNotice(takeRefusedName() !== null, loadPlayer().name));
-  const [phase, setPhase] = useState<Phase>("setup");
+  // After an update reload a player with a name and team is back in the arena with no tap.
+  const [phase, setPhase] = useState<Phase>(updateReload ? "arena" : "setup");
 
   if (phase === "arena" && player.name !== null && player.team !== null) {
     return (

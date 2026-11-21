@@ -2,11 +2,17 @@
 // server's messages handed to game.ts, and a rejoin with backoff (0.5 s doubling to 5 s) when the
 // connection drops, or goes silent: the server sends 20 snapshots a second, so SERVER_SILENT_MS
 // with nothing means it is gone even if no close arrived (a half-open connection). A refused name
-// or team, or another protocol version, does not retry. `close()` ends it for good: the socket,
-// the silence check and any pending rejoin (the page left the arena).
+// or team, or another protocol version, does not retry. A redeploy (the server's `error
+// restarting`, then a close) shows "Reconnecting..." and rejoins the same way. A rejoin's hello
+// carries the build id of the first welcome; when the new server refuses it for another build (or
+// for this page's protocol version), the page is out of date: `newBuild` is called (game.ts
+// reloads) instead of playing on. Either refusal comes before the server joins it to an arena,
+// so the update saves no empty life. `close()` ends it for good: the socket, the silence check and any pending rejoin
+// (the page left the arena).
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
+  ERROR_BUILD,
   ERROR_NAME,
   ERROR_TEAM,
   ERROR_VERSION,
@@ -56,15 +62,33 @@ export function connectArena(
   hello: Hello,
   on: {
     message: (m: ServerMessage) => void;
-    /** "Connecting...", "Reconnecting...", "Reload to update", or null when playing. */
+    /** "Connecting...", "Reconnecting...", "Updating...", "Reload to update", or null when playing. */
     status: (text: string | null) => void;
     /** A name or team the server refused. */
     refused: (code: ErrorCode) => void;
+    /**
+     * The server was redeployed with a new build (its build id, or "" when only its protocol
+     * version told): this page is out of date. Called once; nothing reconnects after it.
+     */
+    newBuild: (build: string) => void;
   },
+  /** The /ws URL; defaults to this page's (tests pass a server's). */
+  url?: string,
 ): Connection {
+  const target = url ?? socketUrl(location);
   let ws: WebSocket | null = null;
   let attempt = 0;
   let final = false;
+  /** The build id of the first welcome: the build this page was loaded against. */
+  let firstBuild: string | null = null;
+
+  /** The server runs another build: stop here and hand over to `newBuild`. */
+  const outdated = (socket: WebSocket, build: string) => {
+    final = true;
+    on.status("Updating...");
+    on.newBuild(build);
+    socket.close();
+  };
   let lastHeard = 0;
   let rejoin: ReturnType<typeof setTimeout> | null = null;
 
@@ -80,13 +104,13 @@ export function connectArena(
   const open = () => {
     rejoin = null;
     if (final) return;
-    const socket = new WebSocket(socketUrl(location));
+    const socket = new WebSocket(target);
     ws = socket;
     lastHeard = performance.now();
     socket.addEventListener("open", () => {
       // Closed before it opened: never say hello (a hello joins, and leaving saves a life).
       if (ws !== socket) return;
-      socket.send(encodeHello(PROTOCOL_VERSION, hello.name, hello.team, hello.player, hello.touch()));
+      socket.send(encodeHello(PROTOCOL_VERSION, hello.name, hello.team, hello.player, hello.touch(), firstBuild ?? ""));
     });
     socket.addEventListener("message", (e) => {
       if (ws !== socket) return;
@@ -94,8 +118,16 @@ export function connectArena(
       const m = parseServerMessage(e.data);
       if (!m) return;
       if (m.t === WELCOME) {
+        firstBuild ??= m.build;
         attempt = 0;
         on.status(null);
+      } else if (m.t === ERROR && m.code === ERROR_BUILD) {
+        // Only a rejoin carries a build, so a first join can never loop on reloads.
+        return outdated(socket, m.build ?? "");
+      } else if (m.t === ERROR && m.code === ERROR_VERSION && firstBuild !== null) {
+        // A rejoin to a server that no longer speaks this page's protocol: a redeploy. (On the very
+        // first connect it stays final below, so a stale cache can't loop on reloads.)
+        return outdated(socket, "");
       } else if (m.t === ERROR && isFinalError(m.code)) {
         final = true;
         if (m.code === ERROR_VERSION) on.status("Reload to update");

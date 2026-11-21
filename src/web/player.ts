@@ -43,6 +43,32 @@ export function setPlayerTeam(team: Team): Player {
   return save({ ...loadPlayer(), team });
 }
 
+const UPDATED_KEY = "bugswarm.updated";
+
+/**
+ * Marks the reload a redeploy forces (a new build), just before it: the reloaded page goes
+ * straight back into the arena instead of the start screen. Kept in sessionStorage (this tab
+ * only); where that is unavailable the reload opens on the start screen.
+ */
+export function markUpdateReload(): void {
+  try {
+    sessionStorage.setItem(UPDATED_KEY, "1");
+  } catch {
+    // No storage: the start screen it is.
+  }
+}
+
+/** Whether this page load is an update reload, once: a later manual reload opens on the start screen. */
+export function takeUpdateReload(): boolean {
+  try {
+    const updated = sessionStorage.getItem(UPDATED_KEY) === "1";
+    sessionStorage.removeItem(UPDATED_KEY);
+    return updated;
+  } catch {
+    return false;
+  }
+}
+
 /** For tests: forget the player kept in memory, as a fresh page load would. */
 export function forgetPlayerForTests(): void {
   memory = null;
