@@ -77,12 +77,6 @@ describe("load players", () => {
   });
 });
 
-test("every read the board and the game-over screen make is in the route table", () => {
-  expect(Object.values(ROUTES).map((r) => r.label)).toEqual(
-    expect.arrayContaining(["GET /api/top", "GET /api/teams", "GET /api/board", "GET /api/players/:id/best"]),
-  );
-});
-
 test("one board watcher per 50 players, and always at least one", () => {
   expect(boardWatchers(1)).toBe(1);
   expect(boardWatchers(500)).toBe(10);

@@ -38,22 +38,17 @@ export type PollerDeps = {
   load: () => Promise<Board | "failed">;
   onData: (board: Board) => void;
   onStatus: (status: BoardStatus) => void;
-  setTimer: (fn: () => void, ms: number) => unknown;
-  clearTimer: (handle: unknown) => void;
+  setTimer: (fn: () => void, ms: number) => void;
 };
 
 /**
- * Loads at once on start, then again once each load has settled. A failure (a "failed" load, a
+ * Loads at once, then again once each load has settled. A failure (a "failed" load, a
  * rejected one, or onData throwing) leaves the last board alone, counts toward the backoff and
  * shows "reconnecting"; the next success resets both. onStatus fires only on a change.
  */
-export function createPoller(deps: PollerDeps): { start(): void; stop(): void } {
+export function startPolling(deps: PollerDeps): void {
   let failures = 0;
   let status: BoardStatus | null = null;
-  let timer: unknown = null;
-  let running = false;
-  // Bumped on every start and stop, so a load still in flight from an earlier start is ignored.
-  let generation = 0;
 
   const setStatus = (s: BoardStatus) => {
     if (s === status) return;
@@ -61,36 +56,21 @@ export function createPoller(deps: PollerDeps): { start(): void; stop(): void } 
     deps.onStatus(s);
   };
 
-  const tick = async (gen: number) => {
-    timer = null;
+  const tick = async () => {
     let ok = false;
     try {
       const result = await deps.load();
-      if (gen !== generation) return;
       if (result !== "failed") {
         deps.onData(result);
         ok = true;
       }
     } catch (err) {
-      if (gen !== generation) return;
       console.error("board update failed", err);
     }
     failures = ok ? 0 : failures + 1;
     setStatus(ok ? "live" : "reconnecting");
-    timer = deps.setTimer(() => void tick(gen), nextDelay(failures));
+    deps.setTimer(() => void tick(), nextDelay(failures));
   };
 
-  return {
-    start() {
-      if (running) return;
-      running = true;
-      void tick(++generation);
-    },
-    stop() {
-      running = false;
-      generation++;
-      if (timer !== null) deps.clearTimer(timer);
-      timer = null;
-    },
-  };
+  void tick();
 }

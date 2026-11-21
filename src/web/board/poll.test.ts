@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Board } from "./data";
-import { BOARD_MAX_BACKOFF_MS, BOARD_POLL_MS, createPoller, fetchBoard, nextDelay, type BoardStatus } from "./poll";
+import { BOARD_MAX_BACKOFF_MS, BOARD_POLL_MS, fetchBoard, nextDelay, startPolling, type BoardStatus } from "./poll";
 
 const BOARD: Board = { top: [{ name: "Ann", score: 50 }], teams: { tabs: 50, spaces: 0 } };
 
@@ -15,22 +15,18 @@ afterEach(() => {
 /** A poller over a fake timer queue and loads that the test settles by hand. */
 function harness(opts: { onData?: (b: Board) => void } = {}) {
   const loads: { resolve: (v: Board | "failed") => void; reject: (e: Error) => void }[] = [];
-  const timers: { fn: () => void; ms: number; cleared: boolean }[] = [];
+  const timers: { fn: () => void; ms: number }[] = [];
   const data: Board[] = [];
   const statuses: BoardStatus[] = [];
-  const poller = createPoller({
-    load: () => new Promise((resolve, reject) => loads.push({ resolve, reject })),
-    onData: opts.onData ?? ((b) => data.push(b)),
-    onStatus: (s) => statuses.push(s),
-    setTimer: (fn, ms) => {
-      const t = { fn, ms, cleared: false };
-      timers.push(t);
-      return t;
-    },
-    clearTimer: (t) => {
-      (t as { cleared: boolean }).cleared = true;
-    },
-  });
+  const start = () =>
+    startPolling({
+      load: () => new Promise((resolve, reject) => loads.push({ resolve, reject })),
+      onData: opts.onData ?? ((b) => data.push(b)),
+      onStatus: (s) => statuses.push(s),
+      setTimer: (fn, ms) => {
+        timers.push({ fn, ms });
+      },
+    });
   const flush = () => new Promise<void>((r) => setTimeout(r, 0));
   /** Settles the latest load, lets the poller react, and returns the delay it scheduled. */
   const settle = async (v: Board | "failed" | Error) => {
@@ -42,7 +38,7 @@ function harness(opts: { onData?: (b: Board) => void } = {}) {
   };
   /** Fires the latest timer, which starts the next load. */
   const fire = () => timers.at(-1)!.fn();
-  return { poller, loads, timers, data, statuses, settle, fire, flush };
+  return { start, loads, timers, data, statuses, settle, fire, flush };
 }
 
 test("nextDelay: the normal cadence, doubling after the second failure in a row, capped", () => {
@@ -51,10 +47,10 @@ test("nextDelay: the normal cadence, doubling after the second failure in a row,
   expect(BOARD_MAX_BACKOFF_MS).toBe(10000);
 });
 
-describe("createPoller", () => {
+describe("startPolling", () => {
   test("loads at once, and never again until that load has settled", async () => {
     const h = harness();
-    h.poller.start();
+    h.start();
     expect(h.loads.length).toBe(1);
     await h.flush();
     expect(h.timers.length).toBe(0); // nothing scheduled while the load is in flight
@@ -66,7 +62,7 @@ describe("createPoller", () => {
 
   test("hands the server's board to onData and keeps the 2 s cadence while it succeeds", async () => {
     const h = harness();
-    h.poller.start();
+    h.start();
     for (let i = 0; i < 3; i++) {
       expect(await h.settle(BOARD)).toBe(2000);
       h.fire();
@@ -77,7 +73,7 @@ describe("createPoller", () => {
 
   test("backs off over failures, keeps the last board, and resets on success", async () => {
     const h = harness();
-    h.poller.start();
+    h.start();
     const delays: (number | undefined)[] = [await h.settle(BOARD)];
     for (let i = 0; i < 5; i++) {
       h.fire();
@@ -98,33 +94,13 @@ describe("createPoller", () => {
         throw new Error("render broke");
       },
     });
-    h.poller.start();
+    h.start();
     expect(await h.settle(new Error("network"))).toBe(2000);
     h.fire();
     expect(await h.settle(BOARD)).toBe(4000);
     expect(calls).toBe(1);
     expect(h.statuses).toEqual(["reconnecting"]);
     expect(errors).toHaveBeenCalled();
-  });
-
-  test("after stop nothing runs, and a late load does not reach onData", async () => {
-    const h = harness();
-    h.poller.start();
-    await h.settle(BOARD);
-    h.fire(); // load 2 in flight
-    h.poller.stop();
-    await h.settle(BOARD);
-    expect(h.data).toEqual([BOARD]);
-    expect(h.timers.length).toBe(1);
-    expect(h.statuses).toEqual(["live"]);
-  });
-
-  test("stop cancels a scheduled load", async () => {
-    const h = harness();
-    h.poller.start();
-    await h.settle(BOARD);
-    h.poller.stop();
-    expect(h.timers[0]!.cleared).toBe(true);
   });
 });
 

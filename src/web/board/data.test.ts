@@ -124,7 +124,8 @@ describe("boardView teams", () => {
 test("joinHost names the page's own host, without protocol or slash, split after each dot", () => {
   expect(joinHost("http://localhost:5173")).toEqual(["localhost:5173"]);
   expect(joinHost("https://x.example.com/")).toEqual(["x.", "example.", "com"]);
-  expect(joinHost("https://bug-swarm-claude-production.up.railway.app").join("")).toBe("bug-swarm-claude-production.up.railway.app");
+  // Never at a hyphen: viewers might type the break.
+  expect(joinHost("https://bug-swarm-claude-production.up.railway.app")).toEqual(["bug-swarm-claude-production.", "up.", "railway.", "app"]);
 });
 
 test("the board's DOM code never writes HTML, so names always render as text", () => {
