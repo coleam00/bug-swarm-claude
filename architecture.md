@@ -12,7 +12,7 @@
 - Container: `Dockerfile` builds the game and runs `bun run start` with `NODE_ENV=production`, which makes the server listen on all interfaces; everywhere else it listens on localhost only. `DATA_DIR` must be a persistent volume.
 - Health: `GET /health` answers `200 ok` once the app is ready.
 - Test everything: `bun run check` (`tsc --noEmit`, then `bun test`). CI runs exactly this.
-- The bet's command: `bun run stats`. Moderation: `bun run hide "<name>"`. Load test (Phase 3): `bun run load`.
+- The bet's command: `bun run stats`. Moderation: `bun run hide "<name>"`. Balance: `bun run pacing`. Load test (Phase 3): `bun run load`.
 
 ## Shape
 - Browser game -> HTTP API -> one SQLite file.
@@ -33,7 +33,7 @@
 - `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time) and `UPGRADE_IDS`, all pure and tested.
 - `src/server/blocked-words.ts`: the blocked-word list.
 - `src/server/main.ts`: production entry; reads `PORT` and `DATA_DIR` (default `data/`).
-- `scripts/stats.ts`, `scripts/hide.ts`, `scripts/load.ts`.
+- `scripts/stats.ts`, `scripts/hide.ts`, `scripts/pacing.ts`, `scripts/load.ts`.
 - Tests are `*.test.ts` beside the code.
 
 ## Data
@@ -51,5 +51,5 @@
 - Nothing the player does depends on a server response; a run plays with the API down.
 
 ## Decisions deferred
-- Spawn rates, bug speed and upgrade strength: tuned in `src/web/game/config.ts` to the PRD's targets: an idle player loses within 30 to 60 s, and a player who keeps moving survives 1 to 3 minutes, because the gun reloads faster while the robot moves. `sim.test.ts` holds both with scripted players and upgrade choices off, so they guard the swarm alone; run length with upgrades is tuned in one balance item once all four upgrades have landed, and how it feels to a human is still the Phase 2 playtest.
+- Spawn rates, bug speed and upgrade strength: tuned in `src/web/game/config.ts` to the PRD's targets: an idle player loses within 30 to 60 s, and a player who keeps moving survives 1 to 3 minutes, because the gun reloads faster while the robot moves (and the CI drone slower while it stands still). From 60 s the swarm surges: the spawn interval falls again to its last floor and every bug speeds up with run time (`swarmSpeed`), so no upgrade build holds forever. `sim.test.ts` holds both targets with scripted players and upgrade choices off, so they guard the swarm alone. Run length with upgrades is measured by `bun run pacing` (`src/web/game/pacing.ts`): an idle player and a realistic mover (sees bugs within 200 units, reacts 0.25 s late, drifts to the centre, wobbles) through each upgrade order, over seeds 0-49 and both screen shapes; `pacing.test.ts` asserts its targets on 8 seeds. How it feels to a human is still the Phase 2 playtest.
 - Art: drawn in code on the canvas (see `direction.md`, "The look"). Effects live in `src/web/game/fx/` (particles, trails, screen shake, floating text, the shield's pop), pooled so they allocate nothing per frame.

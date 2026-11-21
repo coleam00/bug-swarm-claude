@@ -8,7 +8,8 @@
     "start": "bun src/server/main.ts",
     "check": "tsc --noEmit && bun test",
     "stats": "bun scripts/stats.ts",
-    "hide": "bun scripts/hide.ts"
+    "hide": "bun scripts/hide.ts",
+    "pacing": "bun scripts/pacing.ts"
   },
   "dependencies": {
     "hono": "^4.6.0",
