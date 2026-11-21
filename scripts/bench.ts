@@ -59,7 +59,8 @@ const RUNS: { run: Viewport; layouts: Viewport[] }[] = [
     run: { label: "Desktop 1440x900", width: 1440, height: 900, dpr: 1, mobile: false },
     layouts: [
       { label: "Desktop 1440x900", width: 1440, height: 900, dpr: 1, mobile: false },
-      { label: "Desktop 1280x720", width: 1280, height: 720, dpr: 1, mobile: false },
+      // One column above 520 px of height: the top 10 scrolls here (as before #42), Play again doesn't.
+      { label: "Desktop 1280x720", width: 1280, height: 720, dpr: 1, mobile: false, gate: "reachable" },
     ],
   },
   {
@@ -265,9 +266,9 @@ async function measureLayout(cdp: Session, v: Viewport) {
       alert.textContent = ${JSON.stringify(LONGEST_NOTICE)};
       summary.insertBefore(alert, again);
     }
-    const rows = document.querySelectorAll(".over-board li").length;
+    const rows = document.querySelectorAll(".over-board ol li").length;
     const chips = document.querySelectorAll("ul.over-upgrades li").length;
-    const lastRow = document.querySelector(".over-board li:last-child");
+    const lastRow = document.querySelector(".over-board ol li:last-child");
     const race = document.querySelector(".over-race");
     const chipsBox = document.querySelector(".over-upgrades").getBoundingClientRect();
     return {
@@ -318,9 +319,11 @@ async function measureChoice(cdp: Session, v: Viewport) {
   await wait(500); // the cards' fade-in
   const m = await cdp.evaluate(`(() => {
     const c = document.querySelector(".choice");
-    const p = getComputedStyle(document.querySelector(".safe-probe"));
+    // The game's own probe went with the run (loop.ts), so a fresh one reads the insets.
+    const probe = document.body.appendChild(Object.assign(document.createElement("div"), { className: "safe-probe" }));
+    const p = getComputedStyle(probe);
     const cards = [...c.querySelectorAll("button")].map((b) => b.getBoundingClientRect());
-    return {
+    const m = {
       top: Math.round(c.querySelector("h2").getBoundingClientRect().top),
       bottom: Math.round(Math.max(...cards.map((r) => r.bottom))),
       left: Math.round(Math.min(...cards.map((r) => r.left))),
@@ -329,6 +332,8 @@ async function measureChoice(cdp: Session, v: Viewport) {
       safeTop: parseFloat(p.paddingTop), safeBottom: innerHeight - parseFloat(p.paddingBottom),
       safeLeft: parseFloat(p.paddingLeft), safeRight: innerWidth - parseFloat(p.paddingRight),
     };
+    probe.remove();
+    return m;
   })()`);
   await screenshot(cdp, `choice-${sizeName(v)}`);
   await cdp.evaluate(`document.querySelector(".choice").remove()`);
