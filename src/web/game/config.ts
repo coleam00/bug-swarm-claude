@@ -58,8 +58,8 @@ export function spawnInterval(time: number): number {
 /**
  * How fast the swarm moves `time` seconds into a run, as a multiple of each kind's base speed.
  * It applies to every bug on screen at once, by run time: 1 up to SURGE_FROM, then rising
- * without end, so no build holds forever. The fast bug passes the robot's speed at about 89 s
- * and the base bug at about 125 s.
+ * without end, so no build holds forever. The fast bug passes the robot's speed at about 81 s
+ * and the base bug at about 114 s.
  */
 export function swarmSpeed(time: number): number {
   return 1 + SURGE_SPEED * Math.max(0, time - SURGE_FROM);
@@ -122,7 +122,7 @@ export const DRONE_RADIUS = 5;
 export const DRONE_FIRE_INTERVAL = 0.5;
 /**
  * CI drone: the part of its reload rate a drone keeps while the robot stands still, the gun's
- * "moving pays" rule (operator ruling on #18). Without it an idle player who is offered the
+ * "moving pays" rule (the balance plan for #18). Without it an idle player who is offered the
  * drone outlasts 60 s (bun run pacing: idle up to 84 s).
  */
 export const DRONE_STILL_RATE = 1 / 3;
