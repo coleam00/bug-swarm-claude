@@ -8,10 +8,7 @@
     "start": "bun src/server/main.ts",
     "check": "tsc --noEmit && bun test",
     "stats": "bun scripts/stats.ts",
-    "bench": "bun scripts/bench.ts",
     "hide": "bun scripts/hide.ts",
-    "pacing": "bun scripts/pacing.ts",
-    "load": "bun scripts/load.ts",
     "bots": "bun scripts/bots.ts",
     "skill": "bun scripts/skill.ts",
     "reset": "bun scripts/reset.ts"

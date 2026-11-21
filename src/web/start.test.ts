@@ -73,12 +73,23 @@ test("a stored name the rules now refuse: an empty field, the team kept, and the
   expect(pressEnter(view, "Robo")).toEqual({ kind: "start", name: "Robo", team: TABS });
 });
 
-test("sent back by the arena for a bot name: the name field, filled in, says why", () => {
+test("a stored bot name: the name field, filled in, says why, instead of Play as", () => {
   const notice = openingNotice(false, "bot alice");
   expect(notice).toBe(BOT_NAME_MESSAGE);
   expect(startView({ id, name: "bot alice", team: SPACES }, notice)).toEqual({ kind: "entry", name: "bot alice", team: SPACES, message: BOT_NAME_MESSAGE });
-  // A name the rules now refuse says so first; any other arena refusal asks for a different name.
+  // A name the rules now refuse says so first; any other stored name says nothing.
   expect(openingNotice(true, "bot alice")).toBe(REFUSED);
-  expect(openingNotice(false, "Robo")).toBe(REFUSED);
+  expect(openingNotice(false, "Robo")).toBeNull();
   expect(openingNotice(false, null)).toBeNull();
+});
+
+test("a bot name is refused before joining, by a team button and by Enter", () => {
+  const view = startView({ id, name: null, team: null }, null);
+  expect(pressTeam(view, "bot alice", TABS)).toEqual({ kind: "message", text: BOT_NAME_MESSAGE });
+  expect(pressTeam(view, "BOT  Bob", SPACES)).toEqual({ kind: "message", text: BOT_NAME_MESSAGE });
+  expect(pressEnter(view, "Bot carl")).toEqual({ kind: "message", text: BOT_NAME_MESSAGE });
+  expect(pressEnter({ kind: "entry", name: "", team: TABS, message: null }, "bot dee")).toEqual({ kind: "message", text: BOT_NAME_MESSAGE });
+  // Not a bot name: "bots-01", "Robot".
+  expect(pressTeam(view, "bots-01", TABS)).toEqual({ kind: "start", name: "bots-01", team: TABS });
+  expect(pressTeam(view, "Robot", TABS)).toEqual({ kind: "start", name: "Robot", team: TABS });
 });

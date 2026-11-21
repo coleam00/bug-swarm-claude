@@ -5,8 +5,9 @@
 // already held is ignored. The aim stick, dragged past STICK_DEAD, sets the aim and fires while
 // held (direction = aim, held = fire); the last aim is kept otherwise. Nothing fires for you.
 // Dash (#60): Space or Shift (`pressDash`), the right mouse button, or the round dash button above
-// the right stick (`dashButtonAt`), tapped with any pointer; a finger on the button never starts a
-// stick. A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
+// the right stick (`dashButtonAt`). The button is there only on a touch screen (#64): a coarse
+// pointer, or once a finger has touched (`dashButtonOn`); then any pointer can tap it, and a finger
+// on it never starts a stick. A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
 // while alive and the respawn while out. Pure: main.ts feeds it DOM events in CSS px relative to
 // the canvas.
 import type { Insets } from "../game/hud";
@@ -51,6 +52,8 @@ export type Controls = {
   /** A dash press waiting for the next input. */
   dashPress: boolean;
   dashButton: DashButton;
+  /** The dash button is shown and takes presses: a touch screen (game.ts sets it from `(pointer: coarse)`), or a finger has touched. */
+  dashButtonOn: boolean;
 };
 
 export function createControls(width: number): Controls {
@@ -68,6 +71,7 @@ export function createControls(width: number): Controls {
     respawn: false,
     dashPress: false,
     dashButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1 },
+    dashButtonOn: false,
   };
 }
 
@@ -88,6 +92,7 @@ export function dashButtonAt(width: number, height: number, insets: Insets, out:
 }
 
 function onDashButton(c: Controls, x: number, y: number): boolean {
+  if (!c.dashButtonOn) return false;
   const b = c.dashButton;
   const reach = b.r + DASH_BUTTON_SLOP;
   return (x - b.x) ** 2 + (y - b.y) ** 2 <= reach * reach;
@@ -118,6 +123,7 @@ function setMouseButtons(c: Controls, buttons: number): void {
 export function pointerDown(c: Controls, kind: PointerKind, id: number, x: number, y: number, button = 0, buttons = BUTTON_BITS[button] ?? 0): void {
   if (kind === "touch") {
     c.touched = true;
+    c.dashButtonOn = true;
     c.mouse.on = false;
   }
   if (onDashButton(c, x, y)) {
