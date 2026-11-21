@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { INPUT_BUFFER, INPUT_STALE_TICKS, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, TICK_MS } from "../../shared/arena/constants";
 import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
-import { HITS_PER_LIFE } from "../../shared/arena/constants";
+import { DOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
 import { placeBug } from "../../shared/arena/testkit";
 import { meOf, type LifeRecord } from "./room";
 import { Rooms } from "./rooms";
@@ -189,12 +189,16 @@ describe("lives", () => {
     p.budget = 0;
     placeBug(room.state, p.x + 5, p.y);
     tick();
+    // Down, not out: nothing saved yet. Then it bleeds out (as if DOWN_S had passed).
+    expect([p.down, saved.length]).toEqual([true, 0]);
+    p.downTick = room.state.tick - DOWN_TICKS;
+    tick();
     tick(5);
     expect(saved).toEqual([
-      { playerKey: "a".repeat(32), name: "Ada", team: "tabs", touch: true, score: 120, kills: 9, seconds: 1.5, endedAtMs: 1_000_000 + 31 * TICK_MS },
+      { playerKey: "a".repeat(32), name: "Ada", team: "tabs", touch: true, score: 120, kills: 9, seconds: 1.55, endedAtMs: 1_000_000 + 32 * TICK_MS },
     ]);
     const overs = (got: ServerMessage[]) => got.filter((m) => m.t === "event" && m.kind === "over");
-    expect(overs(a.got)).toEqual([{ t: "event", kind: "over", id: ja.entity, score: 120, kills: 9, seconds: 1.5 }]);
+    expect(overs(a.got)).toEqual([{ t: "event", kind: "over", id: ja.entity, score: 120, kills: 9, seconds: 1.55 }]);
     expect(overs(b.got)).toEqual([]);
     const last = snapshots(a.got).at(-1)!;
     expect(last.me).toMatchObject({ al: 0, hl: 0 });
@@ -213,6 +217,59 @@ describe("lives", () => {
     rooms.leave(j.room, j.entity);
     rooms.leave(j.room, j.entity);
     expect(saved).toMatchObject([{ name: "Ada", seconds: 1, score: 0 }]);
+  });
+
+  test("a down and a revive go to every member, down first, each before its tick's snapshot; the reviver's points are saved with its life", () => {
+    const saved: LifeRecord[] = [];
+    const { rooms, tick } = setup((r) => saved.push(r));
+    const a = client();
+    const b = client();
+    const ja = rooms.join("Ada", "tabs", INFO, a.send);
+    const jb = rooms.join("Bob", "spaces", { playerKey: "b".repeat(32), touch: false }, b.send);
+    const room = rooms.room(ja.room)!;
+    const [pa, pb] = [room.state.players[0]!, room.state.players[1]!];
+    const quiet = () => {
+      pa.budget = 0;
+      pb.budget = 0;
+    };
+    quiet();
+    tick();
+    room.state.bugs.length = 0;
+    pb.x = pa.x + 40;
+    pb.y = pa.y;
+    pa.invulnTicks = 0;
+    pa.hits = HITS_PER_LIFE - 1;
+    pb.invulnTicks = 1000; // Bob can't be hit while he revives
+    placeBug(room.state, pa.x - 5, pa.y);
+    quiet();
+    tick();
+    const meOfA = snapshots(a.got).at(-1)!.me;
+    expect(meOfA).toMatchObject({ al: 1, dn: 1, hl: 0 });
+    expect(snapshots(b.got).at(-1)!.d).toEqual([[ja.entity, 9.95, 0, 0]]);
+    for (let i = 0; i < REVIVE_TICKS; i++) {
+      quiet();
+      tick();
+    }
+    const kinds = (got: ServerMessage[]) => got.filter((m) => m.t !== "event" || m.kind === "down" || m.kind === "revive").map((m) => (m.t === "event" ? m.kind : m.t));
+    for (const c of [a, b]) {
+      const seen = kinds(c.got);
+      const down = seen.indexOf("down");
+      const revive = seen.indexOf("revive");
+      // Each event comes before the snapshot of the tick it happened in, and after the one before.
+      expect(seen.slice(down - 1, down + 2)).toEqual(["snapshot", "down", "snapshot"]);
+      expect(seen.slice(revive - 1, revive + 2)).toEqual(["snapshot", "revive", "snapshot"]);
+      expect(seen.filter((k) => k === "snapshot").length).toBe(REVIVE_TICKS + 2);
+      expect(c.got.filter((m) => m.t === "event" && (m.kind === "down" || m.kind === "revive"))).toEqual([
+        { t: "event", kind: "down", id: ja.entity },
+        { t: "event", kind: "revive", id: ja.entity, by: jb.entity, points: REVIVE_POINTS },
+      ]);
+    }
+    expect(snapshots(a.got).at(-1)!.me).toMatchObject({ al: 1, dn: 0, hl: 1 });
+    expect(snapshots(a.got).at(-1)!.d).toEqual([]);
+    expect(snapshots(b.got).at(-1)!.me.sc).toBe(REVIVE_POINTS);
+    // Bob's revive points are in his life when it ends, saved under his (spaces) name.
+    rooms.leave(jb.room, jb.entity);
+    expect(saved).toMatchObject([{ playerKey: "b".repeat(32), team: "spaces", score: REVIVE_POINTS }]);
   });
 
   test("a stale input stops firing as well as moving", () => {
@@ -236,8 +293,8 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.heat = 0.42;
   p.lockTicks = 3;
   p.hits = 1;
-  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1 };
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1 });
+  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dn: 0 as 0 | 1 };
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dn: 0 });
   p.lockTicks = 0;
   p.streak = 20;
   expect(meOf(p, me)).toMatchObject({ mu: 3, lk: 0 });

@@ -87,7 +87,7 @@ function start(playerId: string, name: string, team: Team): void {
   let seq = 0;
   let wave = 0;
   /** Your numbers from the last snapshot. */
-  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0 };
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dn: 0 };
   let haveMe = false;
   /** Your last life's end: when (performance.now ms) and what to show. */
   let overAt: number | null = null;

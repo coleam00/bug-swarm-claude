@@ -2,10 +2,11 @@
 // the browser runs `stepPlayer` to predict its own robot. No clock, no Math.random, no DOM: time
 // comes in as the fixed step and randomness from the arena's seeded generator. This file holds
 // the state, players and lives, and the step's order; shots, heat and the streak live in
-// combat.ts, crawlers and spawning in bugs.ts.
+// combat.ts, crawlers and spawning in bugs.ts, down, revive and bleed-out in downs.ts.
 import type { Team } from "../../server/rules";
 import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
+import { stepDowns } from "./downs";
 import {
   ACCEL,
   DT,
@@ -53,8 +54,16 @@ export type Player = {
   input: Input;
   /** Ticks since the last new input (the server zeroes a stale move). */
   idleTicks: number;
-  /** In a life (false: out, waiting for a respawn press). */
+  /** In a life (false: out, waiting for a respawn press). Still true while down. */
   alive: boolean;
+  /** Down (#59): in a life, but unable to move or fire until revived or bled out. */
+  down: boolean;
+  /** The tick of the step this player went down in (meaningful while down). */
+  downTick: number;
+  /** The player holding revive progress on this one (0: none). */
+  reviver: number;
+  /** Steps that holder has stayed in range. */
+  reviveTicks: number;
   /** Hits taken this life. */
   hits: number;
   /** The tick this life began. */
@@ -112,6 +121,8 @@ export type ShotEnded = { id: number; hit: boolean; travelled: number };
 export type Kill = { bug: number; by: number; x: number; y: number; points: number };
 /** A finished life, as the server saves it. */
 export type LifeEnd = { id: number; score: number; kills: number; ticks: number };
+/** A revive this tick: player `id` brought back by `by`, who scored `points`. */
+export type Revive = { id: number; by: number; points: number };
 
 /** What happened in the last stepArena. The arrays are reused: cleared at the start of each step. */
 export type ArenaEvents = {
@@ -121,6 +132,9 @@ export type ArenaEvents = {
   /** Ids of players who took a hit. */
   hitsTaken: number[];
   livesEnded: LifeEnd[];
+  /** Ids of players who went down. */
+  downs: number[];
+  revives: Revive[];
 };
 
 export type ArenaState = {
@@ -149,7 +163,7 @@ export function createArena(seed: number): ArenaState {
     shots: [],
     nextBugId: 1,
     nextShotId: 1,
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], livesEnded: [] },
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], livesEnded: [], downs: [], revives: [] },
   };
 }
 
@@ -165,6 +179,7 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.vx = 0;
   p.vy = 0;
   p.alive = true;
+  clearDown(p);
   p.hits = 0;
   p.lifeStartTick = state.tick;
   p.score = 0;
@@ -175,6 +190,18 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.fireCooldown = 0;
   p.invulnTicks = Math.round(INVULN_S / DT);
   p.budget = 0;
+}
+
+function clearDown(p: Player): void {
+  p.down = false;
+  p.downTick = 0;
+  p.reviver = 0;
+  p.reviveTicks = 0;
+}
+
+/** In a life and not down: can move, fire, be chased and revive others. */
+export function canAct(p: Player): boolean {
+  return p.alive && !p.down;
 }
 
 const spot = { x: 0, y: 0 };
@@ -216,6 +243,10 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
     input: noInput(),
     idleTicks: 0,
     alive: true,
+    down: false,
+    downTick: 0,
+    reviver: 0,
+    reviveTicks: 0,
     hits: 0,
     lifeStartTick: 0,
     outTick: 0,
@@ -233,9 +264,10 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
   return p;
 }
 
-/** Ends `p`'s life now and returns its record. */
-function endLife(state: ArenaState, p: Player): LifeEnd {
+/** Ends `p`'s life now (from up or down) and returns its record. */
+export function endLife(state: ArenaState, p: Player): LifeEnd {
   p.alive = false;
+  clearDown(p);
   p.outTick = state.tick;
   p.vx = 0;
   p.vy = 0;
@@ -257,12 +289,27 @@ export function leavePlayer(state: ArenaState, id: number): { life: LifeEnd | nu
   return { life };
 }
 
-/** Takes a hit on `p` (the caller checked it can be hit): untouchable for a moment; the last hit ends the life. */
+/**
+ * Takes a hit on `p` (the caller checked it can be hit): untouchable for a moment; the last hit
+ * puts it down (downs.ts revives it or bleeds it out).
+ */
 export function hitPlayer(state: ArenaState, p: Player): void {
   p.hits++;
   p.invulnTicks = Math.round(INVULN_S / DT);
   state.events.hitsTaken.push(p.id);
-  if (p.hits >= HITS_PER_LIFE) state.events.livesEnded.push(endLife(state, p));
+  if (p.hits >= HITS_PER_LIFE) downPlayer(state, p);
+}
+
+/** Puts `p` down: it stops where it is, and nothing protects it (bugs ignore it anyway). */
+function downPlayer(state: ArenaState, p: Player): void {
+  p.down = true;
+  p.downTick = state.tick;
+  p.reviver = 0;
+  p.reviveTicks = 0;
+  p.vx = 0;
+  p.vy = 0;
+  p.invulnTicks = 0;
+  state.events.downs.push(p.id);
 }
 
 /** Wraps an angle to (-pi, pi]. */
@@ -347,12 +394,14 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
 /**
  * Advances the arena one fixed step, in a fixed order (arrays in index order, every random draw
  * from state.rng), so the same seed and inputs replay exactly:
- * 1. players: the alive move; an out player whose input has dash, RESPAWN_DELAY_S or more after
- *    going out, respawns at a safe spot;
- * 2. fire and heat, alive players only (combat.ts);
- * 3. bugs: personal spawn budgets, spawning out of view, chasing, contact hits (bugs.ts);
+ * 1. players: those up move; a downed player stands still, its aim frozen; an out player whose
+ *    input has dash, RESPAWN_DELAY_S or more after going out, respawns at a safe spot;
+ * 2. fire and heat, players who are up only (combat.ts);
+ * 3. bugs: personal spawn budgets, spawning out of view, chasing, contact hits; the last hit
+ *    puts a player down (bugs.ts);
  * 4. shots: travel, hits, kills, misses (combat.ts);
- * 5. the tick counts.
+ * 5. downs: revive progress, revives and bleed-outs (downs.ts);
+ * 6. the tick counts.
  * `state.events` reports what happened in this step.
  */
 export function stepArena(state: ArenaState): void {
@@ -362,18 +411,24 @@ export function stepArena(state: ArenaState): void {
   ev.kills.length = 0;
   ev.hitsTaken.length = 0;
   ev.livesEnded.length = 0;
+  ev.downs.length = 0;
+  ev.revives.length = 0;
   for (const p of state.players) {
-    p.aim = p.input.aim;
-    if (p.alive) {
+    if (!p.alive) {
+      p.aim = p.input.aim;
+      if (p.input.dash && state.tick - p.outTick >= RESPAWN_DELAY_TICKS) {
+        safeSpot(state);
+        startLife(state, p, spot.x, spot.y);
+      }
+    } else if (!p.down) {
+      p.aim = p.input.aim;
       stepPlayer(p, p.input.mx, p.input.my);
       if (p.invulnTicks > 0) p.invulnTicks--;
-    } else if (p.input.dash && state.tick - p.outTick >= RESPAWN_DELAY_TICKS) {
-      safeSpot(state);
-      startLife(state, p, spot.x, spot.y);
     }
   }
-  for (const p of state.players) if (p.alive) stepFire(state, p);
+  for (const p of state.players) if (canAct(p)) stepFire(state, p);
   stepBugs(state);
   stepShots(state);
+  stepDowns(state);
   state.tick++;
 }
