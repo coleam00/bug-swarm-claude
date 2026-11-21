@@ -43,7 +43,7 @@
 - `src/server/blocked-words.ts`: the blocked-word list.
 - `src/server/art.ts`: the icons and the 1200x630 link preview, drawn in code from `look.ts` (the robot as an SVG, and a small software rasterizer for the PNGs); `src/server/png.ts` encodes PNG and ICO with `node:zlib`. No image files.
 - `src/server/share.ts`: link previews need an absolute image URL, and the app knows no public URL of its own, so the served page takes its origin from the request (`X-Forwarded-Host` or `Host`, and `X-Forwarded-Proto`); a host that is not a plain host name leaves the URL relative.
-- `src/server/main.ts`: production entry; serves `/board` from `dist/board.html` (`ui.ts`), `dist/` and the page (with absolute share-image URLs, `share.ts`) for every other path; reads `PORT`, `DATA_DIR` (default `data/`) and, for load testing only, `RUN_STARTS_PER_WINDOW` (`src/server/limits.ts`).
+- `src/server/main.ts`: production entry; after the API it calls `servePages` (`src/server/ui.ts`, tested in `ui.test.ts`), which serves `/board` from `dist/board.html`, then `dist/` and the page (with absolute share-image URLs, `share.ts`) for every other path; reads `PORT`, `DATA_DIR` (default `data/`) and, for load testing only, `RUN_STARTS_PER_WINDOW` (`src/server/limits.ts`).
 - `scripts/stats.ts`, `scripts/hide.ts`, `scripts/reset.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts` (with `scripts/load-lib.ts`, its tested pure half).
 - Tests are `*.test.ts` beside the code.
 

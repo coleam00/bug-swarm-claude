@@ -92,8 +92,8 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
         const row = view.rows[i];
         r.root.classList.toggle("empty", !row);
         r.name.textContent = row ? row.name : EMPTY;
-        fitName(r.name);
         r.score.textContent = row ? row.score : "";
+        fitName(r.name); // after the score: its width sets the room the name has
         if (row?.isNew) flash(r.root);
       });
       for (const t of view.teams) {

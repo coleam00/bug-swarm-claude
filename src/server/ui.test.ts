@@ -1,46 +1,56 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
-import { serveBoard } from "./ui";
+import viteConfig from "../../vite.config";
+import { servePages } from "./ui";
 
 let dist: string;
-let empty: string;
+let noBoard: string;
 
 beforeAll(() => {
   dist = mkdtempSync(join(tmpdir(), "ui-test-"));
-  empty = mkdtempSync(join(tmpdir(), "ui-test-empty-"));
-  writeFileSync(join(dist, "index.html"), "game");
+  noBoard = mkdtempSync(join(tmpdir(), "ui-test-noboard-"));
+  for (const dir of [dist, noBoard]) {
+    writeFileSync(join(dir, "index.html"), "game");
+    mkdirSync(join(dir, "assets"));
+    writeFileSync(join(dir, "assets", "app.js"), "js");
+  }
   writeFileSync(join(dist, "board.html"), "board");
 });
 
 afterAll(() => {
   rmSync(dist, { recursive: true, force: true });
-  rmSync(empty, { recursive: true, force: true });
+  rmSync(noBoard, { recursive: true, force: true });
 });
 
-/** The board route, then a catch-all standing in for main.ts's static files and SPA fallback. */
-function appFor(dir: string): Hono {
-  const app = new Hono();
-  serveBoard(app, dir);
-  app.get("*", (c) => c.text("game"));
-  return app;
+/** GETs a path and reads the body fully, so no file handle stays open (Windows can't delete an open file). */
+async function get(app: Hono, path: string) {
+  const res = await app.request(path);
+  return { status: res.status, type: res.headers.get("content-type"), body: await res.text() };
 }
 
-test("/board and /board/ serve board.html as html, ahead of the game's fallback", async () => {
-  const app = appFor(dist);
+test("production pages: /board is the board, / and unknown paths are the game, built files are served", async () => {
+  const app = new Hono();
+  servePages(app, dist);
   for (const path of ["/board", "/board/"]) {
-    const res = await app.request(path);
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(await res.text()).toBe("board"); // read the body fully, so no file handle stays open
+    expect(await get(app, path)).toEqual({ status: 200, type: "text/html; charset=utf-8", body: "board" });
   }
-  expect(await (await app.request("/")).text()).toBe("game");
+  for (const path of ["/", "/index.html", "/nope"]) expect((await get(app, path)).body).toBe("game");
+  expect((await get(app, "/assets/app.js")).body).toBe("js");
 });
 
-test("a build with no board.html answers 404 at /board", async () => {
-  const res = await appFor(empty).request("/board");
-  expect(res.status).toBe(404);
-  await res.text();
+test("a build with no board.html answers 404 at /board, not the game", async () => {
+  const app = new Hono();
+  servePages(app, noBoard);
+  expect((await get(app, "/board")).status).toBe(404);
+});
+
+test("the build emits board.html: it is a Vite entry, at the repo root where the dev server finds /board", () => {
+  const input = viteConfig.build?.rollupOptions?.input as Record<string, string>;
+  const root = fileURLToPath(new URL("../../", import.meta.url));
+  expect(input.board).toBe(join(root, "board.html"));
+  expect(existsSync(input.board!)).toBe(true);
 });

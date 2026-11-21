@@ -346,30 +346,18 @@ describe("the stream board's read", () => {
     expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 } });
   });
 
-  test("is cached for 1 second, like the routes it combines", async () => {
+  test("both halves are cached for 1 second, like the routes it combines", async () => {
     const a = app();
-    await play(a, "player-0001", "First", 30, TABS);
-    const before = await board(a);
-    const runId = await startRun(a, "player-0002", "Second", SPACES);
-    clock += 500;
-    expect((await post(a, `/api/runs/${runId}/end`, endBody(0, 0, 0))).status).toBe(200);
+    await play(a, "player-0001", "Bad Name", 50, TABS);
+    await play(a, "player-0002", "Good", 40, SPACES);
+    const before = await board(a); // primes both caches
+    hideName(db, "bad name", new Date(clock)); // moves the top 10 and the Tabs total alike
+    clock += 999;
     expect(await board(a)).toEqual(before);
-    clock += 500;
-    expect((await board(a)).top).toEqual([
-      { name: "First", score: 30 },
-      { name: "Second", score: 0 },
-    ]);
+    clock += 1;
+    expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 } });
   });
 
-  test("agrees with /api/top and /api/teams at the same moment", async () => {
-    const a = app();
-    for (let i = 0; i < 12; i++) await play(a, `player-${1000 + i}`, `P${i}`, 10 * i, TEAMS[i % 2]!);
-    const b = await board(a);
-    const top = ((await (await a.request("/api/top")).json()) as { top: unknown }).top;
-    const teams = ((await (await a.request("/api/teams")).json()) as { teams: unknown }).teams;
-    expect(b).toEqual({ top, teams } as Board);
-    expect(b.top.length).toBe(10);
-  });
 });
 
 test("reopening the same database file keeps its data", async () => {

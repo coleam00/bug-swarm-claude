@@ -46,16 +46,12 @@ describe("parseBoard", () => {
 });
 
 describe("boardView rows", () => {
-  test("ranks from 1 and formats scores with thousands separators", () => {
+  test("ranks from 1, formats scores with thousands separators, and highlights nothing on the first load", () => {
     const v = boardView(null, board([["Ann", 1234567], ["Bob", 0]]));
     expect(v.rows).toEqual([
       { rank: 1, name: "Ann", score: "1,234,567", isNew: false },
       { rank: 2, name: "Bob", score: "0", isNew: false },
     ]);
-  });
-
-  test("the first load highlights nothing", () => {
-    expect(boardView(null, board([["Ann", 5], ["Bob", 4]])).rows.some((r) => r.isNew)).toBe(false);
   });
 
   test("a new name is new; a name moving rank is not", () => {

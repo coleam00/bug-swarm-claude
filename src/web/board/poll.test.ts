@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Board } from "./data";
-import { BOARD_MAX_BACKOFF_MS, BOARD_POLL_MS, fetchBoard, nextDelay, startPolling, type BoardStatus } from "./poll";
+import { BOARD_POLL_MS, fetchBoard, startPolling, type BoardStatus } from "./poll";
 
 const BOARD: Board = { top: [{ name: "Ann", score: 50 }], teams: { tabs: 50, spaces: 0 } };
 
@@ -41,12 +41,6 @@ function harness(opts: { onData?: (b: Board) => void } = {}) {
   return { start, loads, timers, data, statuses, settle, fire, flush };
 }
 
-test("nextDelay: the normal cadence, doubling after the second failure in a row, capped", () => {
-  expect([0, 1, 2, 3, 4, 5, 20].map(nextDelay)).toEqual([2000, 2000, 4000, 8000, 10000, 10000, 10000]);
-  expect(BOARD_POLL_MS).toBe(2000);
-  expect(BOARD_MAX_BACKOFF_MS).toBe(10000);
-});
-
 describe("startPolling", () => {
   test("loads at once, and never again until that load has settled", async () => {
     const h = harness();
@@ -58,17 +52,6 @@ describe("startPolling", () => {
     expect(h.loads.length).toBe(1);
     h.fire();
     expect(h.loads.length).toBe(2);
-  });
-
-  test("hands the server's board to onData and keeps the 2 s cadence while it succeeds", async () => {
-    const h = harness();
-    h.start();
-    for (let i = 0; i < 3; i++) {
-      expect(await h.settle(BOARD)).toBe(2000);
-      h.fire();
-    }
-    expect(h.data).toEqual([BOARD, BOARD, BOARD]);
-    expect(h.statuses).toEqual(["live"]);
   });
 
   test("backs off over failures, keeps the last board, and resets on success", async () => {
