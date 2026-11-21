@@ -409,13 +409,6 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.strokeText(wt, hud.center, hud.top + 4);
       ctx.fillText(wt, hud.center, hud.top + 4);
     }
-    if (sc.stats) {
-      ctx.font = STATS_FONT;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = "#94a3b8";
-      ctx.fillText(sc.stats, hud.left, hud.top + 100);
-    }
   }
 
   function drawOver(o: OverView, t: number): void {
@@ -586,6 +579,14 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
 
     if (sc.over) drawOver(sc.over, t);
     else drawHud(sc);
+    // The F readout shows over everything, the life-over screen too.
+    if (sc.stats) {
+      ctx.font = STATS_FONT;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText(sc.stats, hud.left, hud.top + 100);
+    }
   }
 
   return { resize, draw, size: () => ({ w: cssW, h: cssH }) };
