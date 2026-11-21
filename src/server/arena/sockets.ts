@@ -6,6 +6,9 @@
 // heard from (a message or a pong) for SILENT_MS is dropped, so a peer that vanished without
 // closing (a phone losing its network) does not keep a frozen robot in the arena. Bun's own
 // idle timeout can't do this: the tick's snapshots keep it alive.
+// A hidden name (`bun run hide`, or a stored name the word lists now refuse) is refused at hello,
+// and every HIDE_SWEEP_MS the joined sockets are checked against it, off the tick: a name hidden
+// mid-life gets the same `error name` and close, and leaving saves its life as a disconnect does.
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
@@ -33,6 +36,8 @@ export const PING_MS = 5000;
 export const SILENT_MS = 15_000;
 /** The WebSocket close code for a refused hello (policy violation). */
 export const CLOSE_REFUSED = 1008;
+/** How often joined sockets are checked for a name hidden since they joined, ms. */
+export const HIDE_SWEEP_MS = 2000;
 
 export type SocketData = {
   limiter: InputLimiter;
@@ -42,39 +47,79 @@ export type SocketData = {
   /** When the socket last sent a message or a pong, ms. */
   lastHeard: number;
   liveTimer: ReturnType<typeof setInterval> | null;
+  /** The name the socket joined with, once welcomed. */
+  name: string | null;
 };
 
 /** The data a new socket starts with, passed to server.upgrade. */
 export function newSocketData(): SocketData {
-  return { limiter: createInputLimiter(), room: null, entity: null, helloTimer: null, lastHeard: 0, liveTimer: null };
+  return { limiter: createInputLimiter(), room: null, entity: null, helloTimer: null, lastHeard: 0, liveTimer: null, name: null };
 }
 
 /** How often to ping and when to give up; the defaults are the real ones, tests shorten them. */
 export type Liveness = { pingMs: number; silentMs: number };
 
-export function createArenaSockets(rooms: Rooms, opts: { now?: () => number; liveness?: Liveness } = {}): WebSocketHandler<SocketData> {
+export type ArenaSocketOptions = {
+  now?: () => number;
+  liveness?: Liveness;
+  /** True for a name that may not play (hidden from the boards). Defaults to none. */
+  isHidden?: (name: string) => boolean;
+  /** How often joined sockets are checked with `isHidden`, ms; tests shorten it. */
+  sweepMs?: number;
+};
+
+export type ArenaSockets = WebSocketHandler<SocketData> & {
+  /** Stops the hidden-name sweep (the server is stopping). */
+  stop(): void;
+};
+
+export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}): ArenaSockets {
   const now = opts.now ?? Date.now;
   const { pingMs, silentMs } = opts.liveness ?? { pingMs: PING_MS, silentMs: SILENT_MS };
+  const isHidden = opts.isHidden ?? (() => false);
+  const sweepMs = opts.sweepMs ?? HIDE_SWEEP_MS;
+  /** The welcomed sockets, which the sweep checks. */
+  const joined = new Set<ServerWebSocket<SocketData>>();
+  let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
   const refuse = (ws: ServerWebSocket<SocketData>, code: ErrorCode) => {
     ws.send(JSON.stringify({ t: ERROR, code }));
     ws.close(CLOSE_REFUSED, code);
   };
 
+  const stopSweep = () => {
+    if (sweepTimer) clearInterval(sweepTimer);
+    sweepTimer = null;
+  };
+  // Runs only while someone is joined, so an idle server (and a test that never joins) has no timer.
+  const sweep = () => {
+    for (const ws of joined) {
+      if (ws.data.name !== null && isHidden(ws.data.name)) {
+        joined.delete(ws);
+        refuse(ws, ERROR_NAME);
+      }
+    }
+    if (joined.size === 0) stopSweep();
+  };
+
   const hello = (ws: ServerWebSocket<SocketData>, m: Hello) => {
     if (m.v !== PROTOCOL_VERSION) return refuse(ws, ERROR_VERSION);
     const name = checkName(m.name);
-    if (!name.ok || isBotName(name.name)) return refuse(ws, ERROR_NAME);
+    if (!name.ok || isBotName(name.name) || isHidden(name.name)) return refuse(ws, ERROR_NAME);
     if (!isTeam(m.team)) return refuse(ws, ERROR_TEAM);
     if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
     ws.data.helloTimer = null;
-    const joined = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => void ws.send(msg));
-    ws.data.room = joined.room;
-    ws.data.entity = joined.entity;
-    ws.send(JSON.stringify(joined.welcome));
+    const entered = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => void ws.send(msg));
+    ws.data.room = entered.room;
+    ws.data.entity = entered.entity;
+    ws.data.name = name.name;
+    ws.send(JSON.stringify(entered.welcome));
+    joined.add(ws);
+    if (!sweepTimer) sweepTimer = setInterval(sweep, sweepMs);
   };
 
   return {
+    stop: stopSweep,
     maxPayloadLength: MAX_FRAME_BYTES,
     open(ws) {
       ws.data.helloTimer = setTimeout(() => refuse(ws, ERROR_HELLO), HELLO_TIMEOUT_MS);
@@ -102,6 +147,8 @@ export function createArenaSockets(rooms: Rooms, opts: { now?: () => number; liv
       rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash });
     },
     close(ws) {
+      joined.delete(ws);
+      if (joined.size === 0) stopSweep();
       if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
       ws.data.helloTimer = null;
       if (ws.data.liveTimer) clearInterval(ws.data.liveTimer);

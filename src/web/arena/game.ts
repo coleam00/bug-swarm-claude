@@ -1,16 +1,18 @@
-// The /arena page (release 2): plain TypeScript, no React. With a name and a team (the same
-// local player `/` keeps; without them, `/` asks first), it joins an arena over the WebSocket and
-// runs the frame loop: every local 50 ms step reads the controls, sends one input and predicts
-// your robot with it; every frame draws you between predicted steps, everyone else and the bugs
-// ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the effects
-// and the HUD, with the camera following you. Space, Shift, the right mouse button or the dash
-// button dash (predicted at once, like the move). When you go down you stop (no move, no fire, no
-// dash, no prediction: you are drawn where the server has you) until someone revives you; when
-// your life ends the server says so ("over"), and after RESTART_DELAY_MS any key, click or tap
-// sends the respawn press.
+// The arena (release 2), plain TypeScript with no React in the loop. App.tsx mounts a canvas and
+// calls `startArena` once the start screen has a name and a team: it joins an arena over the
+// WebSocket and runs the frame loop: every local 50 ms step reads the controls, sends one input
+// and predicts your robot with it; every frame draws you between predicted steps, everyone else and
+// the bugs ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the
+// effects and the HUD line, with the camera following you. Space, Shift, the right mouse button or
+// (on a touch screen) the dash button dash (predicted at once, like the move). When you go down
+// you stop (no move, no fire, no dash, no prediction: you are drawn where the server has you)
+// until someone revives you; when your life ends the server says so ("over") and App shows the
+// life-over screen over the arena, which keeps playing behind it; its "Play again" calls
+// `respawn()`, which sends the respawn press once RESTART_DELAY_MS has passed. `stop()` undoes
+// everything `startArena` did: the frame loop, every listener, the probe and the socket, so a
+// remount never leaves a second socket (each one's leaving would save a life).
 import { DASH_COOLDOWN_TICKS, MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
 import {
-  ERROR_NAME,
   EVENT,
   JOIN,
   LEAVE,
@@ -19,6 +21,7 @@ import {
   SNAPSHOT,
   WELCOME,
   encodeInput,
+  type ErrorCode,
   type ServerMessage,
   type SnapshotDown,
   type SnapshotMe,
@@ -35,7 +38,6 @@ import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
 import { BUG_LOOKS, GLOW_SHOT } from "../game/look";
 import { createRng } from "../game/rng";
-import { loadPlayer, nextScreen, noteArenaRefusedName } from "../player";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import {
   DASH_KEYS,
@@ -66,7 +68,7 @@ import {
 } from "./interp";
 import { connectArena } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
-import { createArenaRenderer, type BugsView, type OverView, type Robot, type Scene } from "./render";
+import { createArenaRenderer, type BugsView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 
 /** Local steps one frame may run; a stalled tab drops the rest rather than burst inputs. */
@@ -74,26 +76,49 @@ const MAX_STEPS_PER_FRAME = 3;
 /** Particles in a shot's spark (a kill bursts BURST_COUNT). */
 const SPARK_COUNT = 5;
 
-const player = loadPlayer();
-if (nextScreen(player, false, false) !== "play" || player.name === null || player.team === null) {
-  location.replace("/");
-} else {
-  start(player.id, player.name, player.team);
+/** Who joins: the local player's id, name and team (player.ts). */
+export type ArenaPlayer = { id: string; name: string; team: Team };
+
+/** A life that ended, as the server scored it. */
+export type LifeSummary = { score: number; kills: number; seconds: number };
+
+/** What the arena tells the page around it. */
+export type ArenaEvents = {
+  /** "Connecting...", "Reconnecting...", "Reload to update", or null when playing. */
+  status(text: string | null): void;
+  /** The server refused the name (hidden, a bot name) or the team: the arena has stopped connecting. */
+  refused(code: ErrorCode): void;
+  /** Your life ended, at `at` (performance.now ms): "Play again" works from RESTART_DELAY_MS after it. */
+  over(life: LifeSummary, at: number): void;
+  /** You are in a life again (a respawn, or the new life a rejoin starts). */
+  alive(): void;
+  /** You are in a life for the first time since `startArena`. Once. */
+  firstSpawn(): void;
+};
+
+export type ArenaHandle = {
+  /** Asks for the next life; false (nothing sent) while not out or inside the restart guard. */
+  respawn(): boolean;
+  /** Stops everything startArena started. */
+  stop(): void;
+};
+
+/** A touch screen's main pointer: the dash button shows. */
+function coarsePointer(): boolean {
+  try {
+    return matchMedia("(pointer: coarse)").matches;
+  } catch {
+    return false;
+  }
 }
 
-function formatSeconds(s: number): string {
-  const whole = Math.floor(s);
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
-}
-
-function start(playerId: string, name: string, team: Team): void {
-  const canvas = document.getElementById("arena") as HTMLCanvasElement;
-  const statusEl = document.getElementById("status") as HTMLElement;
+export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: ArenaEvents): ArenaHandle {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("no 2d canvas");
   const renderer = createArenaRenderer(ctx);
   const cam = createCamera(window.innerWidth, window.innerHeight);
   const controls = createControls(window.innerWidth);
+  controls.dashButtonOn = coarsePointer();
   const predictor = createPredictor();
   const interp = createInterp();
   const shots = createShots();
@@ -120,9 +145,11 @@ function start(playerId: string, name: string, team: Team): void {
   /** Your numbers from the last snapshot. */
   const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0 };
   let haveMe = false;
-  /** Your last life's end: when (performance.now ms) and what to show. */
+  /** Your last life's end, performance.now ms, until you are in a life again. */
   let overAt: number | null = null;
-  const over: OverView = { title: "Life over", score: "", line: "", prompt: "Tap or press any key", ready: false };
+  let firstSpawned = false;
+  let stopped = false;
+  let raf = 0;
 
   const robotFor = (id: number, n: string, t: Team): Robot => {
     let r = roster.get(id);
@@ -162,9 +189,9 @@ function start(playerId: string, name: string, team: Team): void {
 
   const lifeOver = (score: number, kills: number, seconds: number) => {
     overAt = performance.now();
-    over.score = `${score.toLocaleString("en-US")} points`;
-    over.line = `${kills} ${kills === 1 ? "kill" : "kills"} · ${formatSeconds(seconds)}`;
-    over.ready = false;
+    // The life-over screen covers the canvas: a button or stick held now never sees its release.
+    releaseAll(controls);
+    on.over({ score, kills, seconds }, overAt);
   };
 
   const onMessage = (m: ServerMessage) => {
@@ -203,10 +230,18 @@ function start(playerId: string, name: string, team: Team): void {
         if (r) r.trail.count = 0;
         spawned = true;
         acc = 0;
-        if (nowAlive) overAt = null;
       } else if (nowAlive && !nowDown) reconcile(predictor, self[1], self[2], self[3], self[4], m.me.dk, m.me.dc, m.ack);
+      const cameBack = nowAlive && !alive;
       alive = nowAlive;
       down = nowDown;
+      if (cameBack) {
+        overAt = null;
+        if (!firstSpawned) {
+          firstSpawned = true;
+          on.firstSpawn();
+        }
+        on.alive();
+      }
     } else if (m.t === EVENT) {
       if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);
       else if (m.kind === LEAVE) roster.delete(m.id);
@@ -220,20 +255,8 @@ function start(playerId: string, name: string, team: Team): void {
   };
 
   const conn = connectArena(
-    { name, team, player: playerId, touch: () => controls.touched || matchMedia("(pointer: coarse)").matches },
-    {
-      message: onMessage,
-      status: (text) => {
-        statusEl.hidden = text === null;
-        if (text !== null) statusEl.textContent = text;
-      },
-      refused: (code) => {
-        // The server refused the name (a "bot ..." name, which `/` still accepts) or the team:
-        // `/` keeps the name and says why on its start screen.
-        if (code === ERROR_NAME) noteArenaRefusedName(name);
-        location.replace("/");
-      },
-    },
+    { name: player.name, team: player.team, player: player.id, touch: () => controls.touched || coarsePointer() },
+    { message: onMessage, status: on.status, refused: on.refused },
   );
 
   // Layout: the canvas at device resolution, the camera's view, the safe-area insets.
@@ -259,31 +282,28 @@ function start(playerId: string, name: string, team: Team): void {
     renderer.resize(w, h, dpr, cam, insets);
   };
   resize();
-  window.addEventListener("resize", resize);
 
   /** Out, and past the guard: a press now respawns you. */
   const canRespawn = () => spawned && !alive && overAt !== null && restartIn(overAt, performance.now()) === 0;
 
-  // Input.
+  // Input. Respawning is the life-over screen's (App.tsx, through `respawn()`), never a key here.
   let showStats = false;
-  window.addEventListener("keydown", (e) => {
+  const onKeyDown = (e: KeyboardEvent) => {
     if (e.code === STATS_KEY && !e.repeat) showStats = !showStats;
-    else if (canRespawn() && !e.repeat) pressRespawn(controls);
     if (alive && DASH_KEYS.has(e.code) && !e.repeat) pressDash(controls);
     if (STEERING_KEYS.has(e.code)) {
       controls.keys.add(e.code);
       e.preventDefault();
     } else if (DASH_KEYS.has(e.code)) e.preventDefault(); // Space would scroll the page
-  });
-  window.addEventListener("keyup", (e) => controls.keys.delete(e.code));
-  window.addEventListener("blur", () => releaseAll(controls));
+  };
+  const onKeyUp = (e: KeyboardEvent) => controls.keys.delete(e.code);
+  const onBlur = () => releaseAll(controls);
   const local = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top, kind: e.pointerType as PointerKind };
   };
-  canvas.addEventListener("pointerdown", (e) => {
+  const onPointerDown = (e: PointerEvent) => {
     const p = local(e);
-    if (canRespawn()) pressRespawn(controls);
     pointerDown(controls, p.kind, e.pointerId, p.x, p.y, e.button, e.buttons);
     if (p.kind === "touch") {
       try {
@@ -293,15 +313,13 @@ function start(playerId: string, name: string, team: Team): void {
       }
     }
     e.preventDefault();
-  });
-  canvas.addEventListener("pointermove", (e) => {
+  };
+  const onPointerMove = (e: PointerEvent) => {
     const p = local(e);
     pointerMove(controls, p.kind, e.pointerId, p.x, p.y, e.buttons);
-  });
-  const end = (e: PointerEvent) => pointerUp(controls, e.pointerType as PointerKind, e.pointerId, e.buttons);
-  canvas.addEventListener("pointerup", end);
-  canvas.addEventListener("pointercancel", end);
-  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  };
+  const onPointerUp = (e: PointerEvent) => pointerUp(controls, e.pointerType as PointerKind, e.pointerId, e.buttons);
+  const onContextMenu = (e: Event) => e.preventDefault();
 
   /**
    * Sends one input, and while up predicts with it. `dash` is the dash press while up and the
@@ -318,12 +336,23 @@ function start(playerId: string, name: string, team: Team): void {
     if (up) predictLocal(predictor, input);
   };
   // A hidden tab gets no frames: stop rather than repeat the last move until the server's stale limit.
-  document.addEventListener("visibilitychange", () => {
+  const onVisibility = () => {
     if (document.hidden && spawned) {
       releaseAll(controls);
       sendInput(0, 0, controls.aim, false, false);
     }
-  });
+  };
+
+  window.addEventListener("resize", resize);
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener("keyup", onKeyUp);
+  window.addEventListener("blur", onBlur);
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("contextmenu", onContextMenu);
+  document.addEventListener("visibilitychange", onVisibility);
 
   const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false };
   const self = { x: 0, y: 0 };
@@ -355,7 +384,8 @@ function start(playerId: string, name: string, team: Team): void {
     me: null,
     wave: 0,
     hud: hudFx,
-    over: null,
+    players: 0,
+    out: false,
     sticks: [controls.move, controls.aimStick],
     stats: null,
     dashButton: null,
@@ -420,6 +450,7 @@ function start(playerId: string, name: string, team: Team): void {
   };
 
   const frame = (now: number) => {
+    if (stopped) return;
     const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
     last = now;
     if (tickFps(meter, dt)) statsReading = -1;
@@ -438,7 +469,6 @@ function start(playerId: string, name: string, team: Team): void {
       if (acc >= TICK_MS) acc = 0;
     }
     decayCorrection(predictor, dt);
-    over.ready = overAt !== null && restartIn(overAt, now) === 0;
 
     // The clocks: everyone else 100 ms behind the server, you and your shots at the server's now.
     const rt = renderTick(interp, now);
@@ -515,12 +545,38 @@ function start(playerId: string, name: string, team: Team): void {
     scene.you = you;
     scene.me = haveMe ? me : null;
     scene.wave = wave;
-    scene.over = overAt !== null && !alive ? over : null;
+    scene.players = roster.size;
+    scene.out = spawned && !alive;
     scene.stats = showStats ? statsText : null;
-    scene.dashButton = alive && selfIndex >= 0 ? controls.dashButton : null;
+    scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
     renderer.draw(cam, scene);
-    requestAnimationFrame(frame);
+    raf = requestAnimationFrame(frame);
   };
-  requestAnimationFrame(frame);
+  raf = requestAnimationFrame(frame);
+
+  return {
+    respawn() {
+      if (stopped || !canRespawn()) return false;
+      pressRespawn(controls);
+      return true;
+    },
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerUp);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+      document.removeEventListener("visibilitychange", onVisibility);
+      probe.remove();
+      conn.close();
+    },
+  };
 }

@@ -1,34 +1,36 @@
 import { expect, test } from "bun:test";
-import { CI_DRONE, REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD } from "../server/rules";
-import { rankLines, saveNotice, upgradeLevels } from "./over";
+import type { TopRow } from "./api";
+import { fmt, topLine } from "./over";
 
-test("no upgrades: an empty list", () => {
-  expect(upgradeLevels([])).toEqual([]);
+const rows = (scores: number[]): TopRow[] => scores.map((score, i) => ({ name: `p${i}`, score }));
+const TEN = rows([5000, 4000, 3000, 2500, 2000, 1500, 1200, 1000, 900, 800]);
+
+test("on the top 10: its place", () => {
+  expect(topLine({ rank: 3, ranked: 40, next: { rank: 2, points: 1001 }, row: 2 }, TEN, 3000)).toBe("#3 on the top 10");
+  expect(topLine({ rank: 10, ranked: 40, next: { rank: 9, points: 101 }, row: 9 }, TEN, 800)).toBe("#10 on the top 10");
 });
 
-test("each upgrade once, in the order first taken, at the level its picks reached", () => {
-  expect(upgradeLevels([REVIEW_LASER, TEST_SHIELD, REVIEW_LASER])).toEqual([
-    { id: REVIEW_LASER, name: "Review laser", level: 2 },
-    { id: TEST_SHIELD, name: "Test shield", level: 1 },
-  ]);
-  const all = upgradeLevels([CI_DRONE, REFACTOR_BOMB, CI_DRONE, TEST_SHIELD, REVIEW_LASER, REFACTOR_BOMB, TEST_SHIELD, REVIEW_LASER]);
-  expect(all.map((u) => `${u.id} ${u.level}`)).toEqual([`${CI_DRONE} 2`, `${REFACTOR_BOMB} 2`, `${TEST_SHIELD} 2`, `${REVIEW_LASER} 2`]);
+test("with fewer than 10 ranked, a player with a best is on it", () => {
+  expect(topLine({ rank: 2, ranked: 2, next: { rank: 1, points: 11 }, row: 1 }, rows([100, 90]), 90)).toBe("#2 on the top 10");
 });
 
-test("the save line: the too-many-runs refusal and a failed save each have their own; otherwise none", () => {
-  expect(saveNotice("rate-limited")).toBe("Too many runs right now. Your next run will save.");
-  expect(saveNotice("failed")).toBe("Couldn't save your score");
-  for (const s of ["saving", "saved", "not-saved"] as const) expect(saveNotice(s)).toBeNull();
+test("below it: one more than the 10th row's score minus the best, not the gap to the rank just above", () => {
+  expect(topLine({ rank: 11, ranked: 40, next: { rank: 10, points: 21 }, row: null }, TEN, 780)).toBe("21 points to reach the top 10");
+  expect(topLine({ rank: 25, ranked: 40, next: { rank: 24, points: 5 }, row: null }, TEN, 120)).toBe("681 points to reach the top 10");
+  expect(topLine({ rank: 11, ranked: 40, next: { rank: 10, points: 1 }, row: null }, TEN, 800)).toBe("1 point to reach the top 10");
+  // The rows can lag the best by a cached second: never 0 or less.
+  expect(topLine({ rank: 11, ranked: 40, next: { rank: 10, points: 1 }, row: null }, TEN, 900)).toBe("1 point to reach the top 10");
+  expect(topLine({ rank: 1234, ranked: 2000, next: null, row: null }, rows(Array<number>(10).fill(15300)), 0)).toBe(
+    "15,301 points to reach the top 10",
+  );
 });
 
-test("rank lines: none without a rank; the top-10 line through #10; the gap to the rank above from #11", () => {
-  expect(rankLines(null)).toEqual([]);
-  expect(rankLines({ rank: null, ranked: 5, next: null, row: null })).toEqual([]);
-  expect(rankLines({ rank: 1, ranked: 1, next: null, row: 0 })).toEqual(["Your best is #1 of 1", "You're in the top 10!"]);
-  expect(rankLines({ rank: 10, ranked: 214, next: { rank: 9, points: 3 }, row: 9 })).toEqual(["Your best is #10 of 214", "You're in the top 10!"]);
-  expect(rankLines({ rank: 11, ranked: 214, next: { rank: 10, points: 1 }, row: null })).toEqual(["Your best is #11 of 214", "1 point to beat #10"]);
-  expect(rankLines({ rank: 1234, ranked: 2000, next: { rank: 1233, points: 15300 }, row: null })).toEqual([
-    "Your best is #1,234 of 2,000",
-    "15,300 points to beat #1,233",
-  ]);
+test("nothing without a rank or a best: hidden, no saved life yet, or the read failed", () => {
+  expect(topLine(null, TEN, 500)).toBeNull();
+  expect(topLine({ rank: null, ranked: 40, next: null, row: null }, TEN, 500)).toBeNull();
+  expect(topLine({ rank: 3, ranked: 40, next: null, row: 2 }, TEN, null)).toBeNull();
+});
+
+test("counts are written as the board writes them", () => {
+  expect(fmt(466548)).toBe("466,548");
 });

@@ -1,9 +1,13 @@
 // Floating "+10" labels over squashed bugs. Squashes close together in place and time merge into
 // one label ("+30") so a full swarm never piles labels into unreadable clutter. A fixed pool: when
 // it is full the label with the least life left is overwritten. Pure (no DOM, no canvas). A
-// squash scores POINTS_PER_SQUASH unless told otherwise (the arena's streak multiplier, #55):
-// a label sums its points, and `textLabel` gives its text without building a string per frame.
-import { POINTS_PER_SQUASH } from "../../../server/rules";
+// kill scores POINTS_PER_SQUASH (the arena's KILL_POINTS) unless told otherwise (the streak
+// multiplier, #55): a label sums its points, and `textLabel` gives its text without building a
+// string per frame.
+import { KILL_POINTS } from "../../../shared/arena/constants";
+
+/** A kill's points before any multiplier. */
+export const POINTS_PER_SQUASH = KILL_POINTS;
 
 /** The most labels alive at once. */
 export const TEXT_CAPACITY = 12;

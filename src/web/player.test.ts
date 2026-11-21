@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { TEAMS } from "../server/rules";
-import { forgetPlayerForTests, loadPlayer, nextScreen, noteArenaRefusedName, setPlayerName, setPlayerTeam, takeArenaRefusedName, takeRefusedName } from "./player";
+import { forgetPlayerForTests, loadPlayer, setPlayerName, setPlayerTeam, takeRefusedName } from "./player";
 
 // A stand-in for the browser's localStorage.
 let store: Map<string, string>;
@@ -40,26 +40,6 @@ test("a player stored before teams loads with no team; a stored team that isn't 
   expect(loadPlayer().team).toBeNull();
 });
 
-test("the next screen: every page load opens on the start screen; between runs, setup only until there is a name and a team", () => {
-  const id = "0123456789abcdef0123456789abcdef";
-  // Opening the page: the start screen for everyone, a returning player too ("Play as").
-  expect(nextScreen({ id, name: null, team: null }, false, true)).toBe("setup");
-  expect(nextScreen({ id, name: "Old Timer", team: TEAMS[0] }, false, true)).toBe("setup");
-  expect(nextScreen({ id, name: null, team: null }, true, true)).toBe("play"); // a stress run needs neither
-  // Between runs in the same page ("Play again"):
-  expect(nextScreen({ id, name: null, team: null }, false, false)).toBe("setup");
-  expect(nextScreen({ id, name: "Old Timer", team: null }, false, false)).toBe("setup"); // the one-time team ask
-  expect(nextScreen({ id, name: "Old Timer", team: TEAMS[0] }, false, false)).toBe("play");
-  expect(nextScreen({ id, name: null, team: TEAMS[0] }, false, false)).toBe("setup"); // a refused name keeps the team
-  expect(nextScreen({ id, name: null, team: null }, true, false)).toBe("play");
-  // Once the team is stored, every later run in the page plays straight away.
-  store.set("bugswarm.player", JSON.stringify({ id, name: "Old Timer" }));
-  expect(nextScreen(loadPlayer(), false, false)).toBe("setup");
-  setPlayerTeam(TEAMS[1]);
-  forgetPlayerForTests();
-  expect(nextScreen(loadPlayer(), false, false)).toBe("play");
-});
-
 test("a stored name that breaks the rules is dropped, so name entry asks again", () => {
   store.set("bugswarm.player", JSON.stringify({ id: "0123456789abcdef0123456789abcdef", name: "sh1t" }));
   expect(loadPlayer()).toEqual({ id: "0123456789abcdef0123456789abcdef", name: null, team: null });
@@ -91,25 +71,4 @@ test("with storage unavailable, the player lasts for the page in memory", () => 
   const a = setPlayerName("Robo");
   store.clear(); // storage lost (private mode, blocked storage)
   expect(loadPlayer()).toEqual({ id: a.id, name: "Robo", team: null });
-});
-
-test("the arena's refusal is noted for the next page once, and keeps the stored name", () => {
-  const session = new Map<string, string>();
-  globalThis.sessionStorage = {
-    getItem: (k: string) => session.get(k) ?? null,
-    setItem: (k: string, v: string) => void session.set(k, v),
-    removeItem: (k: string) => void session.delete(k),
-  } as Storage;
-  try {
-    store.set("bugswarm.player", JSON.stringify({ id: "0123456789abcdef0123456789abcdef", name: "bot alice", team: TEAMS[1] }));
-    noteArenaRefusedName("bot alice");
-    forgetPlayerForTests(); // the redirect is a new page load
-    expect(loadPlayer().name).toBe("bot alice"); // `/` still accepts it
-    expect(takeArenaRefusedName()).toBe("bot alice");
-    expect(takeArenaRefusedName()).toBeNull();
-  } finally {
-    // @ts-expect-error: bun has no sessionStorage of its own
-    delete globalThis.sessionStorage;
-  }
-  expect(takeArenaRefusedName()).toBeNull(); // no storage at all: nothing to say
 });

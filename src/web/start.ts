@@ -1,5 +1,5 @@
 // The start screen's state, without the DOM: which view a player gets, and what each button and
-// Enter does. App.tsx renders it. A returning player (a name and a team) gets one "Play as"
+// Enter does. App.tsx renders it; a "start" press joins an arena. A returning player (a name and a team) gets one "Play as"
 // button; anyone else, or a returning player who taps "change name", gets the name field and the
 // team buttons. A player's team is stored once and never switched (architecture.md, Data), so
 // once they have one, the other team's button is shown but locked.
@@ -22,17 +22,17 @@ export function nameMessage(reason: NameRefusal): string {
   return "Pick a different name";
 }
 
-/** Why the arena sent a player with a "bot ..." name back here (`/` itself still accepts it). */
+/** Why a name starting with "bot " can't play: the arena keeps them for its bots (rules.ts isBotName). */
 export const BOT_NAME_MESSAGE = `Names starting with the word "bot" are kept for the arena's bots`;
 
 /**
  * The message to show on opening the page, or null: the stored name the rules now refuse
- * (`refusedNow`), else the name the arena just refused (`arenaRefused`, player.ts).
+ * (`refusedNow`, player.ts takeRefusedName), else a stored "bot ..." name (kept from before the
+ * arena refused them), which has to change before it can play.
  */
-export function openingNotice(refusedNow: boolean, arenaRefused: string | null): string | null {
+export function openingNotice(refusedNow: boolean, storedName: string | null): string | null {
   if (refusedNow) return nameMessage("blocked");
-  if (arenaRefused === null) return null;
-  return isBotName(arenaRefused) ? BOT_NAME_MESSAGE : nameMessage("blocked");
+  return storedName !== null && isBotName(storedName) ? BOT_NAME_MESSAGE : null;
 }
 
 /** The view on opening the page. `notice` is a message to show at once (a stored name now refused). */
@@ -67,6 +67,7 @@ export function pressTeam(view: StartView, raw: string, team: Team): Press {
   if (view.team !== null && view.team !== team) return { kind: "focus", team: view.team };
   const checked = checkName(raw);
   if (!checked.ok) return { kind: "message", text: nameMessage(checked.reason) };
+  if (isBotName(checked.name)) return { kind: "message", text: BOT_NAME_MESSAGE };
   return { kind: "start", name: checked.name, team };
 }
 
@@ -79,6 +80,7 @@ export function pressEnter(view: StartView, raw: string): Press {
   if (view.kind === "returning") return { kind: "start", name: view.name, team: view.team };
   const checked = checkName(raw);
   if (!checked.ok) return { kind: "message", text: nameMessage(checked.reason) };
+  if (isBotName(checked.name)) return { kind: "message", text: BOT_NAME_MESSAGE };
   if (view.team !== null) return { kind: "start", name: checked.name, team: view.team };
   return { kind: "focus", team: TEAMS[0] };
 }

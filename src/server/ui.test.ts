@@ -19,7 +19,6 @@ beforeAll(() => {
     writeFileSync(join(dir, "assets", "app.js"), "js");
   }
   writeFileSync(join(dist, "board.html"), "board");
-  writeFileSync(join(dist, "arena.html"), "arena");
 });
 
 afterAll(() => {
@@ -33,24 +32,30 @@ async function get(app: Hono, path: string) {
   return { status: res.status, type: res.headers.get("content-type"), body: await res.text() };
 }
 
-test("production pages: /board is the board, /arena the arena, / and unknown paths are the game, built files are served", async () => {
+test("production pages: /board is the board, / and unknown paths are the game, built files are served", async () => {
   const app = new Hono();
   servePages(app, dist);
   for (const path of ["/board", "/board/"]) {
     expect(await get(app, path)).toEqual({ status: 200, type: "text/html; charset=utf-8", body: "board" });
   }
-  for (const path of ["/arena", "/arena/"]) {
-    expect(await get(app, path)).toEqual({ status: 200, type: "text/html; charset=utf-8", body: "arena" });
-  }
   for (const path of ["/", "/index.html", "/nope"]) expect((await get(app, path)).body).toBe("game");
   expect((await get(app, "/assets/app.js")).body).toBe("js");
 });
 
-test("a build with no board.html or arena.html answers 404 there, not the game", async () => {
+test("/arena, the arena's old address, is a 307 to /, the game", async () => {
+  const app = new Hono();
+  servePages(app, dist);
+  for (const path of ["/arena", "/arena/"]) {
+    const res = await app.request(path);
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("/");
+  }
+});
+
+test("a build with no board.html answers 404 there, not the game", async () => {
   const app = new Hono();
   servePages(app, noBoard);
   expect((await get(app, "/board")).status).toBe(404);
-  expect((await get(app, "/arena")).status).toBe(404);
 });
 
 test("the build emits board.html: it is a Vite entry, at the repo root where the dev server finds /board", () => {
@@ -60,9 +65,7 @@ test("the build emits board.html: it is a Vite entry, at the repo root where the
   expect(existsSync(input.board!)).toBe(true);
 });
 
-test("the build emits arena.html, at the repo root where the dev server finds /arena", () => {
+test("the build has no arena page of its own: the arena is the game at /", () => {
   const input = viteConfig.build?.rollupOptions?.input as Record<string, string>;
-  const root = fileURLToPath(new URL("../../", import.meta.url));
-  expect(input.arena).toBe(join(root, "arena.html"));
-  expect(existsSync(input.arena!)).toBe(true);
+  expect(Object.keys(input).sort()).toEqual(["board", "main"]);
 });

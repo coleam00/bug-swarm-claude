@@ -178,8 +178,26 @@ describe("dash", () => {
     }
   });
 
-  test("clicking the dash button dashes and does not fire, even held and dragged off", () => {
+  test("on a desktop there is no dash button: a click where it would be fires and does not dash", () => {
     const c = screen(1280, 720);
+    const o = out();
+    expect(c.dashButtonOn).toBe(false);
+    pointerDown(c, "mouse", 1, c.dashButton.x, c.dashButton.y, 0);
+    readControls(c, 640, 360, o);
+    expect([o.dash, o.fire]).toEqual([false, true]);
+  });
+
+  test("the first finger turns the dash button on, and that touch on it dashes", () => {
+    const c = screen(844, 390);
+    const o = out();
+    pointerDown(c, "touch", 3, c.dashButton.x, c.dashButton.y);
+    readControls(c, 422, 195, o);
+    expect([c.dashButtonOn, o.dash, c.aimStick.active]).toEqual([true, true, false]);
+  });
+
+  test("clicking the dash button (on a touch screen) dashes and does not fire, even held and dragged off", () => {
+    const c = screen(1280, 720);
+    c.dashButtonOn = true;
     const o = out();
     pointerDown(c, "mouse", 1, c.dashButton.x + 10, c.dashButton.y - 10, 0);
     readControls(c, 640, 360, o);
