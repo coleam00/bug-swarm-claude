@@ -1,16 +1,18 @@
 // `bun run load -- --url <base url> [--players 500] [--seconds 60]`: N simulated players start
-// runs, play 5 to 30 s while polling the top 10 every 4 s, finish with a plausible score, then
-// fetch their best and the top 10 as the game-over screen does, and start again. It prints
+// runs, play 5 to 30 s while polling the top 10 and team totals every 4 s, finish with a plausible
+// score, then fetch their best, the top 10 and the team totals as the game-over screen does, and
+// start again. Beside them, one /board tab per 50 players polls /api/board every 2 s. It prints
 // requests, statuses and p50/p95/p99 per route, and exits 1 unless 95% of requests took under
 // 200 ms with no 4xx or 5xx and no network error. The server must run with RUN_STARTS_PER_WINDOW
 // raised (architecture.md, "How it runs"), or most starts are 429.
 // Not part of `bun run check`: it takes a minute and needs a running server. load-lib.ts,
 // its pure half, is tested.
-import { ROUTES, USAGE, claimFor, formatSummary, parseLoadArgs, startBody, summarize, verdict, type LoadArgs, type RouteKind, type Sample } from "./load-lib";
+import { BOARD_POLL_MS } from "../src/web/board/poll";
+import { ROUTES, USAGE, boardWatchers, claimFor, formatSummary, parseLoadArgs, startBody, summarize, verdict, type LoadArgs, type RouteKind, type Sample } from "./load-lib";
 
 /** The client's own timeout (src/web/api.ts). */
 const TIMEOUT_MS = 5000;
-/** The game polls the top 10 this often (src/web/App.tsx). */
+/** The game-over screen polls the top 10 and team totals this often (src/web/App.tsx). */
 const TOP_POLL_MS = 4000;
 const PLAY_MS = { min: 5_000, max: 30_000 };
 const RETRY_MS = 2000;
@@ -74,19 +76,30 @@ async function player(i: number, deadline: number, hardStop: number): Promise<vo
     }
     const startedAt = performance.now();
     const endAt = startedAt + between(PLAY_MS.min, PLAY_MS.max);
-    // Poll the top 10 through the run, from a random phase so players don't poll in step.
+    // Poll the top 10 and team totals through the run, from a random phase so players don't poll in step.
     let nextPoll = startedAt + between(0, TOP_POLL_MS);
     while (performance.now() < endAt && performance.now() < hardStop) {
       if (performance.now() >= nextPoll) {
         nextPoll += TOP_POLL_MS;
-        await call("top", ROUTES.top.path());
+        await Promise.all([call("top", ROUTES.top.path()), call("teams", ROUTES.teams.path())]);
       } else {
         await sleep(Math.min(nextPoll, endAt) - performance.now());
       }
     }
     if (performance.now() >= hardStop) return;
     await call("end", ROUTES.end.path(id), claimFor((performance.now() - startedAt) / 1000, Math.random));
-    await Promise.all([call("best", ROUTES.best.path(playerId)), call("top", ROUTES.top.path())]);
+    await Promise.all([call("best", ROUTES.best.path(playerId)), call("top", ROUTES.top.path()), call("teams", ROUTES.teams.path())]);
+  }
+}
+
+/** A /board tab: one read every BOARD_POLL_MS (the board's own cadence) until the deadline, from a random phase. */
+async function boardWatcher(deadline: number): Promise<void> {
+  let next = performance.now() + between(0, BOARD_POLL_MS);
+  while (true) {
+    await sleep(next - performance.now());
+    if (performance.now() >= deadline) return;
+    next += BOARD_POLL_MS;
+    await call("board", ROUTES.board.path());
   }
 }
 
@@ -98,11 +111,15 @@ try {
   process.exit(1);
 }
 
-console.log(`load: ${args.players} players for ${args.seconds} s against ${args.url}`);
+const watchers = boardWatchers(args.players);
+console.log(`load: ${args.players} players and ${watchers} board watchers for ${args.seconds} s against ${args.url}`);
 const t0 = performance.now();
 const deadline = t0 + args.seconds * 1000;
 const hardStop = deadline + DRAIN_MS;
-await Promise.all(Array.from({ length: args.players }, (_, i) => player(i, deadline, hardStop)));
+await Promise.all([
+  ...Array.from({ length: args.players }, (_, i) => player(i, deadline, hardStop)),
+  ...Array.from({ length: watchers }, () => boardWatcher(deadline)),
+]);
 console.log(`load: done in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
 
 const summary = summarize(samples);

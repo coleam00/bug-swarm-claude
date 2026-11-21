@@ -197,17 +197,22 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     return c.json({ ok: true });
   });
 
-  app.get("/api/top", (c) => {
+  const cachedTop = (): TopRow[] => {
     const t = now();
     if (!topCache || t - topCache.at >= TOP_CACHE_MS) topCache = { at: t, top: topTen(db) };
-    return c.json({ top: topCache.top });
-  });
-
-  app.get("/api/teams", (c) => {
+    return topCache.top;
+  };
+  const cachedTeams = (): Record<Team, number> => {
     const t = now();
     if (!teamsCache || t - teamsCache.at >= TEAMS_CACHE_MS) teamsCache = { at: t, teams: teamTotals(db) };
-    return c.json({ teams: teamsCache.teams });
-  });
+    return teamsCache.teams;
+  };
+
+  app.get("/api/top", (c) => c.json({ top: cachedTop() }));
+  app.get("/api/teams", (c) => c.json({ teams: cachedTeams() }));
+  // The stream board: the top 10 and the team totals in one read, from the same two caches,
+  // so the board moves from one snapshot to the next and costs no extra query.
+  app.get("/api/board", (c) => c.json({ top: cachedTop(), teams: cachedTeams() }));
 
   app.get("/api/players/:id/best", (c) => c.json({ best: playerBest(db, c.req.param("id")) }));
 
