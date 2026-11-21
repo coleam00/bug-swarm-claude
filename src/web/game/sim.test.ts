@@ -4,6 +4,7 @@ import { MAX_SQUASHES_PER_SECOND } from "../../server/rules";
 import {
   ARENA_AREA,
   BASE_BUG,
+  BUG_KINDS,
   FIRE_INTERVAL,
   ROBOT_RADIUS,
   ROBOT_SPEED,
@@ -11,7 +12,7 @@ import {
   SPAWN_START,
   spawnInterval,
 } from "./config";
-import { createState, score, step, type Bug, type Input, type State } from "./sim";
+import { createState, pickKind, score, step, type Bug, type Input, type State } from "./sim";
 
 const DT = 1 / 60;
 const TALL = { w: 450, h: 800 };
@@ -149,6 +150,49 @@ describe("bugs", () => {
     step(s, NONE, DT);
     const after = Math.hypot(s.bugs[0]!.x - s.robot.x, s.bugs[0]!.y - s.robot.y);
     expect(before - after).toBeCloseTo(BASE_BUG.speed * DT, 5);
+  });
+});
+
+describe("the fast bug", () => {
+  const FAST = BUG_KINDS.find((k) => k.id === "fast")!;
+
+  test("is small, at least 1.5x the base speed, and takes one shot", () => {
+    expect(FAST.radius).toBeLessThan(BASE_BUG.radius);
+    expect(FAST.speed).toBeGreaterThanOrEqual(1.5 * BASE_BUG.speed);
+    expect(FAST.hp).toBe(1);
+    const s = quiet();
+    s.bugs.push({ x: 225, y: 50, hp: 1000, kind: FAST });
+    step(s, NONE, DT);
+    expect(s.bugs[0]!.y).toBeCloseTo(50 + FAST.speed * DT, 5);
+  });
+
+  test("only spawns from 30 seconds in", () => {
+    for (let roll = 0; roll < 1; roll += 0.05) {
+      expect(pickKind(0, roll)).toBe(BASE_BUG);
+      expect(pickKind(29.99, roll)).toBe(BASE_BUG);
+    }
+    expect(pickKind(30, 0)).toBe(FAST);
+    expect(pickKind(30, 0.99)).toBe(BASE_BUG);
+    for (let seed = 1; seed <= 5; seed++) {
+      const s = createState(seed, TALL);
+      let fastAt = Infinity;
+      while (s.time < 45 && fastAt === Infinity) {
+        keepAlive(s, NONE, 1);
+        if (s.bugs.some((b) => b.kind === FAST)) fastAt = s.time;
+      }
+      expect(fastAt).toBeGreaterThanOrEqual(30);
+      expect(fastAt).toBeLessThan(45);
+    }
+  });
+
+  test("dies to the first shot that lands", () => {
+    const s = quiet();
+    s.bugs.push({ x: 225, y: 250, hp: FAST.hp, kind: FAST });
+    while (s.squashes === 0 && s.time < 1) step(s, NONE, DT);
+    expect(s.squashes).toBe(1);
+    expect(s.bugs).toHaveLength(0);
+    expect(s.shots).toHaveLength(0);
+    expect(s.time).toBeLessThan(FIRE_INTERVAL); // so only the first shot had been fired
   });
 });
 

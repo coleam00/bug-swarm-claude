@@ -5,6 +5,7 @@ import { POINTS_PER_SECOND, POINTS_PER_SQUASH } from "../../server/rules";
 import type { Arena } from "./arena";
 import {
   BASE_BUG,
+  BUG_KINDS,
   FIRE_INTERVAL,
   INVULN_SECONDS,
   MAX_BUGS,
@@ -116,13 +117,35 @@ function spawnBugs(state: State, dt: number): void {
     const edge = Math.floor(nextRandom(state.rng) * 4);
     const along = nextRandom(state.rng);
     // Just outside the chosen edge: 0 top, 1 right, 2 bottom, 3 left.
-    const kind = BASE_BUG;
+    // The kind takes a draw only once a later kind can appear, so the opening of a run plays
+    // the same whatever kinds come later.
+    const kind = laterKindDue(state.time) ? pickKind(state.time, nextRandom(state.rng)) : BASE_BUG;
     const r = kind.radius;
     const x = edge === 1 ? w + r : edge === 3 ? -r : along * w;
     const y = edge === 0 ? -r : edge === 2 ? h + r : along * h;
     state.bugs.push({ x, y, hp: kind.hp, kind });
     state.spawned++;
   }
+}
+
+function laterKindDue(time: number): boolean {
+  for (let i = 1; i < BUG_KINDS.length; i++) if (BUG_KINDS[i]!.from <= time) return true;
+  return false;
+}
+
+/**
+ * The kind of bug a spawn `time` seconds into a run is, for a `roll` in [0, 1). Each kind that
+ * has started takes its share of rolls; the base kind takes the rest.
+ */
+export function pickKind(time: number, roll: number): BugKind {
+  let upTo = 0;
+  for (let i = 1; i < BUG_KINDS.length; i++) {
+    const kind = BUG_KINDS[i]!;
+    if (kind.from > time) continue;
+    upTo += kind.share;
+    if (roll < upTo) return kind;
+  }
+  return BASE_BUG;
 }
 
 function moveBugs(state: State, dt: number): void {

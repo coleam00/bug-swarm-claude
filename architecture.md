@@ -19,7 +19,8 @@
 - `src/web/App.tsx`: name and team entry, the canvas, the game-over screen.
 - `src/web/game/`: the game in plain TypeScript.
   - The simulation (robot, bugs, shots, hits, upgrades, spawn ramp) is pure: it advances by a time step from input and state, with no canvas, DOM or clock access, so `bun test` covers it.
-  - The loop runs on `requestAnimationFrame` with a fixed time step and draws the state to the canvas, scaled to the screen in portrait or landscape.
+  - The loop runs on `requestAnimationFrame` with a fixed time step and draws the state to the canvas, scaled to the screen in portrait or landscape. The arena has the same area (360,000 units²) on every screen and the screen's ratio, clamped between 9:16 and 16:9, fixed when the run starts.
+  - `config.ts` holds every tuning number (spawn ramp, robot, shots) and `BUG_KINDS`, the one list of bug kinds the simulation and the drawing import.
   - Input: touch drag (the robot moves toward the finger), WASD and arrow keys, mouse steering, 1-3 or tap to pick an upgrade, F for the frame-rate readout on desktop.
   - The API client starts a run and submits its score without blocking the loop; failures are logged and the game-over screen says the score wasn't saved.
 - `src/web/board/`: the `/board` page for the stream (top 10 and team totals, big type, polls the API).
@@ -46,5 +47,5 @@
 - Nothing the player does depends on a server response; a run plays with the API down.
 
 ## Decisions deferred
-- Spawn rates, bug speed and upgrade strength: start from the PRD's targets (idle player loses within 60 s, typical run 1 to 3 minutes) and tune after Phase 2.
+- Spawn rates, bug speed and upgrade strength: tuned in `src/web/game/config.ts` toward the PRD's targets (idle player loses within 60 s, typical run 1 to 3 minutes); the 1 to 3 minute run is checked by playing, after Phase 2.
 - Art: drawn in code on the canvas (see `direction.md`, "The look"). Effects live in `src/web/game/fx/` (particles, trails, screen shake, floating text), pooled so they allocate nothing per frame.
