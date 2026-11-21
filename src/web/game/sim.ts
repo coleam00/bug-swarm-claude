@@ -3,28 +3,30 @@
 // play it with fixed inputs and the same seed always plays the same run.
 import { POINTS_PER_SECOND, POINTS_PER_SQUASH } from "../../server/rules";
 import type { Arena } from "./arena";
+import {
+  BASE_BUG,
+  BUG_KINDS,
+  FIRE_INTERVAL,
+  INVULN_SECONDS,
+  MAX_BUGS,
+  MAX_HITS,
+  MOVING_FIRE_RATE,
+  ROBOT_RADIUS,
+  ROBOT_SPEED,
+  SHOT_LIFETIME,
+  SHOT_SPEED,
+  spawnInterval,
+  type BugKind,
+} from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
 
-// Tuning (Phase 2 adds the ramp). Distances are arena units, times seconds.
-export const ROBOT_RADIUS = 14;
-export const ROBOT_SPEED = 260;
-export const BUG_RADIUS = 12;
-export const BUG_SPEED = 90;
-export const BUG_HP = 2;
-export const FIRE_INTERVAL = 0.25;
-export const SHOT_SPEED = 700;
-export const SHOT_LIFETIME = 1.0;
-export const SPAWN_INTERVAL = 0.48;
-export const INVULN_SECONDS = 1.0;
-export const MAX_HITS = 3;
-export const MAX_BUGS = 200;
-// The robot kills at most 1 / (FIRE_INTERVAL * BUG_HP) bugs a second. That must stay below the
-// spawn rate (1 / SPAWN_INTERVAL), or an idle player never dies; it also stays far under the
-// server's plausibility cap of 6 squashes a second.
+// A shot squashes at most one bug, so the robot squashes at most MOVING_FIRE_RATE / FIRE_INTERVAL
+// bugs a second. That must stay under the server's plausibility cap (MAX_SQUASHES_PER_SECOND in
+// rules.ts); a test in sim.test.ts holds it there.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
-export type Bug = { x: number; y: number; hp: number };
+export type Bug = { x: number; y: number; hp: number; kind: BugKind };
 export type Shot = { x: number; y: number; vx: number; vy: number; life: number };
 
 export type State = {
@@ -54,7 +56,7 @@ export function createState(seed: number, arena: Arena): State {
     bugs: [],
     shots: [],
     time: 0,
-    spawnTimer: SPAWN_INTERVAL,
+    spawnTimer: spawnInterval(0),
     fireTimer: 0,
     invuln: 0,
     hits: 0,
@@ -72,18 +74,21 @@ export function score(state: State): number {
 /** Advances the run by `dt` seconds. Mutates `state`; does nothing once the run is over. */
 export function step(state: State, input: Input, dt: number): void {
   if (state.over) return;
-  moveRobot(state, input, dt);
+  const moved = moveRobot(state, input, dt);
   spawnBugs(state, dt);
   moveBugs(state, dt);
-  fire(state, dt);
+  fire(state, dt, moved);
   moveShots(state, dt);
   hitBugs(state);
   hitRobot(state, dt);
   state.time += dt;
 }
 
-function moveRobot(state: State, input: Input, dt: number): void {
+/** Moves the robot and says whether it moved this step (pushing into a wall is not moving). */
+function moveRobot(state: State, input: Input, dt: number): boolean {
   const r = state.robot;
+  const fromX = r.x;
+  const fromY = r.y;
   const reach = ROBOT_SPEED * dt;
   if (input.kind === "direction") {
     const len = Math.hypot(input.dx, input.dy);
@@ -105,28 +110,53 @@ function moveRobot(state: State, input: Input, dt: number): void {
   }
   r.x = clamp(r.x, ROBOT_RADIUS, state.arena.w - ROBOT_RADIUS);
   r.y = clamp(r.y, ROBOT_RADIUS, state.arena.h - ROBOT_RADIUS);
+  return r.x !== fromX || r.y !== fromY;
 }
 
 function spawnBugs(state: State, dt: number): void {
   state.spawnTimer -= dt;
   while (state.spawnTimer <= 0) {
-    state.spawnTimer += SPAWN_INTERVAL;
+    state.spawnTimer += spawnInterval(state.time);
     if (state.bugs.length >= MAX_BUGS) continue;
     const { w, h } = state.arena;
     const edge = Math.floor(nextRandom(state.rng) * 4);
     const along = nextRandom(state.rng);
     // Just outside the chosen edge: 0 top, 1 right, 2 bottom, 3 left.
-    const x = edge === 1 ? w + BUG_RADIUS : edge === 3 ? -BUG_RADIUS : along * w;
-    const y = edge === 0 ? -BUG_RADIUS : edge === 2 ? h + BUG_RADIUS : along * h;
-    state.bugs.push({ x, y, hp: BUG_HP });
+    // The kind takes a draw only once a later kind can appear, so the opening of a run plays
+    // the same whatever kinds come later.
+    const kind = laterKindDue(state.time) ? pickKind(state.time, nextRandom(state.rng)) : BASE_BUG;
+    const r = kind.radius;
+    const x = edge === 1 ? w + r : edge === 3 ? -r : along * w;
+    const y = edge === 0 ? -r : edge === 2 ? h + r : along * h;
+    state.bugs.push({ x, y, hp: kind.hp, kind });
     state.spawned++;
   }
 }
 
+function laterKindDue(time: number): boolean {
+  for (let i = 1; i < BUG_KINDS.length; i++) if (BUG_KINDS[i]!.from <= time) return true;
+  return false;
+}
+
+/**
+ * The kind of bug a spawn `time` seconds into a run is, for a `roll` in [0, 1). Each kind that
+ * has started takes its share of rolls; the base kind takes the rest.
+ */
+export function pickKind(time: number, roll: number): BugKind {
+  let upTo = 0;
+  for (let i = 1; i < BUG_KINDS.length; i++) {
+    const kind = BUG_KINDS[i]!;
+    if (kind.from > time) continue;
+    upTo += kind.share;
+    if (roll < upTo) return kind;
+  }
+  return BASE_BUG;
+}
+
 function moveBugs(state: State, dt: number): void {
   const { x: rx, y: ry } = state.robot;
-  const reach = BUG_SPEED * dt;
   for (const b of state.bugs) {
+    const reach = b.kind.speed * dt;
     const dx = rx - b.x;
     const dy = ry - b.y;
     const dist = Math.hypot(dx, dy);
@@ -140,8 +170,9 @@ function moveBugs(state: State, dt: number): void {
   }
 }
 
-function fire(state: State, dt: number): void {
-  state.fireTimer -= dt;
+/** Auto-fire at the nearest bug. The gun reloads faster while the robot moves. */
+function fire(state: State, dt: number, moved: boolean): void {
+  state.fireTimer -= moved ? dt * MOVING_FIRE_RATE : dt;
   if (state.fireTimer > 0) return;
   const { x: rx, y: ry } = state.robot;
   let nearest: Bug | undefined;
@@ -177,12 +208,11 @@ function moveShots(state: State, dt: number): void {
 
 function hitBugs(state: State): void {
   const { shots, bugs } = state;
-  const reach2 = BUG_RADIUS * BUG_RADIUS;
   for (let i = shots.length - 1; i >= 0; i--) {
     const s = shots[i]!;
     for (let j = 0; j < bugs.length; j++) {
       const b = bugs[j]!;
-      if ((b.x - s.x) ** 2 + (b.y - s.y) ** 2 > reach2) continue;
+      if ((b.x - s.x) ** 2 + (b.y - s.y) ** 2 > b.kind.radius ** 2) continue;
       removeAt(shots, i);
       b.hp--;
       if (b.hp <= 0) {
@@ -200,11 +230,10 @@ function hitRobot(state: State, dt: number): void {
     return;
   }
   const { x: rx, y: ry } = state.robot;
-  const reach = ROBOT_RADIUS + BUG_RADIUS;
   const bugs = state.bugs;
   for (let j = 0; j < bugs.length; j++) {
     const b = bugs[j]!;
-    if ((b.x - rx) ** 2 + (b.y - ry) ** 2 > reach * reach) continue;
+    if ((b.x - rx) ** 2 + (b.y - ry) ** 2 > (ROBOT_RADIUS + b.kind.radius) ** 2) continue;
     removeAt(bugs, j);
     state.hits++;
     state.invuln = INVULN_SECONDS;

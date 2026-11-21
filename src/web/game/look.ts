@@ -1,5 +1,6 @@
 // How the game looks: every colour and size the renderer uses, in one place. Pure data.
-import { BUG_RADIUS, type Bug } from "./sim";
+import { BUG_KINDS } from "./config";
+import type { Bug } from "./sim";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
 export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff"] as const;
@@ -47,12 +48,13 @@ export type BugLook = {
   jitterHz: number;
 };
 
-export const BUG_LOOK_IDS = ["basic", "fast"] as const;
-export type BugLookId = (typeof BUG_LOOK_IDS)[number];
+/** One look per bug kind, by the kind's id in BUG_KINDS. */
+export type BugLookId = (typeof BUG_KINDS)[number]["id"];
+export const BUG_LOOK_IDS: readonly BugLookId[] = BUG_KINDS.map((k) => k.id);
 
 export const BUG_LOOKS: Record<BugLookId, BugLook> = {
-  basic: {
-    radius: BUG_RADIUS,
+  base: {
+    radius: BUG_KINDS[0].radius,
     shell: "#c2410c",
     shine: "#fb923c",
     head: "#431407",
@@ -63,9 +65,9 @@ export const BUG_LOOKS: Record<BugLookId, BugLook> = {
     jitter: 0.05,
     jitterHz: 0.7,
   },
-  // Waiting for the fast bug (issue #6): small, bright and twitchy.
+  // Small, bright and twitchy.
   fast: {
-    radius: 8,
+    radius: BUG_KINDS[1].radius,
     shell: "#65a30d",
     shine: "#d9f99d",
     head: "#1a2e05",
@@ -78,7 +80,7 @@ export const BUG_LOOKS: Record<BugLookId, BugLook> = {
   },
 };
 
-/** Which look a bug gets. Every bug is basic until the sim gives bugs a kind (#6 switches this to `b.kind`). */
-export function bugLookId(_b: Bug): BugLookId {
-  return "basic";
+/** Which look a bug gets: its kind's. */
+export function bugLookId(b: Bug): BugLookId {
+  return b.kind.id as BugLookId;
 }

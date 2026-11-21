@@ -16,7 +16,7 @@ import {
   type BugLook,
   type BugLookId,
 } from "./look";
-import { ROBOT_RADIUS } from "./sim";
+import { ROBOT_RADIUS } from "./config";
 
 /** Leg poses per bug look; render.ts walks them 0 1 2 3 2 1. */
 export const LEG_FRAMES = 4;

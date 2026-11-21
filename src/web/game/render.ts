@@ -19,7 +19,8 @@ import {
   TEXT_STROKE,
   bugLookId,
 } from "./look";
-import { MAX_HITS, ROBOT_RADIUS, score, type State } from "./sim";
+import { MAX_HITS, ROBOT_RADIUS } from "./config";
+import { score, type State } from "./sim";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake };

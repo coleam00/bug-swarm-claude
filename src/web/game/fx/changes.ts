@@ -5,7 +5,8 @@
 // keeps a steady animation phase per bug, so the swarm's legs don't all step in time.
 // Pure (no DOM, no canvas); it reads the state and never changes it.
 import { nextRandom, type Rng } from "../rng";
-import { MAX_BUGS, type Bug, type State } from "../sim";
+import { MAX_BUGS } from "../config";
+import type { Bug, State } from "../sim";
 
 export type Changes = {
   /** The bugs as of the last call. */
