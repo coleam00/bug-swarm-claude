@@ -42,6 +42,18 @@ export async function endRun(runId: string, result: RunResult): Promise<"saved" 
   return "failed";
 }
 
+/**
+ * Finishes a run: once its start settles, saves the result under its run id. A run with no
+ * start (`null`: a stress run) is 'not-saved' and sends nothing.
+ */
+export async function finishRun(runStart: Promise<RunStart> | null, result: RunResult): Promise<"saved" | "failed" | "not-saved"> {
+  if (!runStart) return "not-saved";
+  const s = await runStart;
+  if (s.kind === "ok") return endRun(s.runId, result);
+  console.error("score not saved: the run never got a run id");
+  return "failed";
+}
+
 export async function fetchTop(): Promise<TopRow[] | "failed"> {
   try {
     const res = await call("/api/top");

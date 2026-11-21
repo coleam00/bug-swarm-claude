@@ -7,10 +7,12 @@ import { createPops, spawnPop, updatePops } from "./fx/pop";
 import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
+import { createFpsMeter, tickFps } from "./fps";
 import type { UpgradeId } from "../../server/rules";
-import { CHOICE_KEYS, STEERING_KEYS, keysToInput } from "./keys";
+import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
-import { createRenderer, type Fx } from "./render";
+import { STRESS_SECONDS } from "./config";
+import { createRenderer, type Fx, type Stats } from "./render";
 import { createRng } from "./rng";
 import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
 
@@ -30,6 +32,40 @@ const MAX_STEPS_PER_FRAME = 8;
 /** Seeds fx's own generator. Effects never draw from the simulation's, so they can't change a run. */
 const FX_SEED = 0x5eed;
 const NONE: Input = { kind: "none" };
+/** Stress mode's hands-off steering: a circle around the middle, this big and this fast. */
+const AUTO_RADIUS = 0.3;
+const AUTO_SPIN = 1.2;
+/** Frames a stress run can record: its whole run at up to 240 Hz. */
+const BENCH_FRAMES = STRESS_SECONDS * 240;
+
+/** What a stress run records for `bun run bench`, one entry a frame (scripts/bench.ts reads it). */
+export type BenchRecord = {
+  /** Each frame's real length, ms. */
+  frames: Float64Array;
+  /** Time spent in render.ts's draw, ms. */
+  draws: Float64Array;
+  bugs: Float64Array;
+  /** Effects alive (see `effectsAlive`). */
+  fx: Float64Array;
+  /** Frames recorded. */
+  count: number;
+  /** Set once the run has ended. */
+  done: boolean;
+};
+
+declare global {
+  interface Window {
+    bugSwarmBench?: BenchRecord;
+  }
+}
+
+/** The readout's on or off, kept across runs: F toggles it. */
+let showStats = false;
+
+/** Effects alive: pooled particles, floating texts and shield pops in use (the trail and shake are always one each). */
+function effectsAlive(fx: Fx): number {
+  return fx.particles.live + fx.texts.live + fx.pops.live;
+}
 
 /**
  * Plays one run on `canvas` and calls `onOver` once when it ends. The simulation advances in
@@ -39,12 +75,17 @@ const NONE: Input = { kind: "none" };
  */
 export function startGame(
   canvas: HTMLCanvasElement,
-  opts: { onOver: (result: RunResult) => void; onChoice: (cards: readonly UpgradeId[] | null) => void },
+  opts: {
+    onOver: (result: RunResult) => void;
+    onChoice: (cards: readonly UpgradeId[] | null) => void;
+    /** A stress run's bug count (stress.ts); 0 or absent for a normal run. */
+    stress?: number;
+  },
 ): Game {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("no 2d canvas");
   const arena: Arena = arenaForViewport(window.innerWidth, window.innerHeight);
-  const state: State = createState(Math.floor(Math.random() * 2 ** 32), arena);
+  const state: State = createState(Math.floor(Math.random() * 2 ** 32), arena, opts.stress ?? 0);
   const renderer = createRenderer(ctx, arena);
 
   // Layout: the arena scaled to fit the canvas and centered (letterboxed), in CSS px.
@@ -64,6 +105,10 @@ export function startGame(
     renderer.resize(dpr, scale, offX, offY);
   };
   resize();
+
+  // The F readout: refreshed when the meter completes a reading, twice a second.
+  const meter = createFpsMeter();
+  const stats: Stats = { show: showStats, fps: 0, bugs: 0, effects: 0, reading: 0 };
 
   // Input, recomputed on input events only so the frame loop allocates nothing.
   // Held keys win over the pointer. A touch steers while the finger is down; the mouse steers
@@ -108,6 +153,10 @@ export function startGame(
     return true;
   };
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.code === STATS_KEY) {
+      if (!e.repeat) stats.show = showStats = !showStats;
+      return;
+    }
     const card = CHOICE_KEYS.get(e.code);
     if (card !== undefined && state.choice) {
       e.preventDefault();
@@ -159,6 +208,22 @@ export function startGame(
     spawnBurst(fx.particles, x, y, BURST_COUNT, GLOW_CYAN, fxRng);
   };
 
+  // A stress run steers itself while the player doesn't, so the trail and moving fire rate are in
+  // the measurement, and records each frame for the bench. Off (and allocated not at all) otherwise.
+  const auto = { kind: "target" as const, x: 0, y: 0 };
+  const bench: BenchRecord | null =
+    state.stress > 0
+      ? {
+          frames: new Float64Array(BENCH_FRAMES),
+          draws: new Float64Array(BENCH_FRAMES),
+          bugs: new Float64Array(BENCH_FRAMES),
+          fx: new Float64Array(BENCH_FRAMES),
+          count: 0,
+          done: false,
+        }
+      : null;
+  if (bench) window.bugSwarmBench = bench;
+
   let raf = 0;
   let last: number | null = null;
   let acc = 0;
@@ -167,12 +232,20 @@ export function startGame(
   let shown: readonly UpgradeId[] | null = null;
   const frame = (ts: number) => {
     if (stopped) return;
-    const delta = last === null ? 0 : Math.min((ts - last) / 1000, MAX_FRAME_SECONDS);
+    const real = last === null ? 0 : (ts - last) / 1000;
+    const delta = Math.min(real, MAX_FRAME_SECONDS);
     last = ts;
     acc += delta;
     let steps = 0;
     while (acc >= STEP && steps < MAX_STEPS_PER_FRAME && !state.over && !state.choice) {
-      step(state, input, STEP);
+      let using = input;
+      if (bench && input === NONE) {
+        const r = AUTO_RADIUS * Math.min(arena.w, arena.h);
+        auto.x = arena.w / 2 + r * Math.cos(state.time * AUTO_SPIN);
+        auto.y = arena.h / 2 + r * Math.sin(state.time * AUTO_SPIN);
+        using = auto;
+      }
+      step(state, using, STEP);
       acc -= STEP;
       steps++;
     }
@@ -187,7 +260,27 @@ export function startGame(
     updateTexts(fx.texts, delta);
     updatePops(fx.pops, delta);
     updateShake(fx.shake, delta, fxRng);
-    renderer.draw(state, fx);
+    if (real > 0 && tickFps(meter, real)) {
+      stats.fps = meter.fps;
+      stats.bugs = state.bugs.length;
+      stats.effects = effectsAlive(fx);
+      stats.reading++;
+    }
+    if (bench) {
+      const t0 = performance.now();
+      renderer.draw(state, fx, stats);
+      const i = bench.count;
+      if (i < BENCH_FRAMES) {
+        bench.draws[i] = performance.now() - t0;
+        bench.frames[i] = real * 1000;
+        bench.bugs[i] = state.bugs.length;
+        bench.fx[i] = effectsAlive(fx);
+        bench.count++;
+      }
+      if (state.over) bench.done = true;
+    } else {
+      renderer.draw(state, fx, stats);
+    }
     if (state.over) {
       stop();
       opts.onOver(runResult(state, touch));

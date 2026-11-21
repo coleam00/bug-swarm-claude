@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { NAME_MAX, checkName, type UpgradeId } from "../server/rules";
-import { endRun, fetchBest, fetchTop, startRun, type RunStart, type TopRow } from "./api";
+import { fetchBest, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
+import { upgradeLevels } from "./over";
 import { loadPlayer, setPlayerName, type Player } from "./player";
+import { STRESS } from "./stress";
 
 // The thin shell around the canvas: name entry, the run, and the game-over screen.
 // No menus between runs: game over -> any key or a fresh tap -> the next run.
+// A stress run (`?stress`, dev and bench builds only) needs no name and is never submitted: it
+// starts no run on the server, saves nothing and fetches no best.
 
 type Over = {
   result: RunResult;
-  saved: "saving" | "saved" | "failed";
+  saved: "saving" | "saved" | "failed" | "not-saved";
   best: number | null | "loading" | "failed";
   top: TopRow[] | "loading" | "failed";
 };
@@ -24,12 +28,12 @@ const TOP_POLL_MS = 4000;
 
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
-  const [phase, setPhase] = useState<Phase>(() => (loadPlayer().name ? { kind: "playing", run: 1 } : { kind: "name" }));
+  const [phase, setPhase] = useState<Phase>(() => (STRESS || loadPlayer().name ? { kind: "playing", run: 1 } : { kind: "name" }));
   const runs = useRef(1);
 
   const play = () => {
     runs.current += 1;
-    setPhase(loadPlayer().name ? { kind: "playing", run: runs.current } : { kind: "name" });
+    setPhase(STRESS || loadPlayer().name ? { kind: "playing", run: runs.current } : { kind: "name" });
   };
 
   if (phase.kind === "name") {
@@ -115,7 +119,7 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
 
   useEffect(() => {
     const { player } = latest.current;
-    if (!start.current) {
+    if (!start.current && !STRESS) {
       start.current = startRun(player.id, player.name ?? "").then((s) => {
         if (s.kind === "name-refused") latest.current.onNameRefused();
         return s;
@@ -123,15 +127,14 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
     }
     const runStart = start.current;
     const running = startGame(canvas.current!, {
+      stress: STRESS,
       onChoice: setCards,
       onOver: (result) => {
         const report = (over: Over) => latest.current.onOver(over);
         report({ result, saved: "saving", best: "loading", top: "loading" });
         void (async () => {
-          const s = await runStart;
-          const saved = s.kind === "ok" ? await endRun(s.runId, result) : "failed";
-          if (s.kind !== "ok") console.error("score not saved: the run never got a run id");
-          const [best, top] = await Promise.all([fetchBest(player.id), fetchTop()]);
+          const saved = await finishRun(runStart, result);
+          const [best, top] = await Promise.all([STRESS ? null : fetchBest(player.id), fetchTop()]);
           report({ result, saved, best, top });
         })();
       },
@@ -170,18 +173,12 @@ function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: 
   );
 }
 
-/** "Review laser x2, ..." in the order first taken, or "No upgrades". */
-function upgradesLine(taken: readonly UpgradeId[]): string {
-  const counts = new Map<UpgradeId, number>();
-  for (const id of taken) counts.set(id, (counts.get(id) ?? 0) + 1);
-  if (counts.size === 0) return "No upgrades";
-  return `Upgrades: ${[...counts].map(([id, n]) => (n > 1 ? `${UPGRADES[id].name} x${n}` : UPGRADES[id].name)).join(", ")}`;
-}
-
 function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) {
   const [top, setTop] = useState(over.top);
   const [ready, setReady] = useState(false);
   useEffect(() => setTop(over.top), [over.top]);
+
+  const upgrades = upgradeLevels(over.result.upgrades);
 
   // The live top 10: poll while this screen shows.
   useEffect(() => {
@@ -223,8 +220,22 @@ function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) 
       <div className="over-summary">
         <h1>Game over</h1>
         <p className="over-score">{over.result.score}</p>
-        <p className="over-upgrades">{upgradesLine(over.result.upgrades)}</p>
-        {over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>}
+        {upgrades.length === 0 ? (
+          <p className="over-upgrades">No upgrades</p>
+        ) : (
+          <ul className="over-upgrades" aria-label="Upgrades">
+            {upgrades.map((u) => (
+              <li key={u.id}>
+                {u.name} <b>L{u.level}</b>
+              </li>
+            ))}
+          </ul>
+        )}
+        {over.saved === "not-saved" ? (
+          <p>Stress test: not saved</p>
+        ) : (
+          over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>
+        )}
         {over.saved === "failed" && (
           <p role="alert" className="over-alert">
             Couldn't save your score
