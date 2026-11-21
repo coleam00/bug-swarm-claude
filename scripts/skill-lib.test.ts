@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatSkill, parseSkillArgs, playLife, quantile, runSkill, USAGE } from "./skill-lib";
+import { formatSkill, gatePasses, judge, parseSkillArgs, playLife, quantile, runSkill, USAGE } from "./skill-lib";
 
 describe("bun run skill", () => {
   test("on 8 seeds the aimer out-scores the mover at least 2x, and neither median is degenerate", () => {
@@ -13,6 +13,22 @@ describe("bun run skill", () => {
     expect(by("aimer").capped).toBeLessThan(8);
     expect(by("idle").medianScore).toBe(0);
     expect(formatSkill(r).at(-1)).toContain("PASS");
+  });
+
+  test("the gate is 2x: an aimer at 19 against a mover at 10 fails, at 20 it passes", () => {
+    expect(gatePasses(19, 10)).toBe(false);
+    expect(gatePasses(20, 10)).toBe(true);
+    expect(gatePasses(5, 0)).toBe(true);
+    expect(gatePasses(0, 0)).toBe(false);
+    const report = (aimer: number, mover: number) =>
+      judge([
+        { policy: "idle", medianScore: 0 },
+        { policy: "mover", medianScore: mover },
+        { policy: "aimer", medianScore: aimer },
+      ]);
+    expect(report(190, 100)).toEqual({ ratio: 1.9, pass: false, trivial: false });
+    expect(report(200, 100)).toEqual({ ratio: 2, pass: true, trivial: false });
+    expect(report(50, 0)).toEqual({ ratio: Infinity, pass: true, trivial: true });
   });
 
   test("a life replays exactly from its seed", () => {

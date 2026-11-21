@@ -49,16 +49,11 @@ describe("shots drawn by the browser", () => {
     expect(s.live).toBe(0);
   });
 
-  test("a shot whose end never came is let go after its range; a full pool reuses the oldest slot", () => {
+  test("a full pool reuses the oldest slot", () => {
     const s = createShots(4);
-    addShot(s, 1, 1, 0, 0, 0, 10);
-    pruneShots(s, 30, nobody, false, () => {});
-    expect(s.live).toBe(1);
-    pruneShots(s, 40, nobody, false, () => {});
-    expect(s.live).toBe(0);
     for (let id = 10; id < 16; id++) addShot(s, id, 1, 0, 0, 0, 50);
     expect(s.live).toBe(4);
-    expect([...s.id]).toEqual([13, 14, 15, 12]);
+    expect([...s.id]).toEqual([14, 15, 12, 13]);
     // The overwritten shots' ends are ignored.
     endShot(s, 10, true, 5, 51);
     expect([...s.endTick].every((t) => t === -1)).toBe(true);

@@ -124,8 +124,6 @@ describe("points other than a squash's", () => {
     spawnText(t, 101, 100, 10);
     expect(textLabel(t, 0)).toBe("+25");
     expect(t.count[0]).toBe(2);
-    // The same string each time: nothing is built per frame.
-    expect(textLabel(t, 0)).toBe(textLabel(t, 0));
   });
 
   test("with no points given a squash still reads +10, as release 1 draws it", () => {

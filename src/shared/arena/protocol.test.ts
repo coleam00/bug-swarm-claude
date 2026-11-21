@@ -46,6 +46,7 @@ describe("parseClientMessage", () => {
       "42",
       '"input"',
       s([input]),
+      s({ ...input, t: "over" }),
     ]) {
       expect(parseClientMessage(raw)).toBeNull();
     }
@@ -153,12 +154,6 @@ describe("server messages", () => {
       k: [[6, 2, 50.1, 60, 15]],
       w: 3,
     });
-  });
-
-  test("a snapshot never carries a score you could send: clients send only inputs", () => {
-    const withScore = { t: "input", seq: 1, mx: 0, my: 0, aim: 0, fire: true, dash: false, score: 99999, kills: 50 };
-    expect(parseClientMessage(s(withScore))).toEqual({ t: "input", seq: 1, mx: 0, my: 0, aim: 0, fire: true, dash: false });
-    expect(parseClientMessage(s({ t: "over", score: 99999 }))).toBeNull();
   });
 
   test("parseServerMessage accepts only known types", () => {

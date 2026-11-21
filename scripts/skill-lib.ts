@@ -11,6 +11,11 @@ export type LifeResult = { score: number; kills: number; seconds: number; capped
 /** The aimer's median score must be at least this many times the mover's. */
 export const GATE_RATIO = 2;
 
+/** The gate: the aimer's median score is above 0 and at least GATE_RATIO times the mover's. */
+export function gatePasses(aimerMedian: number, moverMedian: number): boolean {
+  return aimerMedian > 0 && aimerMedian >= GATE_RATIO * moverMedian;
+}
+
 /**
  * Plays one life of `policy` alone in a fresh arena seeded `seed`, stepping until the life ends or
  * `maxSeconds` pass (then it is reported capped). The policy gets its own generator, never the arena's.
@@ -87,6 +92,15 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
   };
 }
 
+/** The gate's verdict on a set of policy summaries: the aimer's median against the mover's. */
+export function judge(policies: readonly Pick<PolicySummary, "policy" | "medianScore">[]): Pick<SkillReport, "ratio" | "pass" | "trivial"> {
+  const by = (n: PolicyName) => policies.find((p) => p.policy === n)!;
+  const aim = by("aimer").medianScore;
+  const move = by("mover").medianScore;
+  const ratio = move > 0 ? aim / move : aim > 0 ? Infinity : 0;
+  return { ratio, pass: gatePasses(aim, move), trivial: move === 0 && aim > 0 };
+}
+
 /** Plays every policy on seeds 0 to seeds-1 and checks the gate. */
 export function runSkill(seeds: number, maxSeconds: number): SkillReport {
   const policies = POLICY_NAMES.map((name) => {
@@ -94,11 +108,7 @@ export function runSkill(seeds: number, maxSeconds: number): SkillReport {
     for (let s = 0; s < seeds; s++) lives.push(playLife(name, s, maxSeconds));
     return summarize(name, lives);
   });
-  const by = (n: PolicyName) => policies.find((p) => p.policy === n)!;
-  const aim = by("aimer").medianScore;
-  const move = by("mover").medianScore;
-  const ratio = move > 0 ? aim / move : aim > 0 ? Infinity : 0;
-  return { seeds, maxSeconds, policies, ratio, pass: ratio >= GATE_RATIO, trivial: move === 0 && aim > 0 };
+  return { seeds, maxSeconds, policies, ...judge(policies) };
 }
 
 const pad = (s: string | number, n: number) => String(s).padStart(n);

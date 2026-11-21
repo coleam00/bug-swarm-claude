@@ -4,14 +4,15 @@
 // straight line at constant speed. A kill waits in a queue until the drawing time reaches its
 // tick, so its burst shows when the bug is seen to die. Both are fixed pools in typed arrays: a
 // frame allocates nothing. Times are server ticks (fractional between ticks). Pure.
-import { SHOT_RANGE, SHOT_SPEED, TICK_MS } from "../../shared/arena/constants";
+import { SHOT_RANGE } from "../../shared/arena/constants";
 import { shotTravelAt } from "../../shared/arena/combat";
 
-/** The most shots drawn at once: twice the server's MAX_SHOTS, as ended shots linger until drawn to their end. */
+/**
+ * The most shots drawn at once. A full arena has at most about 110 live shots (20 players x 7/s
+ * x 0.78 s of flight); ended shots linger until drawn to their end, so this leaves room to spare.
+ * The server ends every shot it fires, so every slot is let go by its end.
+ */
 export const SHOT_CAPACITY = 512;
-/** A shot whose end never arrived (a dropped snapshot) is let go this many ticks after it would reach its range. */
-const LOST_SHOT_TICKS = 10;
-const RANGE_TICKS = Math.ceil(SHOT_RANGE / ((SHOT_SPEED * TICK_MS) / 1000));
 
 export type ClientShots = {
   id: Int32Array;
@@ -123,7 +124,7 @@ export function pruneShots(s: ClientShots, at: number, isMine: (owner: number) =
     if (end >= 0 && at >= end) {
       if (s.hit[i]) onHit(s.x0[i]! + s.dx[i]! * s.endTravel[i]!, s.y0[i]! + s.dy[i]! * s.endTravel[i]!);
       free(s, i);
-    } else if (end < 0 && at > s.fired[i]! + RANGE_TICKS + LOST_SHOT_TICKS) free(s, i);
+    }
   }
 }
 

@@ -8,7 +8,6 @@ import {
   HEAT_LOCK_S,
   HEAT_PER_SHOT,
   KILL_POINTS,
-  MAX_SHOTS,
   SHOT_RADIUS,
   SHOT_RANGE,
   SHOT_SPEED,
@@ -73,7 +72,6 @@ export function stepFire(state: ArenaState, p: Player): void {
 
 function fireShot(state: ArenaState, p: Player): void {
   const angle = p.aim + (nextRandom(state.rng) * 2 - 1) * SHOT_SPREAD;
-  if (state.shots.length >= MAX_SHOTS) return;
   const dx = Math.cos(angle);
   const dy = Math.sin(angle);
   const id = state.nextShotId++;

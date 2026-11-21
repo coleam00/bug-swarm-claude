@@ -58,8 +58,6 @@ export const SHOT_SPREAD = 0.03;
 export const SHOT_RADIUS = 3;
 /** Shots leave from this far in front of the robot's centre, along the aim (the barrel tip). */
 export const BARREL = PLAYER_RADIUS + 6;
-/** The most live shots in one arena; a shot past this is not fired (a guard, never reached in play). */
-export const MAX_SHOTS = 256;
 
 // ---- Heat (#55). Each shot adds heat; full heat locks the gun. ----
 

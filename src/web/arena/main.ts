@@ -154,8 +154,6 @@ function start(playerId: string, name: string, team: Team): void {
         acc = 0;
         if (nowAlive) overAt = null;
       } else if (nowAlive) reconcile(predictor, self[1], self[2], self[3], self[4], m.ack);
-      // Out without the event (it was lost to a reconnect): show the overlay anyway.
-      if (!nowAlive && alive && overAt === null) lifeOver(m.me.sc, m.me.ki, 0);
       alive = nowAlive;
     } else if (m.t === EVENT) {
       if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);

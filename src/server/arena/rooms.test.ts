@@ -4,7 +4,7 @@ import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import { HITS_PER_LIFE } from "../../shared/arena/constants";
 import { placeBug } from "../../shared/arena/testkit";
-import type { LifeRecord } from "./room";
+import { meOf, type LifeRecord } from "./room";
 import { Rooms } from "./rooms";
 
 const INFO = { playerKey: "0".repeat(32), touch: false };
@@ -225,4 +225,20 @@ describe("lives", () => {
     tick(1);
     expect(p.input.fire).toBe(false);
   });
+});
+
+test("your own numbers in each snapshot: score, kills, streak and its multiplier, heat, lock, hits left", () => {
+  const { rooms } = setup();
+  const p = rooms.room(rooms.join("Ada", "tabs", INFO, client().send).room)!.state.players[0]!;
+  p.score = 125;
+  p.kills = 11;
+  p.streak = 6;
+  p.heat = 0.42;
+  p.lockTicks = 3;
+  p.hits = 1;
+  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1 };
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1 });
+  p.lockTicks = 0;
+  p.streak = 20;
+  expect(meOf(p, me)).toMatchObject({ mu: 3, lk: 0 });
 });
