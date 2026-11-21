@@ -203,6 +203,21 @@ test(
 );
 
 test(
+  "a socket sending more than 30 inputs a second has the rest dropped, and stays open",
+  async () => {
+    const { c } = await enter("Burst");
+    // 60 inputs at once: the first 30 pass the limiter; the queue keeps the newest 4 of those.
+    for (let seq = 1; seq <= 60; seq++) c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    const seen = c.got.length;
+    await c.waitFor("10 snapshots after the burst", () => c.got.slice(seen).filter((m) => m.t === "snapshot").length >= 10);
+    const acks = c.got.filter((m): m is Snapshot => m.t === "snapshot").map((m) => m.ack);
+    expect(Math.max(...acks)).toBe(30);
+    expect(c.isClosed()).toBe(false);
+  },
+  TIMEOUT,
+);
+
+test(
   "a socket upgrade is required at /ws, and the rest of the server still answers",
   async () => {
     expect((await fetch(`${srv.url}/ws`)).status).toBe(426);
