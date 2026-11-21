@@ -447,6 +447,8 @@ try {
       })()`);
       rows.push(summarise(run.label, rec));
       await until("the game-over screen", 20_000, () => cdp!.evaluate("!!document.querySelector('.over-board li')"));
+      // Play again shows RESTART_DELAY_MS after death (guard.ts); the screenshots should show it.
+      await until("Play again", 5_000, () => cdp!.evaluate("document.querySelector('.over-again')?.style.visibility === 'visible'"));
       for (const v of sizes) {
         const m = await measureLayout(cdp, v);
         layouts.push({ v, m });
