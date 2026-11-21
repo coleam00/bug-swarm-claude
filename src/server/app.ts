@@ -120,8 +120,8 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
       c.header("Retry-After", String(Math.max(...waits)));
       return c.json({ error: "rate" }, 429);
     }
-    byIp.push(t);
-    byPlayer.push(t);
+    ipStarts.set(ip, [...byIp, t]);
+    playerStarts.set(body.playerId, [...byPlayer, t]);
     pruneStarts(ipStarts, t);
     pruneStarts(playerStarts, t);
 
@@ -207,11 +207,9 @@ function isUpgrades(v: unknown): v is UpgradeId[] {
   return Array.isArray(v) && v.length <= MAX_UPGRADES && v.every(isUpgradeId);
 }
 
-/** The starts under `key` still inside the window at `t`, stored back so the list stays short. */
+/** The starts under `key` still inside the window at `t`. Reads only: a refused start adds no key. */
 function inWindow(starts: Map<string, number[]>, key: string, t: number): number[] {
-  const recent = (starts.get(key) ?? []).filter((at) => t - at < RATE_WINDOW_MS);
-  starts.set(key, recent);
-  return recent;
+  return (starts.get(key) ?? []).filter((at) => t - at < RATE_WINDOW_MS);
 }
 
 /** 0 when another start fits under `cap`; else the whole seconds until the oldest one leaves the window. */

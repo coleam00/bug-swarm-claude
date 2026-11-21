@@ -52,13 +52,13 @@
 - **Top 10 and team totals:** computed from finished, non-hidden runs (`GET /api/top`, `GET /api/teams`), each cached for 1 second so hundreds of clients polling cost one query a second. The game-over screen polls both every 4 s.
 
 ## Hosting
-- Railway, from the `Dockerfile`, with a volume mounted at `DATA_DIR` and GitHub auto-deploy on `main`, so a merged change reaches players within minutes. One instance (SQLite needs one long-running process with a disk). The owner sets up the Railway project; the app only has to honor `PORT` and `DATA_DIR`, and should run with `TRUST_PROXY_HOPS=1`.
+- Railway, from the `Dockerfile`, with a volume mounted at `DATA_DIR` and GitHub auto-deploy on `main`, so a merged change reaches players within minutes. One instance (SQLite needs one long-running process with a disk). The owner sets up the Railway project; the app only has to honor `PORT` and `DATA_DIR` (and `TRUST_PROXY_HOPS`, below).
 
 ### Client IP behind a proxy
 The run start limit counts by client IP, and behind Railway the socket address is Railway's proxy, so the client comes from headers (`pickClientIp` in `src/server/app.ts`):
 - `TRUST_PROXY_HOPS` unset or `0` (the default, the behaviour before the variable existed): `X-Real-IP`, else the rightmost `X-Forwarded-For` entry, else the socket address. It is not "the socket address only".
 - `TRUST_PROXY_HOPS=n`: the n-th `X-Forwarded-For` entry from the right; `X-Real-IP` is ignored. Each trusted proxy appends one entry, so entries a client sends sit further left and can't choose its IP. A missing header, too few entries or an entry that isn't an IP address falls back to the socket address; a bad header never fails the request.
-- On Railway set `TRUST_PROXY_HOPS=1` (the entry Railway's proxy appends). Use `2` if another proxy, such as a CDN, sits in front of Railway.
+- On Railway the value is `TRUST_PROXY_HOPS=1` (the entry Railway's proxy appends). Use `2` if another proxy, such as a CDN, sits in front of Railway. Railway documents `X-Real-IP` as the client's address but not how it writes `X-Forwarded-For` (docs.railway.com, networking specs and limits), so check it once after deploying: if every viewer still shares one budget, leave the variable unset, which uses `X-Real-IP`.
 - Anything but a whole number from 0 to 10 stops the server from starting.
 
 ## Boundaries
