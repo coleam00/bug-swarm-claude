@@ -66,6 +66,7 @@ import {
   sample,
   type BugSpan,
 } from "./interp";
+import { markUpdateReload } from "../player";
 import { connectArena } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
 import { createArenaRenderer, type BugsView, type Robot, type Scene } from "./render";
@@ -256,8 +257,17 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
 
   const conn = connectArena(
     { name: player.name, team: player.team, player: player.id, touch: () => controls.touched || coarsePointer() },
-    // A redeploy with a new build: load it (the life before was saved by the server).
-    { message: onMessage, status: on.status, refused: on.refused, newBuild: () => location.reload() },
+    // A redeploy with a new build: load it and go straight back in (the life before was saved by
+    // the server).
+    {
+      message: onMessage,
+      status: on.status,
+      refused: on.refused,
+      newBuild: () => {
+        markUpdateReload();
+        location.reload();
+      },
+    },
   );
 
   // Layout: the canvas at device resolution, the camera's view, the safe-area insets.

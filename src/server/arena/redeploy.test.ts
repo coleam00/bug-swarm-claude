@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { ERROR, ERROR_VERSION, type ServerMessage, type Welcome } from "../../shared/arena/protocol";
 import { connectArena, type Connection } from "../../web/arena/net";
-import { openDb, playerBest } from "../db";
+import { computeStats, openDb, playerBest } from "../db";
 import { startServer, type RunningServer } from "../serve";
 
 const TIMEOUT = 15_000;
@@ -103,13 +103,19 @@ test(
     expect(playerBest(db, KEY)).toBe(0);
 
     // A redeploy of a new build: the client is told, and does not play on the old page.
-    await srv.stop();
+    expect(await srv.stop()).toBe(1);
+    const runs = computeStats(db).finishedRuns;
+    expect(runs).toBe(2);
     srv = await start("b", port);
     await until("the new build reported", () => c.newBuilds.length === 1);
     expect(c.newBuilds).toEqual(["b"]);
     expect(c.statuses.at(-1)).toBe("Updating...");
     expect(c.welcomes.length).toBe(2);
     expect(conn!.open).toBe(false);
+    // It was refused before it joined: no arena opened, so no empty life is saved.
+    expect(srv.rooms.stats().arenas).toEqual([]);
+    await srv.stop();
+    expect(computeStats(db).finishedRuns).toBe(runs);
   },
   TIMEOUT,
 );

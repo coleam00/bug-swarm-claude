@@ -3,16 +3,17 @@
 // connection drops, or goes silent: the server sends 20 snapshots a second, so SERVER_SILENT_MS
 // with nothing means it is gone even if no close arrived (a half-open connection). A refused name
 // or team, or another protocol version, does not retry. A redeploy (the server's `error
-// restarting`, then a close) shows "Reconnecting..." and rejoins the same way; when a rejoin's
-// welcome carries a build id other than the first welcome's, or the new server refuses this page's
-// protocol version, the page is out of date: `newBuild` is called (game.ts reloads) instead of
-// playing on. `close()` ends it for good: the socket, the silence check and any pending rejoin
+// restarting`, then a close) shows "Reconnecting..." and rejoins the same way. A rejoin's hello
+// carries the build id of the first welcome; when the new server refuses it for another build (or
+// for this page's protocol version), the page is out of date: `newBuild` is called (game.ts
+// reloads) instead of playing on. Either refusal comes before the server joins it to an arena,
+// so the update saves no empty life. `close()` ends it for good: the socket, the silence check and any pending rejoin
 // (the page left the arena).
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
+  ERROR_BUILD,
   ERROR_NAME,
-  ERROR_RESTARTING,
   ERROR_TEAM,
   ERROR_VERSION,
   WELCOME,
@@ -109,7 +110,7 @@ export function connectArena(
     socket.addEventListener("open", () => {
       // Closed before it opened: never say hello (a hello joins, and leaving saves a life).
       if (ws !== socket) return;
-      socket.send(encodeHello(PROTOCOL_VERSION, hello.name, hello.team, hello.player, hello.touch()));
+      socket.send(encodeHello(PROTOCOL_VERSION, hello.name, hello.team, hello.player, hello.touch(), firstBuild ?? ""));
     });
     socket.addEventListener("message", (e) => {
       if (ws !== socket) return;
@@ -117,13 +118,12 @@ export function connectArena(
       const m = parseServerMessage(e.data);
       if (!m) return;
       if (m.t === WELCOME) {
-        if (firstBuild === null) firstBuild = m.build;
-        else if (m.build !== firstBuild) return outdated(socket, m.build);
+        firstBuild ??= m.build;
         attempt = 0;
         on.status(null);
-      } else if (m.t === ERROR && m.code === ERROR_RESTARTING) {
-        // The close that follows schedules the rejoin.
-        on.status("Reconnecting...");
+      } else if (m.t === ERROR && m.code === ERROR_BUILD) {
+        // Only a rejoin carries a build, so a first join can never loop on reloads.
+        return outdated(socket, m.build ?? "");
       } else if (m.t === ERROR && m.code === ERROR_VERSION && firstBuild !== null) {
         // A rejoin to a server that no longer speaks this page's protocol: a redeploy. (On the very
         // first connect it stays final below, so a stale cache can't loop on reloads.)

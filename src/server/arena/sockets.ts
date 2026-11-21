@@ -1,6 +1,8 @@
 // The /ws endpoint's WebSocket handlers (Bun's built-in WebSocket). A socket must say hello
 // within HELLO_TIMEOUT_MS: its name passes rules.ts and is not a bot name, its team is a team and
-// its protocol version matches, else it gets an `error` and is closed. After the welcome it sends
+// its protocol version matches, else it gets an `error` and is closed. A rejoin carries the build
+// id its page started with; one from another build gets `error build` (with this server's build)
+// before it joins, so a page that is about to reload never starts, and saves, an empty life. After the welcome it sends
 // inputs, at most INPUTS_PER_SECOND; the rest are dropped. Anything the validator refuses is
 // dropped without closing the socket. The server pings every socket every PING_MS; one it has not
 // heard from (a message or a pong) for SILENT_MS is dropped, so a peer that vanished without
@@ -16,6 +18,7 @@ import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
+  ERROR_BUILD,
   ERROR_HELLO,
   ERROR_NAME,
   ERROR_RESTARTING,
@@ -123,6 +126,10 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
 
   const hello = (ws: ServerWebSocket<SocketData>, m: Hello) => {
     if (m.v !== PROTOCOL_VERSION) return refuse(ws, ERROR_VERSION);
+    if (m.build !== "" && m.build !== rooms.buildId) {
+      ws.send(JSON.stringify({ t: ERROR, code: ERROR_BUILD, build: rooms.buildId }));
+      return ws.close(CLOSE_REFUSED, ERROR_BUILD);
+    }
     const name = checkName(m.name);
     if (!name.ok || isBotName(name.name) || isHidden(name.name)) return refuse(ws, ERROR_NAME);
     if (!isTeam(m.team)) return refuse(ws, ERROR_TEAM);

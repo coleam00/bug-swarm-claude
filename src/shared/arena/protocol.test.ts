@@ -14,7 +14,7 @@ import {
 } from "./protocol";
 
 const PLAYER = "0123456789abcdef0123456789abcdef";
-const hello = { t: "hello", v: 1, name: "Robo", team: "tabs", player: PLAYER, touch: false };
+const hello = { t: "hello", v: 1, name: "Robo", team: "tabs", player: PLAYER, touch: false, build: "" };
 const input = { t: "input", seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true };
 const s = (m: unknown) => JSON.stringify(m);
 /** A player row's down fields while not down. */
@@ -32,6 +32,14 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage(s(input))).toEqual(input as never);
     expect(parseClientMessage(encodeHello(1, "Robo", "tabs", PLAYER, false))).toEqual(hello as never);
     expect(parseClientMessage(encodeInput({ seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true }))).toEqual(input as never);
+  });
+
+  test("a hello's build is optional (a first join, an older page) and capped", () => {
+    const { build: _, ...noBuild } = hello;
+    expect(parseClientMessage(s(noBuild))).toEqual(hello as never);
+    expect(parseClientMessage(encodeHello(1, "Robo", "tabs", PLAYER, false, "abc"))).toEqual({ ...hello, build: "abc" } as never);
+    expect(parseClientMessage(s({ ...hello, build: 7 }))).toBeNull();
+    expect(parseClientMessage(s({ ...hello, build: "x".repeat(65) }))).toBeNull();
   });
 
   test("a version mismatch still parses: the server decides", () => {
@@ -64,7 +72,8 @@ describe("parseClientMessage", () => {
       expect(parseClientMessage(s({ ...input, [key]: { nested: [1, 2] } }))).toBeNull();
     }
     for (const key of Object.keys(hello)) {
-      if (key === "t") continue;
+      // build is optional (its own test above).
+      if (key === "t" || key === "build") continue;
       const missing: Record<string, unknown> = { ...hello };
       delete missing[key];
       expect(parseClientMessage(s(missing))).toBeNull();
