@@ -6,7 +6,7 @@ import { createRng } from "../src/shared/arena/rng";
 import { POLICIES, POLICY_NAMES, createMemory, createObservation, observe, type PolicyInput, type PolicyName } from "../src/shared/arena/policies";
 import { clampInput, createArena, joinPlayer, stepArena } from "../src/shared/arena/sim";
 
-export type LifeResult = { score: number; kills: number; seconds: number; capped: boolean };
+export type LifeResult = { score: number; kills: number; seconds: number; capped: boolean; dashes: number };
 
 /** The aimer's median score must be at least this many times the mover's. */
 export const GATE_RATIO = 2;
@@ -30,15 +30,17 @@ export function playLife(policy: PolicyName, seed: number, maxSeconds: number): 
   const act = POLICIES[policy];
   const maxTicks = Math.round(maxSeconds / DT);
   let seq = 0;
+  let dashes = 0;
   for (let t = 0; t < maxTicks; t++) {
     observe(state, p.id, WORLD_W, WORLD_H, obs);
     act(obs, mem, rng, out);
-    p.input = clampInput({ seq: ++seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: false });
+    if (out.dash && obs.self.dashReady) dashes++;
+    p.input = clampInput({ seq: ++seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash });
     stepArena(state);
     const ended = state.events.livesEnded[0];
-    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false };
+    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes };
   }
-  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true };
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes };
 }
 
 /** The value at fraction `q` (0 to 1) of sorted numbers, interpolated. */
@@ -60,6 +62,8 @@ export type PolicySummary = {
   p25Seconds: number;
   p75Seconds: number;
   medianKills: number;
+  /** Dashes per life, median. */
+  medianDashes: number;
   capped: number;
 };
 
@@ -78,6 +82,7 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
   const scores = lives.map((l) => l.score).sort((a, b) => a - b);
   const secs = lives.map((l) => l.seconds).sort((a, b) => a - b);
   const kills = lives.map((l) => l.kills).sort((a, b) => a - b);
+  const dashes = lives.map((l) => l.dashes).sort((a, b) => a - b);
   return {
     policy,
     lives: lives.length,
@@ -88,6 +93,7 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
     p25Seconds: quantile(secs, 0.25),
     p75Seconds: quantile(secs, 0.75),
     medianKills: quantile(kills, 0.5),
+    medianDashes: quantile(dashes, 0.5),
     capped: lives.filter((l) => l.capped).length,
   };
 }
@@ -125,6 +131,13 @@ export function formatSkill(r: SkillReport): string[] {
   }
   const ratio = Number.isFinite(r.ratio) ? `${r.ratio.toFixed(2)}x` : "infinite";
   lines.push(`gate: aimer median score >= ${GATE_RATIO}x mover: ${ratio} ${r.pass ? "PASS" : "FAIL"}`);
+  const aim = r.policies.find((p) => p.policy === "aimer");
+  const dash = r.policies.find((p) => p.policy === "dasher");
+  if (aim && dash && aim.medianScore > 0 && aim.medianSeconds > 0) {
+    lines.push(
+      `dasher vs aimer: ${(dash.medianScore / aim.medianScore).toFixed(2)}x median score, ${(dash.medianSeconds / aim.medianSeconds).toFixed(2)}x median life, ${dash.medianDashes} dashes a life (median)`,
+    );
+  }
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");
   return lines;
 }

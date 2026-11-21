@@ -12,7 +12,8 @@ describe("bun run skill", () => {
     expect(by("mover").capped).toBe(0);
     expect(by("aimer").capped).toBeLessThan(8);
     expect(by("idle").medianScore).toBe(0);
-    expect(formatSkill(r).at(-1)).toContain("PASS");
+    expect(formatSkill(r).find((l) => l.startsWith("gate:"))).toContain("PASS");
+    expect(formatSkill(r).find((l) => l.startsWith("dasher vs aimer:"))).toBeDefined();
   });
 
   test("the gate is 2x: an aimer at 19 against a mover at 10 fails, at 20 it passes", () => {
@@ -34,6 +35,29 @@ describe("bun run skill", () => {
   test("a life replays exactly from its seed", () => {
     expect(playLife("aimer", 3, 60)).toEqual(playLife("aimer", 3, 60));
     expect(playLife("mover", 3, 60)).not.toEqual(playLife("mover", 4, 60));
+  });
+
+  test("the dash changes nothing for the policies that never dash in a life: lives as measured before #60", () => {
+    // Captured on the commit before the dash existed (seeds 0 to 3, 60 s). The dash draws no
+    // randomness, so these must not move.
+    const before = {
+      idle: [[0, 0, 9.9], [0, 0, 10], [0, 0, 10.15], [0, 0, 10.35]],
+      mover: [[90, 9, 40.55], [120, 12, 45.6], [90, 9, 36.35], [70, 7, 30.25]],
+      aimer: [[995, 99, 60], [1005, 98, 60], [970, 97, 60], [985, 98, 60]],
+    } as const;
+    for (const [policy, lives] of Object.entries(before)) {
+      lives.forEach(([score, kills, seconds], seed) => {
+        const l = playLife(policy as keyof typeof before, seed, 60);
+        expect([l.score, l.kills, l.dashes]).toEqual([score, kills, 0]);
+        expect(l.seconds).toBeCloseTo(seconds, 9);
+      });
+    }
+  });
+
+  test("the dasher dashes, and replays exactly from its seed", () => {
+    const l = playLife("dasher", 1, 120);
+    expect(l.dashes).toBeGreaterThan(0);
+    expect(playLife("dasher", 1, 120)).toEqual(l);
   });
 
   test("quantiles and arguments", () => {

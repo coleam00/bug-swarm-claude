@@ -1,8 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { STICK_DEAD, STICK_RANGE } from "../game/stick";
-import { createControls, pointerDown, pointerMove, pointerUp, pressRespawn, readControls, releaseAll } from "./controls";
+import { NO_INSETS } from "../game/hud";
+import {
+  DASH_BUTTON_RADIUS,
+  createControls,
+  dashButtonAt,
+  pointerDown,
+  pointerMove,
+  pointerUp,
+  pressDash,
+  pressRespawn,
+  readControls,
+  releaseAll,
+} from "./controls";
+import { minimapLayout } from "./minimap";
 
-const out = () => ({ mx: 0, my: 0, aim: 0, fire: false, dash: false });
+const out = () => ({ mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false });
 
 describe("fire and respawn", () => {
   test("holding the left mouse button fires; other buttons and letting go do not", () => {
@@ -45,14 +58,99 @@ describe("fire and respawn", () => {
     expect(o.fire).toBe(false);
   });
 
-  test("a respawn press goes out as one dash", () => {
+  test("a respawn press is read once, apart from a dash press", () => {
     const c = createControls(1440);
     const o = out();
     pressRespawn(c);
     readControls(c, 0, 0, o);
-    expect(o.dash).toBe(true);
+    expect([o.respawn, o.dash]).toEqual([true, false]);
+    readControls(c, 0, 0, o);
+    expect(o.respawn).toBe(false);
+  });
+});
+
+describe("dash", () => {
+  /** Controls on a `w` x `h` screen with the dash button laid out. */
+  const screen = (w: number, h: number) => {
+    const c = createControls(w);
+    dashButtonAt(w, h, NO_INSETS, c.dashButton);
+    return c;
+  };
+
+  test("Space or Shift (pressDash) dashes once per press", () => {
+    const c = screen(1280, 720);
+    const o = out();
+    pressDash(c);
+    readControls(c, 0, 0, o);
+    expect([o.dash, o.respawn]).toEqual([true, false]);
     readControls(c, 0, 0, o);
     expect(o.dash).toBe(false);
+  });
+
+  test("the right mouse button dashes and the left fires", () => {
+    const c = screen(1280, 720);
+    const o = out();
+    pointerDown(c, "mouse", 1, 300, 300, 2);
+    readControls(c, 640, 360, o);
+    expect([o.dash, o.fire]).toEqual([true, false]);
+    pointerUp(c, "mouse", 1, 2);
+    pointerDown(c, "mouse", 1, 300, 300, 0);
+    readControls(c, 640, 360, o);
+    expect([o.dash, o.fire]).toEqual([false, true]);
+  });
+
+  test("clicking the dash button dashes and does not fire", () => {
+    const c = screen(1280, 720);
+    const o = out();
+    pointerDown(c, "mouse", 1, c.dashButton.x + 10, c.dashButton.y - 10, 0);
+    readControls(c, 640, 360, o);
+    expect([o.dash, o.fire]).toEqual([true, false]);
+  });
+
+  test("two fingers: one on the move stick, one tapping the dash button: a move and a dash, and no aim stick", () => {
+    for (const [w, h] of [
+      [390, 844],
+      [844, 390],
+    ] as const) {
+      const c = screen(w, h);
+      const o = out();
+      pointerDown(c, "touch", 1, 80, h - 100);
+      pointerMove(c, "touch", 1, 140, h - 100);
+      pointerDown(c, "touch", 2, c.dashButton.x, c.dashButton.y);
+      readControls(c, 0, 0, o);
+      expect(o.mx).toBeGreaterThan(0.5);
+      expect([o.dash, o.fire, c.aimStick.active]).toEqual([true, false, false]);
+      // The finger on the button sliding does not drag an aim stick, and lifting it frees the button.
+      pointerMove(c, "touch", 2, c.dashButton.x - 60, c.dashButton.y + 40);
+      readControls(c, 0, 0, o);
+      expect([o.dash, c.aimStick.active, c.dashButton.id]).toEqual([false, false, 2]);
+      pointerUp(c, "touch", 2);
+      expect(c.dashButton.id).toBe(-1);
+      // The move finger kept moving throughout.
+      expect(o.mx).toBeGreaterThan(0.5);
+      // A finger on the right half away from the button still aims.
+      pointerDown(c, "touch", 3, w - 40, h - 40);
+      expect(c.aimStick.active).toBe(true);
+    }
+  });
+
+  test("the button sits on screen, in the right half, clear of the minimap, and big enough to tap", () => {
+    for (const [w, h] of [
+      [390, 844],
+      [844, 390],
+      [1280, 720],
+      [667, 320],
+    ] as const) {
+      const b = dashButtonAt(w, h, NO_INSETS, { x: 0, y: 0, r: 0, id: -1 });
+      expect(b.r * 2).toBeGreaterThanOrEqual(44);
+      expect(b.r).toBe(DASH_BUTTON_RADIUS);
+      expect(b.x - b.r).toBeGreaterThan(w / 2);
+      expect(b.x + b.r).toBeLessThanOrEqual(w);
+      expect(b.y - b.r).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.r).toBeLessThanOrEqual(h);
+      const m = minimapLayout(w, h, NO_INSETS);
+      expect(b.y - b.r).toBeGreaterThan(m.y + m.size);
+    }
   });
 });
 

@@ -74,10 +74,21 @@ export type Welcome = {
 };
 
 /**
- * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable (0/1). Positions and
- * velocities to 0.01, aim to 0.001. Fields are only ever appended, never reordered.
+ * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable by a hit or spawn
+ * protection (0/1), dashing (0/1, v3). Positions and velocities to 0.01, aim to 0.001. Fields are
+ * only ever appended, never reordered.
  */
-export type SnapshotPlayer = [id: number, x: number, y: number, vx: number, vy: number, aim: number, alive: 0 | 1, invulnerable: 0 | 1];
+export type SnapshotPlayer = [
+  id: number,
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  aim: number,
+  alive: 0 | 1,
+  invulnerable: 0 | 1,
+  dashing: 0 | 1,
+];
 /** One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number];
 /** A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001). It flies per shotTravelAt. */
@@ -101,6 +112,9 @@ export type SnapshotMe = {
   hl: number;
   /** In a life (1) or out (0). */
   al: 0 | 1;
+  /** Dash ticks left (above 0: dashing) and ticks until a dash press is accepted (v3). */
+  dk: number;
+  dc: number;
 };
 
 export type Snapshot = {
@@ -211,15 +225,15 @@ const q1 = (v: number) => Math.round(v * 10) / 10;
 const q2 = (v: number) => Math.round(v * 100) / 100;
 const q3 = (v: number) => Math.round(v * 1000) / 1000;
 
-type PlayerRow = { id: number; x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; invulnTicks: number };
+type PlayerRow = { id: number; x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; invulnTicks: number; dashTicks: number };
 
-/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv],...]`, quantized. */
+/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash],...]`, quantized. */
 export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
   let s = "[";
   for (let i = 0; i < players.length; i++) {
     const p = players[i]!;
     if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0}]`;
+    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0}]`;
   }
   return s + "]";
 }
@@ -276,7 +290,7 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
 
 /** One socket's snapshot: its own ack and numbers around the shared part. */
 export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared: string): string {
-  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al}},${shared}}`;
+  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dk":${me.dk},"dc":${me.dc}},${shared}}`;
 }
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean): string {

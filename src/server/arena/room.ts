@@ -74,6 +74,8 @@ export function meOf(p: Player, out: SnapshotMe): SnapshotMe {
   out.lk = p.lockTicks > 0 ? 1 : 0;
   out.hl = p.alive ? HITS_PER_LIFE - p.hits : 0;
   out.al = p.alive ? 1 : 0;
+  out.dk = p.dashTicks;
+  out.dc = p.dashCooldown;
   return out;
 }
 
@@ -81,7 +83,7 @@ export class Room {
   readonly state: ArenaState;
   private readonly members = new Map<number, Member>();
   private nextTickAt: number;
-  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0 };
+  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0 };
 
   constructor(
     readonly id: number,
@@ -126,13 +128,14 @@ export class Room {
 
   /**
    * Queues a member's input for the next free tick. An input whose sequence number is not newer
-   * than the last one accepted is dropped; a full queue drops its oldest.
+   * than the last one accepted is dropped; a full queue drops its oldest, carrying its dash press
+   * onto the next one, so a press is never lost (the browser has already predicted the dash).
    */
   pushInput(id: number, input: Input): void {
     const m = this.members.get(id);
     if (!m || input.seq <= m.lastSeq) return;
     m.lastSeq = input.seq;
-    if (m.queue.length >= INPUT_BUFFER) m.queue.shift();
+    if (m.queue.length >= INPUT_BUFFER && m.queue.shift()!.dash) m.queue[0]!.dash = true;
     m.queue.push(clampInput(input));
   }
 

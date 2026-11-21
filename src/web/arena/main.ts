@@ -3,9 +3,10 @@
 // runs the frame loop: every local 50 ms step reads the controls, sends one input and predicts
 // your robot with it; every frame draws you between predicted steps, everyone else and the bugs
 // ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the effects
-// and the HUD, with the camera following you. When your life ends the server says so ("over"),
+// and the HUD, with the camera following you. Space, Shift, the right mouse button or the dash
+// button dash (predicted at once, like the move). When your life ends the server says so ("over"),
 // and after RESTART_DELAY_MS any key, click or tap sends the respawn press.
-import { MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
+import { DASH_COOLDOWN_TICKS, MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
 import {
   ERROR_NAME,
   EVENT,
@@ -32,7 +33,19 @@ import { BUG_LOOKS, GLOW_SHOT } from "../game/look";
 import { createRng } from "../game/rng";
 import { loadPlayer, nextScreen, noteArenaRefusedName } from "../player";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
-import { createControls, pointerDown, pointerMove, pointerUp, pressRespawn, readControls, releaseAll, type PointerKind } from "./controls";
+import {
+  DASH_KEYS,
+  createControls,
+  dashButtonAt,
+  pointerDown,
+  pointerMove,
+  pointerUp,
+  pressDash,
+  pressRespawn,
+  readControls,
+  releaseAll,
+  type PointerKind,
+} from "./controls";
 import { createHudFx, noteMe, resetHudFx, updateHudFx } from "./hudfx";
 import { DELAY_TICKS, bugSpan, createInterp, newestPlayers, pushSnapshot, renderTick, resetInterp, sample, type BugSpan } from "./interp";
 import { connectArena } from "./net";
@@ -87,7 +100,7 @@ function start(playerId: string, name: string, team: Team): void {
   let seq = 0;
   let wave = 0;
   /** Your numbers from the last snapshot. */
-  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0 };
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0 };
   let haveMe = false;
   /** Your last life's end: when (performance.now ms) and what to show. */
   let overAt: number | null = null;
@@ -96,7 +109,7 @@ function start(playerId: string, name: string, team: Team): void {
   const robotFor = (id: number, n: string, t: Team): Robot => {
     let r = roster.get(id);
     if (!r) {
-      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false };
+      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false, dashing: false, dashAt: -1, dashFromX: 0, dashFromY: 0 };
       roster.set(id, r);
     }
     r.name = n;
@@ -146,14 +159,14 @@ function start(playerId: string, name: string, team: Team): void {
       const nowAlive = m.me.al === 1;
       if (!spawned || (nowAlive && !alive)) {
         // A join or a respawn: start predicting from where the server put you.
-        resetPredictor(predictor, self[1], self[2], self[3], self[4]);
+        resetPredictor(predictor, self[1], self[2], self[3], self[4], m.me.dk, m.me.dc);
         snapCamera(cam, self[1], self[2]);
         const r = roster.get(self[0]);
         if (r) r.trail.count = 0;
         spawned = true;
         acc = 0;
         if (nowAlive) overAt = null;
-      } else if (nowAlive) reconcile(predictor, self[1], self[2], self[3], self[4], m.ack);
+      } else if (nowAlive) reconcile(predictor, self[1], self[2], self[3], self[4], m.me.dk, m.me.dc, m.ack);
       alive = nowAlive;
     } else if (m.t === EVENT) {
       if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);
@@ -198,6 +211,7 @@ function start(playerId: string, name: string, team: Team): void {
     insets.right = parseFloat(cs.paddingRight) || 0;
     insets.bottom = parseFloat(cs.paddingBottom) || 0;
     insets.left = parseFloat(cs.paddingLeft) || 0;
+    dashButtonAt(w, h, insets, controls.dashButton);
     renderer.resize(w, h, dpr, cam, insets);
   };
   resize();
@@ -211,10 +225,11 @@ function start(playerId: string, name: string, team: Team): void {
   window.addEventListener("keydown", (e) => {
     if (e.code === STATS_KEY && !e.repeat) showStats = !showStats;
     else if (canRespawn() && !e.repeat) pressRespawn(controls);
+    if (alive && DASH_KEYS.has(e.code) && !e.repeat) pressDash(controls);
     if (STEERING_KEYS.has(e.code)) {
       controls.keys.add(e.code);
       e.preventDefault();
-    }
+    } else if (DASH_KEYS.has(e.code)) e.preventDefault(); // Space would scroll the page
   });
   window.addEventListener("keyup", (e) => controls.keys.delete(e.code));
   window.addEventListener("blur", () => releaseAll(controls));
@@ -244,13 +259,17 @@ function start(playerId: string, name: string, team: Team): void {
   canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  /** Sends one input and predicts with it. While out you send no move and no fire, only the respawn press. */
+  /**
+   * Sends one input, and while alive predicts with it. `dash` is the dash press while alive and
+   * the respawn press while out, when you send no move and no fire (and nothing is predicted: you
+   * are not drawn, and the respawn resets the prediction).
+   */
   const sendInput = (mx: number, my: number, aim: number, fire: boolean, dash: boolean) => {
     const input: Input = alive
-      ? clampInput({ seq: ++seq, mx, my, aim, fire, dash: false })
+      ? clampInput({ seq: ++seq, mx, my, aim, fire, dash })
       : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash });
     conn.send(encodeInput(input));
-    predictLocal(predictor, input);
+    if (alive) predictLocal(predictor, input);
   };
   // A hidden tab gets no frames: stop rather than repeat the last move until the server's stale limit.
   document.addEventListener("visibilitychange", () => {
@@ -260,9 +279,9 @@ function start(playerId: string, name: string, team: Team): void {
     }
   });
 
-  const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
+  const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false };
   const self = { x: 0, y: 0 };
-  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false };
+  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false };
   const span: BugSpan = { from: null, to: null, t: 0 };
   const bugs: BugsView = {
     x: new Float32Array(MAX_BUGS_PER_ARENA),
@@ -293,12 +312,25 @@ function start(playerId: string, name: string, team: Team): void {
     over: null,
     sticks: [controls.move, controls.aimStick],
     stats: null,
+    dashButton: null,
+    dashReady: 1,
   };
   const meter = createFpsMeter();
   let statsReading = -1;
   let statsText = "";
   let acc = 0;
   let last = performance.now();
+
+  /**
+   * A robot's dash began this frame: its afterimage runs from where it was last drawn (or `x, y`
+   * when it was not drawn last frame) to wherever it is now.
+   */
+  const startDash = (r: Robot, x: number, y: number, now: number) => {
+    const seen = r.trail.count > 0;
+    r.dashFromX = seen ? r.x : x;
+    r.dashFromY = seen ? r.y : y;
+    r.dashAt = now / 1000;
+  };
 
   const fillBugs = (rt: number) => {
     bugSpan(interp, rt, span);
@@ -345,7 +377,7 @@ function start(playerId: string, name: string, team: Team): void {
         // Aim from your robot's spot on screen, where the player sees it.
         predictedAt(predictor, 1, self);
         readControls(controls, (self.x - cam.x) * cam.scale + (cam.w * cam.scale) / 2, (self.y - cam.y) * cam.scale + (cam.h * cam.scale) / 2, read);
-        sendInput(read.mx, read.my, read.aim, read.fire, read.dash);
+        sendInput(read.mx, read.my, read.aim, read.fire, alive ? read.dash : read.respawn);
         acc -= TICK_MS;
         steps++;
       }
@@ -378,17 +410,24 @@ function start(playerId: string, name: string, team: Team): void {
           continue;
         }
         predictedAt(predictor, Math.min(1, acc / TICK_MS), self);
+        // Your dash shows from your own step, not the server's echo.
+        if (predictor.dashStart) startDash(r, self.x, self.y, now);
+        predictor.dashStart = false;
         r.x = self.x;
         r.y = self.y;
         r.aim = controls.aim;
         r.inv = row[7] === 1;
+        r.dashing = predictor.dashTicks > 0;
         selfIndex = drawn.length;
       } else if (sample(interp, row[0], rt, at) && at.alive) {
+        if (at.dash && !r.dashing) startDash(r, at.x, at.y, now);
+        r.dashing = at.dash;
         r.x = at.x;
         r.y = at.y;
         r.aim = at.aim;
         r.inv = at.inv;
       } else {
+        r.dashing = false;
         r.trail.count = 0;
         continue;
       }
@@ -412,6 +451,8 @@ function start(playerId: string, name: string, team: Team): void {
     scene.wave = wave;
     scene.over = overAt !== null && !alive ? over : null;
     scene.stats = showStats ? statsText : null;
+    scene.dashButton = alive && selfIndex >= 0 ? controls.dashButton : null;
+    scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
     renderer.draw(cam, scene);
     requestAnimationFrame(frame);
   };
