@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { arenaForViewport, type Arena } from "./arena";
-import { CI_DRONE, MAX_SQUASHES_PER_SECOND, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { CI_DRONE, MAX_SQUASHES_PER_SECOND, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import {
   ARENA_AREA,
   BASE_BUG,
@@ -11,10 +11,12 @@ import {
   DRONE_ORBIT,
   DRONE_RANGE,
   FIRE_INTERVAL,
+  INVULN_SECONDS,
   LASER_PIERCE,
   MOVING_FIRE_RATE,
   ROBOT_RADIUS,
   ROBOT_SPEED,
+  SHIELD_CHARGES,
   SPAWN_MIN,
   SPAWN_START,
   spawnInterval,
@@ -36,11 +38,20 @@ function advance(state: State, input: Input, pick = 0) {
   if (state.choice) choose(state, Math.min(pick, state.choice.length - 1));
 }
 
-/** Takes the card for upgrade `id` from the choice on offer; fails the test if it isn't there. */
-function pickId(state: State, id: UpgradeId) {
+/** Takes the card for upgrade `id` from the choice on offer, which must have it. */
+function takeCard(state: State, id: UpgradeId) {
   const index = state.choice?.indexOf(id) ?? -1;
   expect(index).toBeGreaterThanOrEqual(0);
   expect(choose(state, index)).toBe(true);
+}
+
+/** Steps without picking until a choice comes up (bounded), keeping the robot alive. */
+function toChoice(s: State, input: Input = NONE) {
+  const limit = s.time + CHOICE_EVERY + 1;
+  while (!s.choice && s.time < limit) {
+    step(s, input, DT);
+    s.hits = 0;
+  }
 }
 
 function run(state: State, input: Input, steps: number) {
@@ -321,8 +332,9 @@ describe("hits", () => {
   });
 
   test("stepping a finished run changes nothing", () => {
-    const s = createState(5, TALL);
-    while (!s.over && s.time < 120) advance(s, NONE); // bounded: a tuning change fails, never hangs
+    // Choices off: how long a run lasts with upgrades is the balance item's, not this test's.
+    const s = noChoices(5, TALL);
+    while (!s.over && s.time < 120) step(s, NONE, DT); // bounded: a tuning change fails, never hangs
     expect(s.over).toBe(true);
     const snapshot = structuredClone(s);
     run(s, { kind: "direction", dx: 1, dy: 0 }, 120);
@@ -340,15 +352,21 @@ test("the same seed plays the same run; another seed doesn't", () => {
   expect(play(7)).not.toEqual(play(8));
 });
 
-// The run-length tests guard the swarm's own tuning, so they play with upgrade choices off
-// (engineering.md: run length with upgrades is tuned in its own balance item).
+/**
+ * A run with upgrade choices off. The run-length tests use it: they guard the swarm's own tuning,
+ * and how long runs last with upgrades is a later balance item (engineering.md, owner ruling).
+ */
+function noChoices(seed: number, arena: Arena): State {
+  const s = createState(seed, arena);
+  s.nextChoiceAt = Infinity;
+  return s;
+}
+
 test("an idle player loses within 30 to 60 seconds, portrait, landscape and 4:3", () => {
   for (const arena of [TALL, WIDE, FOUR_THREE]) {
     for (let seed = 1; seed <= 10; seed++) {
-      const s = createState(seed, arena);
-      s.nextChoiceAt = Infinity;
-      while (!s.over && s.time < 120) advance(s, NONE);
-      expect(s.taken).toEqual([]);
+      const s = noChoices(seed, arena);
+      while (!s.over && s.time < 120) step(s, NONE, DT);
       expect(s.over).toBe(true);
       expect(s.time).toBeGreaterThanOrEqual(30);
       expect(s.time).toBeLessThanOrEqual(60);
@@ -363,10 +381,8 @@ test("a player who keeps moving survives 1 to 3 minutes, portrait and landscape"
     for (const player of [circle, dodge]) {
       const times: number[] = [];
       for (let seed = 1; seed <= 10; seed++) {
-        const s = createState(seed, arena);
-        s.nextChoiceAt = Infinity;
-        while (!s.over && s.time < 240) advance(s, player(s));
-        expect(s.taken).toEqual([]);
+        const s = noChoices(seed, arena);
+        while (!s.over && s.time < 240) step(s, player(s), DT);
         times.push(s.time);
       }
       expect(median(times)).toBeGreaterThanOrEqual(60);
@@ -393,15 +409,6 @@ test("the arena keeps 360,000 units² and the screen's ratio, clamped to 9:16..1
 });
 
 describe("upgrade choices", () => {
-  /** Steps without picking until a choice comes up (bounded), keeping the robot alive. */
-  function toChoice(s: State, input: Input = NONE) {
-    const limit = s.time + CHOICE_EVERY + 1;
-    while (!s.choice && s.time < limit) {
-      step(s, input, DT);
-      s.hits = 0;
-    }
-  }
-
   test("every 20 s of run time play pauses on up to 3 different upgrades, and a pick resumes it", () => {
     const s = createState(2, TALL);
     toChoice(s);
@@ -519,7 +526,7 @@ describe("review laser", () => {
     while (!s.choice && s.time < 1) step(s, NONE, DT);
     const inFlight = s.shots[0]!;
     expect(inFlight.pierce).toBe(0);
-    pickId(s, REVIEW_LASER);
+    takeCard(s, REVIEW_LASER);
     expect(inFlight.pierce).toBe(0);
     const fired = s.shots.length;
     const limit = s.time + 1;
@@ -530,21 +537,97 @@ describe("review laser", () => {
   });
 });
 
+describe("test shield", () => {
+  /** A quiet run that steps through `times` choices, each 0.1 s apart, taking the shield. */
+  function shielded(times = 1): State {
+    const s = quiet();
+    for (let n = 0; n < times; n++) {
+      s.nextChoiceAt = s.time + 0.1;
+      toChoice(s);
+      takeCard(s, TEST_SHIELD);
+    }
+    s.nextChoiceAt = Infinity;
+    return s;
+  }
+  const touching = (): Bug => ({ x: 225, y: 400, hp: 1000, kind: BASE_BUG });
+  /** Steps until the safe window after a hit or block has run out. */
+  const waitOut = (s: State) => run(s, NONE, Math.ceil(INVULN_SECONDS / DT) + 2);
+
+  test("taken once, the bubble blocks the next hit: the bug is gone, no life is lost, then hits count again", () => {
+    const s = shielded();
+    expect(s.levels[TEST_SHIELD]).toBe(1);
+    expect(s.shield).toBe(SHIELD_CHARGES[1]);
+    s.bugs.push(touching());
+    step(s, NONE, DT);
+    expect(s.hits).toBe(0);
+    expect(s.blocks).toBe(1);
+    expect(s.shield).toBe(0);
+    expect(s.bugs).toHaveLength(0);
+    expect(s.squashes).toBe(0);
+    expect(s.invuln).toBe(INVULN_SECONDS);
+
+    waitOut(s);
+    s.bugs.push(touching());
+    step(s, NONE, DT);
+    expect(s.hits).toBe(1);
+    expect(s.blocks).toBe(1);
+  });
+
+  test("taken twice, it blocks 2 hits; the third costs a life", () => {
+    const s = shielded(2);
+    expect(s.levels[TEST_SHIELD]).toBe(2);
+    expect(s.shield).toBe(SHIELD_CHARGES[2]);
+    for (let n = 1; n <= 2; n++) {
+      s.bugs.push(touching());
+      step(s, NONE, DT);
+      expect(s.blocks).toBe(n);
+      expect(s.hits).toBe(0);
+      waitOut(s);
+    }
+    expect(s.shield).toBe(0);
+    s.bugs.push(touching());
+    step(s, NONE, DT);
+    expect(s.hits).toBe(1);
+  });
+
+  test("a spent bubble taken again holds the second level's 2 charges", () => {
+    const s = shielded();
+    s.bugs.push(touching());
+    step(s, NONE, DT);
+    expect(s.shield).toBe(0);
+    s.nextChoiceAt = s.time + 0.1;
+    toChoice(s);
+    takeCard(s, TEST_SHIELD);
+    expect(s.shield).toBe(SHIELD_CHARGES[2]);
+  });
+
+  test("a clump touching at once pops one charge; the next bug waits out the safe window", () => {
+    const s = shielded(2);
+    // Three, so a block that went on to the next bug would meet one (removing a bug swaps the
+    // last one into its slot, which a loop moving on would skip).
+    s.bugs.push(touching(), touching(), touching());
+    step(s, NONE, DT);
+    expect(s.blocks).toBe(1);
+    expect(s.shield).toBe(1);
+    expect(s.bugs).toHaveLength(2);
+    step(s, NONE, DT); // inside the safe window: the bugs still touching pop nothing
+    expect(s.blocks).toBe(1);
+    expect(s.shield).toBe(1);
+    waitOut(s);
+    expect(s.blocks).toBe(2);
+    expect(s.shield).toBe(0);
+    expect(s.hits).toBe(0);
+  });
+});
+
 test("the run's finish carries the upgrades taken, in pick order", () => {
   const s = createState(2, TALL);
-  const picked: UpgradeId[] = [];
-  while (s.time < 45) {
-    // Through the choices at 20 s and 40 s, taking card 0 each time.
-    step(s, NONE, DT);
-    s.hits = 0;
-    if (s.choice) {
-      picked.push(s.choice[0]!);
-      choose(s, 0);
-    }
-  }
-  expect(picked).toHaveLength(2);
-  expect(s.taken).toEqual(picked);
-  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: picked });
+  toChoice(s);
+  takeCard(s, REVIEW_LASER);
+  toChoice(s);
+  takeCard(s, TEST_SHIELD);
+  expect(s.taken).toEqual([REVIEW_LASER, TEST_SHIELD]);
+  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: [REVIEW_LASER, TEST_SHIELD] });
   expect(runResult(s, false).upgrades).not.toBe(s.taken); // a copy: the finish can't change with the state
 });
 
@@ -558,7 +641,7 @@ describe("the server's squash cap", () => {
       for (const id of UPGRADE_IDS) s.levels[id] = UPGRADE_MAX_LEVEL;
       s.nextChoiceAt = Infinity;
       while (s.time < 120) {
-        advance(s, player(s));
+        step(s, player(s), DT);
         s.hits = 0;
       }
       expect(s.squashes).toBeLessThanOrEqual(s.spawned);
@@ -584,7 +667,7 @@ describe("CI drone", () => {
       const limit = s.time + 1;
       while (!s.choice && s.time < limit) step(s, NONE, DT);
       expect(s.choice).toContain(CI_DRONE);
-      pickId(s, CI_DRONE);
+      takeCard(s, CI_DRONE);
     }
     s.nextChoiceAt = Infinity;
     s.fireTimer = Infinity;

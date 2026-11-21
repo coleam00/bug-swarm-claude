@@ -1,7 +1,7 @@
 // The game itself: pure and time-stepped. It never reads a clock, Math.random or the DOM; time
 // comes in as `dt` and randomness from the seeded generator in the state, so `bun test` can
 // play it with fixed inputs and the same seed always plays the same run.
-import { CI_DRONE, POINTS_PER_SECOND, POINTS_PER_SQUASH, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { CI_DRONE, POINTS_PER_SECOND, POINTS_PER_SQUASH, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import type { Arena } from "./arena";
 import {
   BASE_BUG,
@@ -22,6 +22,7 @@ import {
   MOVING_FIRE_RATE,
   ROBOT_RADIUS,
   ROBOT_SPEED,
+  SHIELD_CHARGES,
   SHOT_LIFETIME,
   SHOT_SPEED,
   spawnInterval,
@@ -76,9 +77,13 @@ export type State = {
   droneAngle: number;
   /** Each drone's reload, by drone; only the first DRONE_COUNT of them are in use. */
   droneTimers: number[];
-  /** Seconds of invulnerability left after a hit. */
+  /** Seconds of invulnerability left after a hit or a blocked hit. */
   invuln: number;
   hits: number;
+  /** Hits the test shield's bubble will still block. */
+  shield: number;
+  /** Hits the bubble has blocked so far (fx/changes.ts tells a pop from a squash by it). */
+  blocks: number;
   squashes: number;
   /** Bugs spawned so far (for tests and tuning). */
   spawned: number;
@@ -109,6 +114,8 @@ export function createState(seed: number, arena: Arena): State {
     droneTimers: [0, DRONE_FIRE_INTERVAL / 2],
     invuln: 0,
     hits: 0,
+    shield: 0,
+    blocks: 0,
     squashes: 0,
     spawned: 0,
     over: false,
@@ -178,6 +185,7 @@ export function choose(state: State, index: number): boolean {
   if (!cards || !Number.isInteger(index) || index < 0 || index >= cards.length) return false;
   const id = cards[index]!;
   state.levels[id]++;
+  if (id === TEST_SHIELD) state.shield = SHIELD_CHARGES[state.levels[id]]!;
   state.taken.push(id);
   state.choice = null;
   return true;
@@ -392,6 +400,14 @@ function hitRobot(state: State, dt: number): void {
     const b = bugs[j]!;
     if ((b.x - rx) ** 2 + (b.y - ry) ** 2 > (ROBOT_RADIUS + b.kind.radius) ** 2) continue;
     removeAt(bugs, j);
+    // The bubble takes the hit: the bug is gone, no life is lost, and the same safe window
+    // follows, so a clump can't pop both charges (or a charge and a life) at once.
+    if (state.shield > 0) {
+      state.shield--;
+      state.blocks++;
+      state.invuln = INVULN_SECONDS;
+      return;
+    }
     state.hits++;
     state.invuln = INVULN_SECONDS;
     if (state.hits >= MAX_HITS) state.over = true;
