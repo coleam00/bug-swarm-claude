@@ -155,6 +155,23 @@ export function hideName(db: Database, name: string, at: Date): { key: string; p
   return { key, players: row.n };
 }
 
+/**
+ * Deletes every run (its run events) and every player, in one transaction, for a clean board
+ * before the stream (`bun run reset`). Hidden names stay: moderation survives a wipe. Tables
+ * and the file stay too, since a running server holds them open. Returns what was deleted.
+ */
+export function resetData(db: Database): { runs: number; players: number } {
+  const marks = EVENT_TYPES.map(() => "?").join(", ");
+  return db.transaction(() => {
+    const runs = db
+      .query(`SELECT COUNT(DISTINCT run_id) AS n FROM events WHERE type IN (${marks})`)
+      .get(...EVENT_TYPES) as { n: number };
+    db.query(`DELETE FROM events WHERE type IN (${marks})`).run(...EVENT_TYPES);
+    const players = db.query("DELETE FROM players").run();
+    return { runs: runs.n, players: players.changes };
+  })();
+}
+
 export type Stats = { players: number; finishedRuns: number; medianRunsPerPlayer: number; touchShare: number };
 
 /**
