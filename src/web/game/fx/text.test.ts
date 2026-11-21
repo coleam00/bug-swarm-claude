@@ -9,6 +9,7 @@ import {
   createTexts,
   setTextScale,
   spawnText,
+  textLabel,
   updateTexts,
   type Texts,
 } from "./text";
@@ -112,5 +113,26 @@ describe("floating text pool", () => {
     const t = createTexts();
     for (let i = 0; i < TEXT_MAX_SQUASHES + 1; i++) spawnText(t, 100, 100);
     expect(counts(t)).toEqual([TEXT_MAX_SQUASHES, 1]);
+  });
+});
+
+describe("points other than a squash's", () => {
+  test("a label shows the points it was given, and merges sum them: 15 then 10 reads +25", () => {
+    const t = createTexts();
+    spawnText(t, 100, 100, 15);
+    expect(textLabel(t, 0)).toBe("+15");
+    spawnText(t, 101, 100, 10);
+    expect(textLabel(t, 0)).toBe("+25");
+    expect(t.count[0]).toBe(2);
+    // The same string each time: nothing is built per frame.
+    expect(textLabel(t, 0)).toBe(textLabel(t, 0));
+  });
+
+  test("with no points given a squash still reads +10, as release 1 draws it", () => {
+    const t = createTexts();
+    spawnText(t, 100, 100);
+    spawnText(t, 100, 100);
+    expect(textLabel(t, 0)).toBe(TEXT_LABELS[t.count[0]!]!);
+    expect(textLabel(t, 0)).toBe("+20");
   });
 });

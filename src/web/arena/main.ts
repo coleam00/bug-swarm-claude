@@ -1,32 +1,60 @@
 // The /arena page (release 2): plain TypeScript, no React. With a name and a team (the same
 // local player `/` keeps; without them, `/` asks first), it joins an arena over the WebSocket and
 // runs the frame loop: every local 50 ms step reads the controls, sends one input and predicts
-// your robot with it; every frame draws you between predicted steps, everyone else ~100 ms behind
-// the server, and the camera following you.
-import { TICK_MS } from "../../shared/arena/constants";
-import { ERROR_NAME, EVENT, JOIN, LEAVE, SNAPSHOT, WELCOME, encodeInput, type ServerMessage } from "../../shared/arena/protocol";
+// your robot with it; every frame draws you between predicted steps, everyone else and the bugs
+// ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the effects
+// and the HUD, with the camera following you. When your life ends the server says so ("over"),
+// and after RESTART_DELAY_MS any key, click or tap sends the respawn press.
+import { MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
+import {
+  ERROR_NAME,
+  EVENT,
+  JOIN,
+  LEAVE,
+  OVER,
+  SNAPSHOT,
+  WELCOME,
+  encodeInput,
+  type ServerMessage,
+  type SnapshotMe,
+} from "../../shared/arena/protocol";
 import { clampInput, type Input } from "../../shared/arena/sim";
 import { isTeam, type Team } from "../../server/rules";
 import { createFpsMeter, tickFps } from "../game/fps";
+import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "../game/fx/particles";
+import { HIT_SHAKE, createShake, kick, updateShake } from "../game/fx/shake";
+import { createTexts, setTextScale, spawnText, updateTexts } from "../game/fx/text";
 import { createTrail, updateTrail } from "../game/fx/trail";
+import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
+import { BUG_LOOKS, GLOW_SHOT } from "../game/look";
+import { createRng } from "../game/rng";
 import { loadPlayer, nextScreen, noteArenaRefusedName } from "../player";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
-import { createControls, pointerDown, pointerMove, pointerUp, readControls, releaseAll, type PointerKind } from "./controls";
-import { createInterp, newestPlayers, pushSnapshot, renderTick, resetInterp, sample } from "./interp";
+import { createControls, pointerDown, pointerMove, pointerUp, pressRespawn, readControls, releaseAll, type PointerKind } from "./controls";
+import { createHudFx, noteMe, resetHudFx, updateHudFx } from "./hudfx";
+import { DELAY_TICKS, bugSpan, createInterp, newestPlayers, pushSnapshot, renderTick, resetInterp, sample, type BugSpan } from "./interp";
 import { connectArena } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
-import { createArenaRenderer, type Robot } from "./render";
+import { createArenaRenderer, type BugsView, type OverView, type Robot, type Scene } from "./render";
+import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 
 /** Local steps one frame may run; a stalled tab drops the rest rather than burst inputs. */
 const MAX_STEPS_PER_FRAME = 3;
+/** Particles in a shot's spark (a kill bursts BURST_COUNT). */
+const SPARK_COUNT = 5;
 
 const player = loadPlayer();
 if (nextScreen(player, false, false) !== "play" || player.name === null || player.team === null) {
   location.replace("/");
 } else {
   start(player.id, player.name, player.team);
+}
+
+function formatSeconds(s: number): string {
+  const whole = Math.floor(s);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 function start(playerId: string, name: string, team: Team): void {
@@ -39,6 +67,15 @@ function start(playerId: string, name: string, team: Team): void {
   const controls = createControls(window.innerWidth);
   const predictor = createPredictor();
   const interp = createInterp();
+  const shots = createShots();
+  const kills = createKillQueue();
+  const particles = createParticles();
+  const texts = createTexts();
+  const shake = createShake();
+  const hudFx = createHudFx();
+  // Effects draw from their own generator, never the simulation's.
+  const fxRng = createRng(Date.now() | 0);
+  const killGlow = BUG_LOOKS.base.glow;
 
   // Who is in the arena: names and teams come once, in the welcome and in join events.
   const roster = new Map<number, Robot>();
@@ -46,12 +83,20 @@ function start(playerId: string, name: string, team: Team): void {
   const drawn: Robot[] = [];
   let you: number | null = null;
   let spawned = false;
+  let alive = false;
   let seq = 0;
+  let wave = 0;
+  /** Your numbers from the last snapshot. */
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0 };
+  let haveMe = false;
+  /** Your last life's end: when (performance.now ms) and what to show. */
+  let overAt: number | null = null;
+  const over: OverView = { title: "Life over", score: "", line: "", prompt: "Tap or press any key", ready: false };
 
   const robotFor = (id: number, n: string, t: Team): Robot => {
     let r = roster.get(id);
     if (!r) {
-      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail() };
+      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false };
       roster.set(id, r);
     }
     r.name = n;
@@ -59,27 +104,63 @@ function start(playerId: string, name: string, team: Team): void {
     return r;
   };
 
+  const isMine = (owner: number) => owner === you;
+  const spark = (x: number, y: number) => spawnBurst(particles, x, y, SPARK_COUNT, GLOW_SHOT, fxRng);
+  const showKill = (x: number, y: number, points: number) => {
+    spawnBurst(particles, x, y, BURST_COUNT, killGlow, fxRng);
+    if (points > 0) spawnText(texts, x, y, points);
+  };
+
+  const lifeOver = (score: number, kills: number, seconds: number) => {
+    overAt = performance.now();
+    over.score = `${score.toLocaleString("en-US")} points`;
+    over.line = `${kills} ${kills === 1 ? "kill" : "kills"} · ${formatSeconds(seconds)}`;
+    over.ready = false;
+  };
+
   const onMessage = (m: ServerMessage) => {
     if (m.t === WELCOME) {
       you = m.you;
       spawned = false;
+      alive = false;
+      haveMe = false;
+      overAt = null;
       seq = 0;
       roster.clear();
       resetInterp(interp);
+      clearShots(shots);
+      clearKills(kills);
+      resetHudFx(hudFx);
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
     } else if (m.t === SNAPSHOT) {
-      pushSnapshot(interp, m.tick, m.p, performance.now());
+      pushSnapshot(interp, m.tick, m.p, performance.now(), m.b);
+      wave = m.w;
+      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick);
+      for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
+      for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1]);
+      Object.assign(me, m.me);
+      haveMe = true;
+      if (noteMe(hudFx, m.me)) kick(shake, HIT_SHAKE);
       const self = m.p.find((p) => p[0] === you);
       if (!self) return;
-      if (!spawned) {
+      const nowAlive = m.me.al === 1;
+      if (!spawned || (nowAlive && !alive)) {
+        // A join or a respawn: start predicting from where the server put you.
         resetPredictor(predictor, self[1], self[2], self[3], self[4]);
         snapCamera(cam, self[1], self[2]);
+        const r = roster.get(self[0]);
+        if (r) r.trail.count = 0;
         spawned = true;
         acc = 0;
-      } else reconcile(predictor, self[1], self[2], self[3], self[4], m.ack);
+        if (nowAlive) overAt = null;
+      } else if (nowAlive) reconcile(predictor, self[1], self[2], self[3], self[4], m.ack);
+      // Out without the event (it was lost to a reconnect): show the overlay anyway.
+      if (!nowAlive && alive && overAt === null) lifeOver(m.me.sc, m.me.ki, 0);
+      alive = nowAlive;
     } else if (m.t === EVENT) {
       if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);
       else if (m.kind === LEAVE) roster.delete(m.id);
+      else if (m.kind === OVER && m.id === you) lifeOver(m.score ?? 0, m.kills ?? 0, m.seconds ?? 0);
     }
   };
 
@@ -112,6 +193,7 @@ function start(playerId: string, name: string, team: Team): void {
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     setViewport(cam, w, h);
+    setTextScale(texts, cam.scale);
     controls.width = w;
     const cs = getComputedStyle(probe);
     insets.top = parseFloat(cs.paddingTop) || 0;
@@ -123,10 +205,14 @@ function start(playerId: string, name: string, team: Team): void {
   resize();
   window.addEventListener("resize", resize);
 
+  /** Out, and past the guard: a press now respawns you. */
+  const canRespawn = () => spawned && !alive && overAt !== null && restartIn(overAt, performance.now()) === 0;
+
   // Input.
   let showStats = false;
   window.addEventListener("keydown", (e) => {
     if (e.code === STATS_KEY && !e.repeat) showStats = !showStats;
+    else if (canRespawn() && !e.repeat) pressRespawn(controls);
     if (STEERING_KEYS.has(e.code)) {
       controls.keys.add(e.code);
       e.preventDefault();
@@ -140,7 +226,8 @@ function start(playerId: string, name: string, team: Team): void {
   };
   canvas.addEventListener("pointerdown", (e) => {
     const p = local(e);
-    pointerDown(controls, p.kind, e.pointerId, p.x, p.y);
+    if (canRespawn()) pressRespawn(controls);
+    pointerDown(controls, p.kind, e.pointerId, p.x, p.y, e.button);
     if (p.kind === "touch") {
       try {
         canvas.setPointerCapture(e.pointerId); // keep the moves if a thumb slides off the canvas
@@ -154,14 +241,16 @@ function start(playerId: string, name: string, team: Team): void {
     const p = local(e);
     pointerMove(controls, p.kind, e.pointerId, p.x, p.y);
   });
-  const end = (e: PointerEvent) => pointerUp(controls, e.pointerType as PointerKind, e.pointerId);
+  const end = (e: PointerEvent) => pointerUp(controls, e.pointerType as PointerKind, e.pointerId, e.button);
   canvas.addEventListener("pointerup", end);
   canvas.addEventListener("pointercancel", end);
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  /** Sends one input and predicts with it. */
-  const sendInput = (mx: number, my: number, aim: number) => {
-    const input: Input = clampInput({ seq: ++seq, mx, my, aim, fire: false, dash: false });
+  /** Sends one input and predicts with it. While out you send no move and no fire, only the respawn press. */
+  const sendInput = (mx: number, my: number, aim: number, fire: boolean, dash: boolean) => {
+    const input: Input = alive
+      ? clampInput({ seq: ++seq, mx, my, aim, fire, dash: false })
+      : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash });
     conn.send(encodeInput(input));
     predictLocal(predictor, input);
   };
@@ -169,19 +258,82 @@ function start(playerId: string, name: string, team: Team): void {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden && spawned) {
       releaseAll(controls);
-      sendInput(0, 0, controls.aim);
+      sendInput(0, 0, controls.aim, false, false);
     }
   });
 
-  const read = { mx: 0, my: 0, aim: 0 };
+  const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
   const self = { x: 0, y: 0 };
-  const at = { x: 0, y: 0, aim: 0 };
+  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false };
+  const span: BugSpan = { from: null, to: null, t: 0 };
+  const bugs: BugsView = {
+    x: new Float32Array(MAX_BUGS_PER_ARENA),
+    y: new Float32Array(MAX_BUGS_PER_ARENA),
+    heading: new Float32Array(MAX_BUGS_PER_ARENA),
+    phase: new Float32Array(MAX_BUGS_PER_ARENA),
+    kind: new Uint8Array(MAX_BUGS_PER_ARENA),
+    count: 0,
+  };
+  /** Each bug's last heading, so a bug standing still keeps facing where it was going. */
+  const headings = new Map<number, number>();
+  const scene: Scene = {
+    robots: drawn,
+    count: 0,
+    self: -1,
+    t: 0,
+    bugs,
+    shots,
+    mineAt: 0,
+    othersAt: 0,
+    you: null,
+    particles,
+    texts,
+    shake,
+    me: null,
+    wave: 0,
+    hud: hudFx,
+    over: null,
+    sticks: [controls.move, controls.aimStick],
+    stats: null,
+  };
   const meter = createFpsMeter();
   let statsReading = -1;
   let statsText = "";
   let acc = 0;
   let last = performance.now();
-  const sticks = [controls.move, controls.aimStick];
+
+  const fillBugs = (rt: number) => {
+    bugSpan(interp, rt, span);
+    bugs.count = 0;
+    const from = span.from;
+    if (!from) return;
+    for (const row of from.b) {
+      if (bugs.count >= MAX_BUGS_PER_ARENA) break;
+      const id = row[0];
+      const next = span.to?.bi.get(id);
+      let x = row[2];
+      let y = row[3];
+      let heading = headings.get(id) ?? 0;
+      if (next) {
+        const dx = next[2] - row[2];
+        const dy = next[3] - row[3];
+        x += dx * span.t;
+        y += dy * span.t;
+        if (dx * dx + dy * dy > 0.01) {
+          heading = Math.atan2(dy, dx);
+          headings.set(id, heading);
+        }
+      }
+      const i = bugs.count++;
+      bugs.x[i] = x;
+      bugs.y[i] = y;
+      bugs.heading[i] = heading;
+      bugs.phase[i] = (id * 0.618) % 1;
+      bugs.kind[i] = row[1];
+    }
+    // Forget the headings of bugs long gone.
+    if (headings.size > MAX_BUGS_PER_ARENA * 2) headings.clear();
+  };
 
   const frame = (now: number) => {
     const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
@@ -194,43 +346,75 @@ function start(playerId: string, name: string, team: Team): void {
       while (acc >= TICK_MS && steps < MAX_STEPS_PER_FRAME) {
         // Aim from your robot's spot on screen, where the player sees it.
         predictedAt(predictor, 1, self);
-        readControls(controls, (self.x - cam.x) * cam.scale + cam.w * cam.scale / 2, (self.y - cam.y) * cam.scale + cam.h * cam.scale / 2, read);
-        sendInput(read.mx, read.my, read.aim);
+        readControls(controls, (self.x - cam.x) * cam.scale + (cam.w * cam.scale) / 2, (self.y - cam.y) * cam.scale + (cam.h * cam.scale) / 2, read);
+        sendInput(read.mx, read.my, read.aim, read.fire, read.dash);
         acc -= TICK_MS;
         steps++;
       }
       if (acc >= TICK_MS) acc = 0;
     }
     decayCorrection(predictor, dt);
+    over.ready = overAt !== null && restartIn(overAt, now) === 0;
 
-    // Who to draw: everyone in the newest snapshot, you predicted, the rest interpolated.
+    // The clocks: everyone else 100 ms behind the server, you and your shots at the server's now.
+    const rt = renderTick(interp, now);
+    const mineAt = rt + DELAY_TICKS;
+    pruneShots(shots, mineAt, isMine, true, spark);
+    pruneShots(shots, rt, isMine, false, spark);
+    drainKills(kills, mineAt, isMine, true, showKill);
+    drainKills(kills, rt, isMine, false, showKill);
+    updateParticles(particles, dt);
+    updateTexts(texts, dt);
+    updateShake(shake, dt, fxRng);
+    updateHudFx(hudFx, dt);
+
+    // Who to draw: everyone in a life in the newest snapshot, you predicted, the rest interpolated.
     drawn.length = 0;
     let selfIndex = -1;
-    const rt = renderTick(interp, now);
     for (const row of newestPlayers(interp)) {
       const r = roster.get(row[0]);
       if (!r) continue;
       if (row[0] === you) {
+        if (!alive) {
+          r.trail.count = 0; // no streak across the map on the respawn
+          continue;
+        }
         predictedAt(predictor, Math.min(1, acc / TICK_MS), self);
         r.x = self.x;
         r.y = self.y;
         r.aim = controls.aim;
+        r.inv = row[7] === 1;
         selfIndex = drawn.length;
-      } else if (sample(interp, row[0], rt, at)) {
+      } else if (sample(interp, row[0], rt, at) && at.alive) {
         r.x = at.x;
         r.y = at.y;
         r.aim = at.aim;
-      } else continue;
+        r.inv = at.inv;
+      } else {
+        r.trail.count = 0;
+        continue;
+      }
       updateTrail(r.trail, r.x, r.y, dt);
       drawn.push(r);
     }
     if (selfIndex >= 0) followCamera(cam, drawn[selfIndex]!.x, drawn[selfIndex]!.y, dt);
+    fillBugs(rt);
 
     if (showStats && statsReading === -1) {
       statsReading = 0;
-      statsText = `${Math.round(meter.fps)} fps · ${drawn.length} players`;
+      statsText = `${Math.round(meter.fps)} fps · ${drawn.length} players · ${bugs.count} bugs · ${shots.live} shots · ${particles.live} fx`;
     }
-    renderer.draw(cam, drawn, drawn.length, selfIndex, now / 1000, sticks, showStats ? statsText : null);
+    scene.count = drawn.length;
+    scene.self = selfIndex;
+    scene.t = now / 1000;
+    scene.mineAt = mineAt;
+    scene.othersAt = rt;
+    scene.you = you;
+    scene.me = haveMe ? me : null;
+    scene.wave = wave;
+    scene.over = overAt !== null && !alive ? over : null;
+    scene.stats = showStats ? statsText : null;
+    renderer.draw(cam, scene);
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);

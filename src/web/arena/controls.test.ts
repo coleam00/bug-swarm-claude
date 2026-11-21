@@ -1,8 +1,60 @@
 import { describe, expect, test } from "bun:test";
-import { STICK_RANGE } from "../game/stick";
-import { createControls, pointerDown, pointerMove, pointerUp, readControls, releaseAll } from "./controls";
+import { STICK_DEAD, STICK_RANGE } from "../game/stick";
+import { createControls, pointerDown, pointerMove, pointerUp, pressRespawn, readControls, releaseAll } from "./controls";
 
-const out = () => ({ mx: 0, my: 0, aim: 0 });
+const out = () => ({ mx: 0, my: 0, aim: 0, fire: false, dash: false });
+
+describe("fire and respawn", () => {
+  test("holding the left mouse button fires; other buttons and letting go do not", () => {
+    const c = createControls(1440);
+    const o = out();
+    pointerDown(c, "mouse", 1, 800, 450, 2);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(false);
+    pointerDown(c, "mouse", 1, 800, 450, 0);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(true);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(true);
+    pointerUp(c, "mouse", 1, 0);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(false);
+    pointerDown(c, "mouse", 1, 800, 450, 0);
+    releaseAll(c);
+    readControls(c, 700, 450, o);
+    expect(o.fire).toBe(false);
+  });
+
+  test("the aim stick fires while held past its dead zone, and stops when the thumb lifts", () => {
+    const c = createControls(844);
+    const o = out();
+    pointerDown(c, "touch", 2, 650, 200);
+    readControls(c, 0, 0, o);
+    expect(o.fire).toBe(false);
+    pointerMove(c, "touch", 2, 650 + STICK_DEAD + 1, 200);
+    readControls(c, 0, 0, o);
+    expect(o.fire).toBe(true);
+    expect(o.aim).toBe(0);
+    pointerUp(c, "touch", 2);
+    readControls(c, 0, 0, o);
+    expect(o.fire).toBe(false);
+    // The move stick never fires.
+    pointerDown(c, "touch", 1, 100, 200);
+    pointerMove(c, "touch", 1, 160, 200);
+    readControls(c, 0, 0, o);
+    expect(o.fire).toBe(false);
+  });
+
+  test("a respawn press goes out as one dash", () => {
+    const c = createControls(1440);
+    const o = out();
+    pressRespawn(c);
+    readControls(c, 0, 0, o);
+    expect(o.dash).toBe(true);
+    readControls(c, 0, 0, o);
+    expect(o.dash).toBe(false);
+  });
+});
 
 describe("keyboard and mouse", () => {
   test("WASD and arrows move; the mouse aims from your robot on screen", () => {
