@@ -31,6 +31,18 @@ export function isUpgradeId(v: unknown): v is UpgradeId {
   return (UPGRADE_IDS as readonly unknown[]).includes(v);
 }
 
+// Teams.
+/**
+ * The two teams of the Tabs vs Spaces race. Here, not in db.ts, because the browser imports
+ * this file and can't import db.ts (bun:sqlite); db.ts re-exports it for server code.
+ */
+export const TEAMS = ["tabs", "spaces"] as const;
+export type Team = (typeof TEAMS)[number];
+
+export function isTeam(v: unknown): v is Team {
+  return (TEAMS as readonly unknown[]).includes(v);
+}
+
 // Names.
 export const NAME_MIN = 2;
 export const NAME_MAX = 16;

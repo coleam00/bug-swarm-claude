@@ -187,12 +187,14 @@ async function measureLayout(cdp: Session, v: Viewport) {
     const rows = document.querySelectorAll(".over-board li").length;
     const chips = document.querySelectorAll("ul.over-upgrades li").length;
     const lastRow = document.querySelector(".over-board li:last-child");
+    const race = document.querySelector(".over-race");
     return {
       hintBottom: Math.round(hint.getBoundingClientRect().bottom),
       boardBottom: lastRow ? Math.round(lastRow.getBoundingClientRect().bottom) : null,
       chipsTop: Math.round(document.querySelector(".over-upgrades").getBoundingClientRect().top),
       scrollHeight: document.scrollingElement.scrollHeight,
       scrollWidth: document.scrollingElement.scrollWidth,
+      race: race ? Math.round(race.getBoundingClientRect().height) : null,
       innerWidth, innerHeight, rows, chips,
     };
   })()`);
@@ -217,16 +219,19 @@ try {
   });
   if (build.exitCode !== 0) throw new Error("vite build failed");
 
-  // The built game, plus a fake top 10 (ten of the widest names) so the layout check sees the
-  // longest board. Every other API call fails, as with the server down; a stress run sends none.
+  // The built game, plus a fake top 10 (ten of the widest names) and six-figure team totals,
+  // so the layout check sees the longest board and the race bar. Every other API call fails, as
+  // with the server down; a stress run sends none.
   const root = normalize(outDir + sep);
   const top = { top: Array.from({ length: 10 }, (_, i) => ({ name: TOP_NAME, score: 99999 - i })) };
+  const teams = { teams: { tabs: 123456, spaces: 98765 } };
   server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(req) {
       const path = new URL(req.url).pathname;
       if (path === "/api/top") return Response.json(top);
+      if (path === "/api/teams") return Response.json(teams);
       if (path.startsWith("/api/")) return new Response("bench: no API", { status: 503 });
       const file = normalize(join(outDir, path === "/" ? "index.html" : decodeURIComponent(path)));
       if (!file.startsWith(root) || !existsSync(file)) return new Response("not found", { status: 404 });
@@ -297,19 +302,22 @@ try {
     console.log(`| ${r.label} | ${r.bugs} | ${f1(r.avg)} | ${r.worst} | ${r.slow} | ${r.fxMax} | ${f2(r.draw.avg)} / ${f1(r.draw.p99)} / ${f1(r.draw.max)} ms |`);
   }
   for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
-  console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the couldn't-save alert added):\n");
-  console.log("| Viewport | Upgrade chips | Top-10 rows | Hint bottom | Last row bottom | Page height | Fits |");
-  console.log("|---|---|---|---|---|---|---|");
+  console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the couldn't-save alert added):\n");
+  console.log("| Viewport | Upgrade chips | Top-10 rows | Race bar height | Hint bottom | Last row bottom | Page height | Fits |");
+  console.log("|---|---|---|---|---|---|---|---|");
+  const fit = (m: any) => m.race !== null && m.hintBottom <= m.innerHeight && m.scrollHeight <= m.innerHeight && m.scrollWidth <= m.innerWidth;
   for (const { label, m } of layouts) {
-    const fits = m.hintBottom <= m.innerHeight && m.scrollHeight <= m.innerHeight && m.scrollWidth <= m.innerWidth;
+    const fits = fit(m);
     if (!fits) failed = true;
-    console.log(`| ${label} | ${m.chips} | ${m.rows} | ${m.hintBottom} | ${m.boardBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${fits ? "yes" : "NO"} |`);
+    console.log(
+      `| ${label} | ${m.chips} | ${m.rows} | ${m.race ?? "missing"} | ${m.hintBottom} | ${m.boardBottom} | ${m.scrollHeight} / ${m.innerHeight} | ${fits ? "yes" : "NO"} |`,
+    );
   }
   const slow = rows.filter((r) => r.avg < TARGET_FPS || r.worst < TARGET_FPS);
   if (slow.length) failed = true;
   console.log(
     `\n${failed ? "FAIL" : "PASS"}: ${slow.length ? `under ${TARGET_FPS} fps at ${slow.map((r) => r.label).join(", ")}` : `${TARGET_FPS}+ fps avg and worst 1 s at both sizes`}${
-      layouts.some((l) => !(l.m.hintBottom <= l.m.innerHeight && l.m.scrollHeight <= l.m.innerHeight)) ? "; the game-over screen doesn't fit" : ""
+      layouts.some((l) => !fit(l.m)) ? "; the game-over screen doesn't fit (or has no race bar)" : ""
     }`,
   );
 } catch (err) {

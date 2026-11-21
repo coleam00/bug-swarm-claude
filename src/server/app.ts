@@ -3,21 +3,25 @@ import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
 import {
   DuplicateRunEnd,
+  findPlayer,
   findRunStart,
   playerBest,
   recordRunEnded,
   recordRunStarted,
+  teamTotals,
   topTen,
   upsertPlayer,
   type TopRow,
 } from "./db";
-import { MAX_UPGRADES, checkName, checkScore, isUpgradeId, type UpgradeId } from "./rules";
+import { MAX_UPGRADES, checkName, checkScore, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
 
 /** At most this many run starts per IP per window (architecture.md, "Boundaries"). */
 export const RUN_STARTS_PER_WINDOW = 30;
 export const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** Hundreds of clients polling the top 10 cost one query a second. */
 export const TOP_CACHE_MS = 1000;
+/** Team totals are cached the same way. */
+export const TEAMS_CACHE_MS = TOP_CACHE_MS;
 export const MAX_BODY_BYTES = 2048;
 const PLAYER_ID = /^[A-Za-z0-9-]{8,64}$/;
 
@@ -47,6 +51,7 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
   const clientIp = opts.clientIp ?? forwardedClientIp;
   const starts = new Map<string, number[]>();
   let topCache: { at: number; top: TopRow[] } | null = null;
+  let teamsCache: { at: number; teams: Record<Team, number> } | null = null;
 
   const app = new Hono();
   app.get("/health", (c) => c.text("ok"));
@@ -54,12 +59,24 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
 
   app.post("/api/runs", async (c) => {
     const body = await readJson(c);
-    if (!isRecord(body) || typeof body.playerId !== "string" || typeof body.name !== "string") {
+    if (
+      !isRecord(body) ||
+      typeof body.playerId !== "string" ||
+      typeof body.name !== "string" ||
+      (body.team !== undefined && !isTeam(body.team))
+    ) {
       return c.json({ error: "body" }, 400);
     }
     if (!PLAYER_ID.test(body.playerId)) return c.json({ error: "playerId" }, 400);
     const name = checkName(body.name);
     if (!name.ok) return c.json({ error: "name", reason: name.reason }, 400);
+    // A new player must pick a team. A player from before teams (no team stored) still plays,
+    // and their runs count for nobody until they send one. A stored team is never switched:
+    // a different team sent later is ignored.
+    const sentTeam = body.team ?? null;
+    const existing = findPlayer(db, body.playerId);
+    if (!existing && !sentTeam) return c.json({ error: "team" }, 400);
+    const team = existing?.team ?? sentTeam;
 
     const t = now();
     const ip = clientIp(c);
@@ -74,11 +91,11 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
 
     const runId = crypto.randomUUID();
     const at = new Date(t);
-    recordRunStarted(db, runId, body.playerId, at);
+    recordRunStarted(db, runId, body.playerId, at, team);
     // The run is saved: answer 200 even if the follow-up write fails, so a retry never
-    // duplicates it. A failed upsert only leaves this run off the top 10.
+    // duplicates it. A failed upsert only leaves this run off the top 10 and the team totals.
     try {
-      upsertPlayer(db, body.playerId, name.name, at);
+      upsertPlayer(db, body.playerId, name.name, sentTeam, at);
     } catch (err) {
       console.error(`run ${runId}: saving player ${body.playerId} failed`, err);
     }
@@ -110,7 +127,7 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     try {
       recordRunEnded(
         db,
-        { runId, playerId: start.playerId, ...claim, touch: body.touch, upgrades: body.upgrades },
+        { runId, playerId: start.playerId, ...claim, touch: body.touch, upgrades: body.upgrades, team: start.team },
         new Date(t),
       );
     } catch (err) {
@@ -124,6 +141,12 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const t = now();
     if (!topCache || t - topCache.at >= TOP_CACHE_MS) topCache = { at: t, top: topTen(db) };
     return c.json({ top: topCache.top });
+  });
+
+  app.get("/api/teams", (c) => {
+    const t = now();
+    if (!teamsCache || t - teamsCache.at >= TEAMS_CACHE_MS) teamsCache = { at: t, teams: teamTotals(db) };
+    return c.json({ teams: teamsCache.teams });
   });
 
   app.get("/api/players/:id/best", (c) => c.json({ best: playerBest(db, c.req.param("id")) }));

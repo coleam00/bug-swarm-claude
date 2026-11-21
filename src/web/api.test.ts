@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { endRun, fetchBest, fetchTop, finishRun, startRun } from "./api";
+import { endRun, fetchBest, fetchTeams, fetchTop, finishRun, startRun } from "./api";
 import type { RunResult } from "./game/loop";
-import { REVIEW_LASER } from "../server/rules";
+import { REVIEW_LASER, TEAMS } from "../server/rules";
 
 const realFetch = globalThis.fetch;
 let respond: () => Response | Promise<Response>;
@@ -31,15 +31,37 @@ const RESULT: RunResult = { score: 10, squashes: 1, seconds: 3, touch: false, up
 
 test("startRun: a run id, a name refusal, or a failure", async () => {
   respond = () => json(200, { runId: "run-1" });
-  expect(await startRun("player-0001", "Robo")).toEqual({ kind: "ok", runId: "run-1" });
+  expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "ok", runId: "run-1" });
   respond = () => json(400, { error: "name", reason: "blocked" });
-  expect(await startRun("player-0001", "sh1t")).toEqual({ kind: "name-refused" });
+  expect(await startRun("player-0001", "sh1t", TEAMS[0])).toEqual({ kind: "name-refused" });
   respond = () => json(400, { error: "body" });
-  expect(await startRun("player-0001", "Robo")).toEqual({ kind: "failed" });
+  expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "failed" });
+  respond = () => json(400, { error: "team" });
+  expect(await startRun("player-0001", "Robo", null)).toEqual({ kind: "failed" });
   respond = () => json(429, { error: "rate" });
-  expect(await startRun("player-0001", "Robo")).toEqual({ kind: "failed" });
+  expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "failed" });
   respond = down;
-  expect(await startRun("player-0001", "Robo")).toEqual({ kind: "failed" });
+  expect(await startRun("player-0001", "Robo", TEAMS[0])).toEqual({ kind: "failed" });
+});
+
+test("startRun sends the team when the player has one, and none when they don't", async () => {
+  respond = () => json(200, { runId: "run-1" });
+  await startRun("player-0001", "Robo", TEAMS[1]);
+  expect(sent).toEqual({ playerId: "player-0001", name: "Robo", team: TEAMS[1] });
+  await startRun("player-0001", "Robo", null);
+  expect(sent).toEqual({ playerId: "player-0001", name: "Robo" });
+});
+
+test("fetchTeams: both totals, else a failure instead of throwing", async () => {
+  respond = () => json(200, { teams: { tabs: 120, spaces: 80 } });
+  expect(await fetchTeams()).toEqual({ tabs: 120, spaces: 80 });
+  expect(url).toBe("/api/teams");
+  respond = () => json(200, { teams: { tabs: 120 } });
+  expect(await fetchTeams()).toBe("failed");
+  respond = () => json(500, {});
+  expect(await fetchTeams()).toBe("failed");
+  respond = down;
+  expect(await fetchTeams()).toBe("failed");
 });
 
 test("endRun: saved only when the server accepted the score", async () => {

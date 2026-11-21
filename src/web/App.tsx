@@ -1,25 +1,27 @@
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import { NAME_MAX, checkName, type UpgradeId } from "../server/rules";
-import { fetchBest, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server/rules";
+import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { upgradeLevels } from "./over";
-import { loadPlayer, setPlayerName, type Player } from "./player";
+import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
 import { STRESS } from "./stress";
+import { TEAM_LOOK } from "./teams";
 
-// The thin shell around the canvas: name entry, the run, and the game-over screen.
+// The thin shell around the canvas: name and team entry, the run, and the game-over screen.
 // No menus between runs: game over -> any key or a fresh tap -> the next run.
-// A stress run (`?stress`, dev and bench builds only) needs no name and is never submitted: it
-// starts no run on the server, saves nothing and fetches no best.
+// A stress run (`?stress`, dev and bench builds only) needs no name or team and is never
+// submitted: it starts no run on the server, saves nothing and fetches no best.
 
 type Over = {
   result: RunResult;
   saved: "saving" | "saved" | "failed" | "not-saved";
   best: number | null | "loading" | "failed";
   top: TopRow[] | "loading" | "failed";
+  teams: Record<Team, number> | "loading" | "failed";
 };
 
-type Phase = { kind: "name" } | { kind: "playing"; run: number } | { kind: "over"; run: number; over: Over };
+type Phase = { kind: "setup" } | { kind: "playing"; run: number } | { kind: "over"; run: number; over: Over };
 
 /** Game over ignores input this long, so the finger still steering doesn't restart at once. */
 const RESTART_DELAY_MS = 750;
@@ -28,19 +30,22 @@ const TOP_POLL_MS = 4000;
 
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
-  const [phase, setPhase] = useState<Phase>(() => (STRESS || loadPlayer().name ? { kind: "playing", run: 1 } : { kind: "name" }));
   const runs = useRef(1);
+  const phaseFor = (run: number): Phase => (nextScreen(loadPlayer(), STRESS > 0) === "play" ? { kind: "playing", run } : { kind: "setup" });
+  const [phase, setPhase] = useState<Phase>(() => phaseFor(1));
 
   const play = () => {
     runs.current += 1;
-    setPhase(STRESS || loadPlayer().name ? { kind: "playing", run: runs.current } : { kind: "name" });
+    setPhase(phaseFor(runs.current));
   };
 
-  if (phase.kind === "name") {
+  if (phase.kind === "setup") {
     return (
-      <NameScreen
-        onName={(name) => {
-          setPlayer(setPlayerName(name));
+      <SetupScreen
+        player={player}
+        onDone={(name, team) => {
+          setPlayerName(name);
+          setPlayer(setPlayerTeam(team));
           play();
         }}
       />
@@ -53,35 +58,53 @@ export function App() {
         player={player}
         onNameRefused={() => setPlayer(setPlayerName(null))}
         // The save settles after the over screen shows; drop it if the player has moved on.
-        onOver={(over) => setPhase((p) => (p.kind !== "name" && p.run === phase.run ? { kind: "over", run: phase.run, over } : p))}
+        onOver={(over) => setPhase((p) => (p.kind !== "setup" && p.run === phase.run ? { kind: "over", run: phase.run, over } : p))}
       />
     );
   }
-  return <OverScreen key={phase.run} over={phase.over} onRestart={play} />;
+  return <OverScreen key={phase.run} over={phase.over} team={player.team} onRestart={play} />;
 }
 
-function NameScreen({ onName }: { onName: (name: string) => void }) {
+/**
+ * Before the first run: a name and a team, one tap each. A player from before teams already has
+ * a name, so they see only the team buttons, once; a tap picks and plays. A name the server
+ * refused comes back here with the team kept.
+ */
+function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string, team: Team) => void }) {
   const [value, setValue] = useState("");
+  const [team, setTeam] = useState<Team | null>(player.team);
   const [message, setMessage] = useState<string | null>(null);
+  const known = player.name;
+
+  if (known !== null) {
+    return (
+      <main className="setup">
+        <h1>Pick your team</h1>
+        <TeamButtons selected={null} onPick={(t) => onDone(known, t)} />
+      </main>
+    );
+  }
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const checked = checkName(value);
-    if (checked.ok) return onName(checked.name);
-    setMessage(
-      checked.reason === "blocked"
-        ? "That name isn't allowed. Try another."
-        : checked.reason === "length"
-          ? `Use 2 to ${NAME_MAX} characters.`
-          : "Use letters, numbers, spaces, - and _ only.",
-    );
+    if (!checked.ok) {
+      return setMessage(
+        checked.reason === "blocked"
+          ? "That name isn't allowed. Try another."
+          : checked.reason === "length"
+            ? `Use 2 to ${NAME_MAX} characters.`
+            : "Use letters, numbers, spaces, - and _ only.",
+      );
+    }
+    if (!team) return setMessage("Pick a team.");
+    onDone(checked.name, team);
   };
   return (
-    <main style={screen}>
-      <h1 style={{ fontSize: 44, margin: 0 }}>Bug Swarm</h1>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 16, width: "min(100%, 360px)" }}>
-        <label htmlFor="name" style={{ fontSize: 22 }}>
-          Your name on the board
-        </label>
+    <main className="setup">
+      <h1>Bug Swarm</h1>
+      <form onSubmit={submit}>
+        <label htmlFor="name">Your name on the board</label>
         <input
           id="name"
           autoFocus
@@ -92,18 +115,47 @@ function NameScreen({ onName }: { onName: (name: string) => void }) {
             setValue(e.target.value);
             setMessage(null);
           }}
-          style={{ fontSize: 24, padding: "10px 12px", borderRadius: 8, border: "2px solid #334155", background: "#0f172a", color: "#f8fafc" }}
+        />
+        <TeamButtons
+          selected={team}
+          onPick={(t) => {
+            setTeam(t);
+            setMessage(null);
+          }}
         />
         {message && (
-          <p role="alert" style={{ color: "#fda4af", fontSize: 20, margin: 0 }}>
+          <p role="alert" className="setup-alert">
             {message}
           </p>
         )}
-        <button type="submit" style={{ minHeight: 56, fontSize: 24, fontWeight: 700, borderRadius: 8, border: 0, background: "#22d3ee", color: "#05070d" }}>
+        <button type="submit" className="setup-play">
           Play
         </button>
       </form>
     </main>
+  );
+}
+
+/** Tabs and Spaces, side by side. `selected` shows the pick filled; null leaves both outlined. */
+function TeamButtons({ selected, onPick }: { selected: Team | null; onPick: (team: Team) => void }) {
+  return (
+    <div className="setup-teams" role="group" aria-label="Your team">
+      {TEAMS.map((t) => {
+        const { label, color } = TEAM_LOOK[t];
+        const on = selected === t;
+        return (
+          <button
+            key={t}
+            type="button"
+            aria-pressed={on}
+            onClick={() => onPick(t)}
+            style={{ borderColor: color, background: on ? color : "transparent", color: on ? "#05070d" : color }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -120,7 +172,7 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   useEffect(() => {
     const { player } = latest.current;
     if (!start.current && !STRESS) {
-      start.current = startRun(player.id, player.name ?? "").then((s) => {
+      start.current = startRun(player.id, player.name ?? "", player.team).then((s) => {
         if (s.kind === "name-refused") latest.current.onNameRefused();
         return s;
       });
@@ -131,11 +183,11 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
       onChoice: setCards,
       onOver: (result) => {
         const report = (over: Over) => latest.current.onOver(over);
-        report({ result, saved: "saving", best: "loading", top: "loading" });
+        report({ result, saved: "saving", best: "loading", top: "loading", teams: "loading" });
         void (async () => {
           const saved = await finishRun(runStart, result);
-          const [best, top] = await Promise.all([STRESS ? null : fetchBest(player.id), fetchTop()]);
-          report({ result, saved, best, top });
+          const [best, top, teams] = await Promise.all([STRESS ? null : fetchBest(player.id), fetchTop(), fetchTeams()]);
+          report({ result, saved, best, top, teams });
         })();
       },
     });
@@ -173,18 +225,22 @@ function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: 
   );
 }
 
-function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) {
+function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; onRestart: () => void }) {
   const [top, setTop] = useState(over.top);
+  const [teams, setTeams] = useState(over.teams);
   const [ready, setReady] = useState(false);
   useEffect(() => setTop(over.top), [over.top]);
+  useEffect(() => setTeams(over.teams), [over.teams]);
 
   const upgrades = upgradeLevels(over.result.upgrades);
 
-  // The live top 10: poll while this screen shows.
+  // The live top 10 and team totals: poll while this screen shows. Both show only what the
+  // server returned; this run's score is in the totals once the server has counted it.
   useEffect(() => {
     if (over.saved === "saving") return;
     const id = setInterval(() => {
       void fetchTop().then((t) => t !== "failed" && setTop(t));
+      void fetchTeams().then((t) => t !== "failed" && setTeams(t));
     }, TOP_POLL_MS);
     return () => clearInterval(id);
   }, [over.saved]);
@@ -220,6 +276,7 @@ function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) 
       <div className="over-summary">
         <h1>Game over</h1>
         <p className="over-score">{over.result.score}</p>
+        {teams !== "failed" && <Race teams={teams} mine={team} />}
         {upgrades.length === 0 ? (
           <p className="over-upgrades">No upgrades</p>
         ) : (
@@ -268,16 +325,29 @@ function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) 
   );
 }
 
-const screen: CSSProperties = {
-  minHeight: "100dvh",
-  boxSizing: "border-box",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 24,
-  padding: 16,
-  color: "#f8fafc",
-  fontFamily: "system-ui, sans-serif",
-  textAlign: "center",
-};
+/**
+ * Tabs vs Spaces: each team's total, and a bar split by them (half and half before either
+ * scores). While loading it keeps its size, so the screen doesn't jump. The player's team is bold.
+ */
+function Race({ teams, mine }: { teams: Record<Team, number> | "loading"; mine: Team | null }) {
+  const sum = teams === "loading" ? 0 : TEAMS.reduce((a, t) => a + teams[t], 0);
+  return (
+    <div className="over-race" aria-label="Tabs vs Spaces">
+      <p>
+        {TEAMS.map((t) => (
+          <span key={t} style={{ color: TEAM_LOOK[t].color, fontWeight: t === mine ? 800 : 400 }}>
+            {TEAM_LOOK[t].label} {teams === "loading" ? "..." : teams[t].toLocaleString("en-US")}
+          </span>
+        ))}
+      </p>
+      <div className="over-race-bar">
+        {TEAMS.map((t) => (
+          <span
+            key={t}
+            style={{ flexGrow: sum === 0 ? 1 : teams === "loading" ? 1 : teams[t], background: TEAM_LOOK[t].color, opacity: teams === "loading" ? 0.3 : 1 }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}

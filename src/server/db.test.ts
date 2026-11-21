@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Database } from "bun:sqlite";
-import { computeStats, openDb, recordRunEnded, recordRunStarted, topTen, upsertPlayer } from "./db";
+import { Database } from "bun:sqlite";
+import { TEAMS, computeStats, openDb, recordRunEnded, recordRunStarted, teamTotals, topTen, upsertPlayer } from "./db";
 
 let dir: string;
 let db: Database;
@@ -22,10 +22,11 @@ let runs = 0;
 function run(playerId: string, at: string, opts: { touch?: boolean; finished?: boolean; score?: number } = {}) {
   const runId = `run-${++runs}`;
   const start = new Date(Date.parse(at) - 60_000);
-  upsertPlayer(db, playerId, playerId.toUpperCase(), start);
-  recordRunStarted(db, runId, playerId, start);
+  const team = TEAMS[0];
+  upsertPlayer(db, playerId, playerId.toUpperCase(), team, start);
+  recordRunStarted(db, runId, playerId, start, team);
   if (opts.finished === false) return;
-  const end = { runId, playerId, score: opts.score ?? 60, squashes: 0, seconds: 60, touch: opts.touch ?? false, upgrades: [] };
+  const end = { runId, playerId, score: opts.score ?? 60, squashes: 0, seconds: 60, touch: opts.touch ?? false, upgrades: [], team };
   recordRunEnded(db, end, new Date(at));
 }
 
@@ -93,16 +94,35 @@ test("bun run stats refuses a time it can't read", () => {
   expect(script(["scripts/stats.ts", "--since", "yesterday"]).code).toBe(1);
 });
 
-test("bun run hide removes a name from the top 10, whatever its case", () => {
+test("a database file from before teams opens and gains events.team; its old runs count for nobody", () => {
+  db.close();
+  const path = join(dir, "old.db");
+  const old = new Database(path, { create: true });
+  old.exec(`CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, at TEXT NOT NULL,
+    run_id TEXT, player_id TEXT, score INTEGER, squashes INTEGER, seconds REAL, touch INTEGER, upgrades TEXT);`);
+  old.exec("CREATE TABLE players (id TEXT PRIMARY KEY, name TEXT NOT NULL, team TEXT, created_at TEXT NOT NULL);");
+  old.exec("INSERT INTO players VALUES ('old', 'Old', NULL, '2026-11-01T00:00:00.000Z');");
+  old.exec("INSERT INTO events (type, at, run_id, player_id, score) VALUES ('run_ended', '2026-11-01T00:01:00.000Z', 'r0', 'old', 99);");
+  old.close();
+  db = openDb(path);
+  const columns = (db.query("PRAGMA table_info(events)").all() as { name: string }[]).map((c) => c.name);
+  expect(columns).toContain("team");
+  expect(topTen(db)).toEqual([{ name: "Old", score: 99 }]); // still on the top 10
+  expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
+});
+
+test("bun run hide removes a name from the top 10 and the team totals, whatever its case", () => {
   run("a", "2026-11-28T15:01:00.000Z", { score: 50 });
   run("b", "2026-11-28T15:02:00.000Z", { score: 40 });
   expect(topTen(db).map((r) => r.name)).toEqual(["A", "B"]);
+  expect(teamTotals(db)).toEqual({ tabs: 90, spaces: 0 });
   db.close();
   const r = script(["run", "hide", "a"]);
   db = openDb(join(dir, "app.db"));
   expect(r.code).toBe(0);
   expect(r.out).toEqual(["hidden: a (1 player)"]);
   expect(topTen(db)).toEqual([{ name: "B", score: 40 }]);
+  expect(teamTotals(db)).toEqual({ tabs: 40, spaces: 0 });
 });
 
 test("bun run hide says when no player has the name", () => {

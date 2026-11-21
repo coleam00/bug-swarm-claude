@@ -17,7 +17,7 @@
 
 ## Shape
 - Browser game -> HTTP API -> one SQLite file.
-- `src/web/App.tsx`: name and team entry, the canvas, the game-over screen.
+- `src/web/App.tsx`: name and team entry, the canvas, the game-over screen (with the Tabs vs Spaces race bar). `player.ts` keeps the player in local storage and decides when to ask: a name and a team on a first visit, only the team (once) for a player from before teams. `teams.ts` gives each team its label and colour.
 - `src/web/over.ts`: the game-over screen's list of upgrades taken, each with its level.
 - `src/web/game/`: the game in plain TypeScript.
   - The simulation (robot, bugs, shots, hits, upgrades, spawn ramp) is pure: it advances by a time step from input and state, with no canvas, DOM or clock access, so `bun test` covers it.
@@ -32,18 +32,18 @@
   - The API client starts a run and submits its score without blocking the loop; failures are logged and the game-over screen says the score wasn't saved.
 - `src/web/board/`: the `/board` page for the stream (top 10 and team totals, big type, polls the API).
 - `src/server/app.ts`: `/health`, and routes under `/api`: start a run (returns a run id), finish a run (score, squashes, upgrades, device type), top 10, a player's best, team totals.
-- `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`). Schema changes are additive.
-- `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time) and `UPGRADE_IDS`, all pure and tested.
+- `src/server/db.ts`: the SQLite file, its tables, `EVENT_TYPES` (`run_started`, `run_ended`) and `TEAMS` (`tabs`, `spaces`; defined in `rules.ts` so the browser can import it, and re-exported here). Schema changes are additive.
+- `src/server/rules.ts`: name rules, score plausibility (max points per second of real elapsed time), `UPGRADE_IDS` and `TEAMS`, all pure and tested.
 - `src/server/blocked-words.ts`: the blocked-word list.
 - `src/server/main.ts`: production entry; reads `PORT` and `DATA_DIR` (default `data/`).
 - `scripts/stats.ts`, `scripts/hide.ts`, `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts`.
 - Tests are `*.test.ts` beside the code.
 
 ## Data
-- **Player:** a random id the browser creates on first visit and keeps in local storage, with a name and (Phase 3) a team. No account.
-- **Run:** `run_started` (run id, player id, server time) and `run_ended` (run id, score, squashes, seconds, upgrades, touch or not). A run with no `run_ended` was abandoned.
+- **Player:** a random id the browser creates on first visit and keeps in local storage, with a name and a team. No account. The server requires a team for a player id it hasn't seen, stores it once and never switches it; a player from before teams still plays with none.
+- **Run:** `run_started` (run id, player id, server time, team) and `run_ended` (run id, score, squashes, seconds, upgrades, touch or not, and the team copied from the start). A run counts for the team its player had when it started; runs with no team (from before teams) count for nobody. A run with no `run_ended` was abandoned.
 - **Hidden names:** a table the top 10 and the board filter on; `bun run hide` adds to it.
-- **Top 10 and team totals:** computed from finished, non-hidden runs, cached for 1 second so hundreds of clients polling cost one query a second.
+- **Top 10 and team totals:** computed from finished, non-hidden runs (`GET /api/top`, `GET /api/teams`), each cached for 1 second so hundreds of clients polling cost one query a second. The game-over screen polls both every 4 s.
 
 ## Hosting
 - Railway, from the `Dockerfile`, with a volume mounted at `DATA_DIR` and GitHub auto-deploy on `main`, so a merged change reaches players within minutes. One instance (SQLite needs one long-running process with a disk). The owner sets up the Railway project; the app only has to honor `PORT` and `DATA_DIR`.
