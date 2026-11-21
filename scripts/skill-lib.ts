@@ -1,9 +1,10 @@
 // `bun run skill`'s pure half: plays one life per policy per seed in-process, on the real arena
 // simulation, and checks the skill gate (PRD.md, "Skill is measured"): the aimer's median score
-// at least 2x the mover's. Tested in skill-lib.test.ts on a few seeds.
+// at least 2x the mover's. The dasher (#60) is printed beside them and against the aimer, not
+// gated. Tested in skill-lib.test.ts on a few seeds.
 import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createRng } from "../src/shared/arena/rng";
-import { POLICIES, POLICY_NAMES, createMemory, createObservation, observe, type PolicyInput, type PolicyName } from "../src/shared/arena/policies";
+import { AIMER, DASHER, POLICIES, POLICY_NAMES, createMemory, createObservation, observe, type PolicyInput, type PolicyName } from "../src/shared/arena/policies";
 import { clampInput, createArena, joinPlayer, stepArena } from "../src/shared/arena/sim";
 
 export type LifeResult = { score: number; kills: number; seconds: number; capped: boolean; dashes: number };
@@ -131,8 +132,8 @@ export function formatSkill(r: SkillReport): string[] {
   }
   const ratio = Number.isFinite(r.ratio) ? `${r.ratio.toFixed(2)}x` : "infinite";
   lines.push(`gate: aimer median score >= ${GATE_RATIO}x mover: ${ratio} ${r.pass ? "PASS" : "FAIL"}`);
-  const aim = r.policies.find((p) => p.policy === "aimer");
-  const dash = r.policies.find((p) => p.policy === "dasher");
+  const aim = r.policies.find((p) => p.policy === AIMER);
+  const dash = r.policies.find((p) => p.policy === DASHER);
   if (aim && dash && aim.medianScore > 0 && aim.medianSeconds > 0) {
     lines.push(
       `dasher vs aimer: ${(dash.medianScore / aim.medianScore).toFixed(2)}x median score, ${(dash.medianSeconds / aim.medianSeconds).toFixed(2)}x median life, ${dash.medianDashes} dashes a life (median)`,
