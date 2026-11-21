@@ -35,6 +35,31 @@ export function takeRefusedName(): string | null {
   return name;
 }
 
+const ARENA_REFUSED_KEY = "bugswarm.arenaRefused";
+
+/**
+ * The arena (/arena) refused the stored name and is sending the player to `/`: keep the name
+ * (`/` still accepts it) and leave a note, for this tab only, so `/` can say why.
+ */
+export function noteArenaRefusedName(name: string): void {
+  try {
+    sessionStorage.setItem(ARENA_REFUSED_KEY, name);
+  } catch {
+    // Storage is unavailable: then the arena had no stored player to refuse either.
+  }
+}
+
+/** The name the arena refused, once (the note is cleared), or null. */
+export function takeArenaRefusedName(): string | null {
+  try {
+    const name = sessionStorage.getItem(ARENA_REFUSED_KEY);
+    sessionStorage.removeItem(ARENA_REFUSED_KEY);
+    return name;
+  } catch {
+    return null;
+  }
+}
+
 export function setPlayerName(name: string | null): Player {
   return save({ ...loadPlayer(), name });
 }

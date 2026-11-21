@@ -193,6 +193,18 @@ export function checkName(raw: string): NameCheck {
   return { ok: true, name };
 }
 
+/**
+ * Names starting with this (after normalizing, any case) belong to the server's own arena bots,
+ * so the arena's /ws refuses them from clients. Not folded into checkName yet: release 1 (`/`)
+ * and its boards keep accepting such names until the item that switches `/` to the arena.
+ */
+export const BOT_NAME_PREFIX = "bot ";
+
+/** True for a name reserved for the server's bots: "bot " and more, in any case. "bots-01" is not one. */
+export function isBotName(name: string): boolean {
+  return nameKey(name).startsWith(BOT_NAME_PREFIX);
+}
+
 const shown = new Map<string, boolean>();
 /**
  * May a stored name appear on a board? False when the word lists now refuse it (blocked or

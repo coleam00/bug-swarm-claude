@@ -138,6 +138,36 @@ function glowSprite(colour: string): HTMLCanvasElement {
   return c;
 }
 
+/**
+ * One tile of release 1's floor grid, `tileUnits` square (a multiple of GRID_SPACING), for the
+ * arena's world, which is too big to pre-render whole. The same three passes as the floor, with
+ * lines at 0, GRID_SPACING, ... tileUnits: a line on the tile's edge is half in each tile, so
+ * tiles laid edge to edge draw it once, at full width. No edge and no vignette: the arena draws
+ * its own walls.
+ */
+export function floorTile(ppu: number, tileUnits = 240): HTMLCanvasElement {
+  const [c, ctx] = canvas(tileUnits * ppu, tileUnits * ppu);
+  ctx.scale(c.width / tileUnits, c.height / tileUnits);
+  ctx.fillStyle = FLOOR;
+  ctx.fillRect(0, 0, tileUnits, tileUnits);
+  const grid = (width: number, alpha: number) => {
+    ctx.lineWidth = width;
+    ctx.strokeStyle = `rgba(${GRID_RGB}, ${alpha})`;
+    ctx.beginPath();
+    for (let v = 0; v <= tileUnits; v += GRID_SPACING) {
+      ctx.moveTo(v, -width);
+      ctx.lineTo(v, tileUnits + width);
+      ctx.moveTo(-width, v);
+      ctx.lineTo(tileUnits + width, v);
+    }
+    ctx.stroke();
+  };
+  grid(5, 0.035);
+  grid(2.5, 0.05);
+  grid(1, 0.13);
+  return c;
+}
+
 /** Ping-pong leg angle for frame `f`, from -1 to 1. */
 function legPose(f: number): number {
   return -1 + (2 * f) / (LEG_FRAMES - 1);
@@ -252,7 +282,7 @@ function robotSprite(ppu: number, rim: string, flash: boolean): HTMLCanvasElemen
 }
 
 /** A white ring on a darker, wider one, so it reads over bugs, glows and the bare floor alike. */
-function robotMarkSprite(ppu: number): HTMLCanvasElement {
+export function robotMarkSprite(ppu: number): HTMLCanvasElement {
   const half = ROBOT_RADIUS * ROBOT_MARK_HALF;
   const [c, ctx] = canvas(half * 2 * ppu, half * 2 * ppu);
   ctx.scale(c.width / (half * 2), c.height / (half * 2));

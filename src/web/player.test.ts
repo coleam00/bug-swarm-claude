@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { TEAMS } from "../server/rules";
-import { forgetPlayerForTests, loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeRefusedName } from "./player";
+import { forgetPlayerForTests, loadPlayer, nextScreen, noteArenaRefusedName, setPlayerName, setPlayerTeam, takeArenaRefusedName, takeRefusedName } from "./player";
 
 // A stand-in for the browser's localStorage.
 let store: Map<string, string>;
@@ -91,4 +91,25 @@ test("with storage unavailable, the player lasts for the page in memory", () => 
   const a = setPlayerName("Robo");
   store.clear(); // storage lost (private mode, blocked storage)
   expect(loadPlayer()).toEqual({ id: a.id, name: "Robo", team: null });
+});
+
+test("the arena's refusal is noted for the next page once, and keeps the stored name", () => {
+  const session = new Map<string, string>();
+  globalThis.sessionStorage = {
+    getItem: (k: string) => session.get(k) ?? null,
+    setItem: (k: string, v: string) => void session.set(k, v),
+    removeItem: (k: string) => void session.delete(k),
+  } as Storage;
+  try {
+    store.set("bugswarm.player", JSON.stringify({ id: "0123456789abcdef0123456789abcdef", name: "bot alice", team: TEAMS[1] }));
+    noteArenaRefusedName("bot alice");
+    forgetPlayerForTests(); // the redirect is a new page load
+    expect(loadPlayer().name).toBe("bot alice"); // `/` still accepts it
+    expect(takeArenaRefusedName()).toBe("bot alice");
+    expect(takeArenaRefusedName()).toBeNull();
+  } finally {
+    // @ts-expect-error: bun has no sessionStorage of its own
+    delete globalThis.sessionStorage;
+  }
+  expect(takeArenaRefusedName()).toBeNull(); // no storage at all: nothing to say
 });

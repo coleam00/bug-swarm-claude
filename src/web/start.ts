@@ -3,7 +3,7 @@
 // button; anyone else, or a returning player who taps "change name", gets the name field and the
 // team buttons. A player's team is stored once and never switched (architecture.md, Data), so
 // once they have one, the other team's button is shown but locked.
-import { NAME_MAX, NAME_MIN, TEAMS, checkName, type NameCheck, type Team } from "../server/rules";
+import { NAME_MAX, NAME_MIN, TEAMS, checkName, isBotName, type NameCheck, type Team } from "../server/rules";
 import type { Player } from "./player";
 
 export type StartView =
@@ -20,6 +20,19 @@ export function nameMessage(reason: NameRefusal): string {
   if (reason === "length") return `${NAME_MIN} to ${NAME_MAX} characters`;
   if (reason === "characters") return "Letters, numbers, spaces, - and _";
   return "Pick a different name";
+}
+
+/** Why the arena sent a player with a "bot ..." name back here (`/` itself still accepts it). */
+export const BOT_NAME_MESSAGE = `Names starting with the word "bot" are kept for the arena's bots`;
+
+/**
+ * The message to show on opening the page, or null: the stored name the rules now refuse
+ * (`refusedNow`), else the name the arena just refused (`arenaRefused`, player.ts).
+ */
+export function openingNotice(refusedNow: boolean, arenaRefused: string | null): string | null {
+  if (refusedNow) return nameMessage("blocked");
+  if (arenaRefused === null) return null;
+  return isBotName(arenaRefused) ? BOT_NAME_MESSAGE : nameMessage("blocked");
 }
 
 /** The view on opening the page. `notice` is a message to show at once (a stored name now refused). */

@@ -7,8 +7,8 @@ import { restartIn } from "./game/guard";
 import { HINT_MS, hintText, takeFirstRun } from "./hint";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { fmt, rankLines, saveNotice, upgradeLevels, type SaveState } from "./over";
-import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeRefusedName, type Player } from "./player";
-import { changeName, nameMessage, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type Press, type StartView } from "./start";
+import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeArenaRefusedName, takeRefusedName, type Player } from "./player";
+import { changeName, nameMessage, openingNotice, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type Press, type StartView } from "./start";
 import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
 
@@ -40,7 +40,10 @@ const TOP_POLL_MS = 4000;
 
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
-  const [notice, setNotice] = useState<string | null>(() => (takeRefusedName() !== null ? NAME_NOW_REFUSED : null));
+  const [notice, setNotice] = useState<string | null>(() => {
+    const refusedNow = takeRefusedName() !== null;
+    return openingNotice(refusedNow, takeArenaRefusedName());
+  });
   const runs = useRef(1);
   const phaseFor = (run: number, pageLoad: boolean): Phase =>
     nextScreen(loadPlayer(), STRESS > 0, pageLoad) === "play" ? { kind: "playing", run } : { kind: "setup" };

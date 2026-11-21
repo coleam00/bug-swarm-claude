@@ -5,22 +5,26 @@ import { serveStatic } from "hono/bun";
 import { requestOrigin, withAbsoluteImages } from "./share";
 
 /**
- * The built UI, in the order production needs it (main.ts calls this after the API routes):
- * 1. /board and /board/: the stream board, `board.html`. The static files add index.html only for
- *    directories, so without this route /board would fall through to the game.
+ * The built UI, in the order production needs it (serve.ts calls this after the API routes):
+ * 1. /board and /board/: the stream board, `board.html`; /arena and /arena/: the arena,
+ *    `arena.html`. The static files add index.html only for directories, so without these routes
+ *    they would fall through to the game.
  * 2. / and /index.html: the game's page, with its link-preview image URLs made absolute from the
  *    request (share.ts). Before the static files, which would otherwise answer / with the file as it is.
  * 3. The static files in `distDir`.
  * 4. Any other path: the game's page.
  */
 export function servePages(app: Hono, distDir: string): void {
-  const board = async () => {
-    const file = Bun.file(join(distDir, "board.html"));
-    if (!(await file.exists())) return new Response("board not built", { status: 404 });
+  const htmlFile = (name: string) => async () => {
+    const file = Bun.file(join(distDir, `${name}.html`));
+    if (!(await file.exists())) return new Response(`${name} not built`, { status: 404 });
     return new Response(file, { headers: { "content-type": "text/html; charset=utf-8" } });
   };
-  app.get("/board", board);
-  app.get("/board/", board);
+  for (const name of ["board", "arena"]) {
+    const page = htmlFile(name);
+    app.get(`/${name}`, page);
+    app.get(`/${name}/`, page);
+  }
 
   let page: string | null = null;
   try {
