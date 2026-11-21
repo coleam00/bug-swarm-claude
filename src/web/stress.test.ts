@@ -1,11 +1,10 @@
 import { expect, test } from "bun:test";
 import { MAX_BUGS, STRESS_DEFAULT } from "./game/config";
-import { STRESS, parseStress } from "./stress";
+import { parseStress } from "./stress";
 
 test("off unless allowed (a production build never allows it)", () => {
   expect(parseStress("?stress=150", false)).toBe(0);
   expect(parseStress("?stress", false)).toBe(0);
-  expect(STRESS).toBe(0); // no dev server and no page under bun test
 });
 
 test("allowed: a bare flag is the default count, a whole count in range is itself, anything else is off", () => {

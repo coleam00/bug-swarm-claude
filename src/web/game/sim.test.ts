@@ -901,7 +901,7 @@ describe("stress mode", () => {
     const s = createState(3, TALL, 150);
     let blasts = 0;
     let bombAt = s.bombAt;
-    while (!s.over) {
+    while (!s.over && s.time < STRESS_SECONDS + 1) {
       step(s, circle(s), DT);
       expect(s.bugs.length).toBe(150);
       if (s.bombAt !== bombAt) {
@@ -909,6 +909,7 @@ describe("stress mode", () => {
         bombAt = s.bombAt;
       }
     }
+    expect(s.over).toBe(true);
     // Charged at the start, then every 15 s (level 2) of the 60 s run.
     expect(blasts).toBeGreaterThanOrEqual(4);
     expect(s.bugs.some((b) => b.kind.id === "fast")).toBe(true);
