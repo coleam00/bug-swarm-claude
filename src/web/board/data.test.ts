@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TEAMS } from "../../server/rules";
 import { TEAM_LOOK } from "../teams";
-import { boardView, joinHost, parseBoard, type Board } from "./data";
+import { NAME_MIN_SCALE, boardView, joinHost, nameScale, parseBoard, type Board } from "./data";
 
 const [TABS, SPACES] = TEAMS;
 const board = (names: [string, number][], tabs = 0, spaces = 0): Board => ({
@@ -119,6 +119,15 @@ describe("boardView teams", () => {
     expect(boardView(board([], 5, 5), board([], 6, 5)).overtook).toBe(false);
     expect(boardView(board([], 10, 5), board([], 10, 10)).overtook).toBe(false);
   });
+});
+
+test("nameScale: a name that fits keeps its size; a wider one shrinks to fit, down to 36 px of a 57.6 px row", () => {
+  expect(nameScale(300, 300)).toBe(1);
+  expect(nameScale(300, 120)).toBe(1);
+  expect(nameScale(300, 400)).toBe(0.75);
+  expect(nameScale(300, 600)).toBe(NAME_MIN_SCALE); // 0.5 would be under the floor: the ellipsis takes over
+  expect(57.6 * NAME_MIN_SCALE).toBeCloseTo(36);
+  expect(nameScale(300, 0)).toBe(1);
 });
 
 test("joinHost names the page's own host, without protocol or slash, split after each dot", () => {

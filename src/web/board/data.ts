@@ -5,6 +5,12 @@ import type { TopRow } from "../api";
 import { TEAM_LOOK } from "../teams";
 
 export const TOP_SIZE = 10;
+/**
+ * A name too wide for its row shrinks to fit, down to this share of the row's type (owner ruling
+ * on #26: viewers must tell names apart). Rows are 8vh, so the floor is 5vh: 36 px at 1280x720.
+ * Below the floor the name is cut with an ellipsis.
+ */
+export const NAME_MIN_SCALE = 5 / 8;
 
 export type Board = { top: TopRow[]; teams: Record<Team, number> };
 
@@ -73,6 +79,12 @@ export function boardView(prev: Board | null, next: Board): BoardView {
   const leader = leaderOf(next.teams);
   const was = prev ? leaderOf(prev.teams) : null;
   return { rows, teams, leader, overtook: was !== null && leader !== null && leader !== was };
+}
+
+/** The font scale that fits a name of natural width `natural` into `available` px, never below the floor. */
+export function nameScale(available: number, natural: number): number {
+  if (natural <= available || natural <= 0) return 1;
+  return Math.max(NAME_MIN_SCALE, available / natural);
 }
 
 /**
