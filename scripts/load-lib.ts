@@ -3,7 +3,7 @@
 import { MAX_UPGRADES, POINTS_PER_SECOND, POINTS_PER_SQUASH, UPGRADE_IDS, type UpgradeId } from "../src/server/rules";
 
 export const USAGE = "usage: bun run load -- --url <base url> [--players 500] [--seconds 60]";
-/** The bar from the PRD: 95% of requests under this many ms, and no 5xx. */
+/** The bar from the PRD: 95% of requests under this many ms, and no 5xx (the load test also fails on any 4xx). */
 export const FAST_MS = 200;
 export const FAST_SHARE = 0.95;
 
@@ -153,7 +153,12 @@ export function summarize(samples: Sample[], routes: string[] = Object.values(RO
 
 export type Verdict = { pass: boolean; failed: string[] };
 
-/** Pass: at least 95% of all requests under 200 ms, no 5xx, and no network error or timeout. */
+/**
+ * Pass: at least 95% of all requests under 200 ms, no 4xx or 5xx, and no network error or timeout.
+ * No request the load test makes should ever be refused: a 4xx means the test is wrong (a 429 from
+ * a server started without RUN_STARTS_PER_WINDOW raised, a 400 from an outdated start body), and
+ * fast refusals would otherwise read as a pass.
+ */
 export function verdict(summary: Summary): Verdict {
   const { overall } = summary;
   const failed: string[] = [];
@@ -161,10 +166,12 @@ export function verdict(summary: Summary): Verdict {
   else if (overall.fastShare < FAST_SHARE) {
     failed.push(`${pct(overall.fastShare)} of requests under ${FAST_MS} ms (needs ${pct(FAST_SHARE)})`);
   }
-  const fiveXx = Object.entries(overall.statuses)
-    .filter(([s]) => /^5\d\d$/.test(s))
-    .reduce((a, [, n]) => a + n, 0);
-  if (fiveXx > 0) failed.push(`${fiveXx} 5xx response${fiveXx === 1 ? "" : "s"}`);
+  for (const kind of ["4", "5"]) {
+    const n = Object.entries(overall.statuses)
+      .filter(([s]) => s.length === 3 && s.startsWith(kind))
+      .reduce((a, [, c]) => a + c, 0);
+    if (n > 0) failed.push(`${n} ${kind}xx response${n === 1 ? "" : "s"}`);
+  }
   const errors = overall.statuses.error ?? 0;
   if (errors > 0) failed.push(`${errors} network error${errors === 1 ? "" : "s"} or timeout${errors === 1 ? "" : "s"}`);
   return { pass: failed.length === 0, failed };

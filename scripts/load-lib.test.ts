@@ -160,6 +160,11 @@ describe("verdict", () => {
     expect(verdict(s)).toEqual({ pass: false, failed: ["1 5xx response"] });
   });
 
+  test("fails on a single 4xx: a refused request means the test itself is wrong", () => {
+    const s = summarize([...samples(top, Array(999).fill(10)), ...samples(start, [10], 429)]);
+    expect(verdict(s)).toEqual({ pass: false, failed: ["1 4xx response"] });
+  });
+
   test("fails on a single network error or timeout", () => {
     const s = summarize([...samples(top, Array(999).fill(10)), ...samples(start, [10], "error")]);
     expect(verdict(s)).toEqual({ pass: false, failed: ["1 network error or timeout"] });

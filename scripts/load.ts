@@ -2,7 +2,7 @@
 // runs, play 5 to 30 s while polling the top 10 every 4 s, finish with a plausible score, then
 // fetch their best and the top 10 as the game-over screen does, and start again. It prints
 // requests, statuses and p50/p95/p99 per route, and exits 1 unless 95% of requests took under
-// 200 ms with no 5xx and no network error. The server must run with RUN_STARTS_PER_WINDOW
+// 200 ms with no 4xx or 5xx and no network error. The server must run with RUN_STARTS_PER_WINDOW
 // raised (architecture.md, "How it runs"), or most starts are 429.
 // Not part of `bun run check`: it takes a minute and needs a running server. load-lib.ts,
 // its pure half, is tested.
