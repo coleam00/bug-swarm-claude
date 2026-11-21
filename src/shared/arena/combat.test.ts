@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { BARREL, DT, HEAT_LOCK_S, KILL_POINTS, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
+import { BARREL, DT, HEAT_LOCK_S, HITS_PER_LIFE, KILL_POINTS, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
 import { mult, segmentHit, shotTravelAt } from "./combat";
+import { leavePlayer } from "./sim";
 import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
 
 const PER_TICK = SHOT_SPEED * DT;
@@ -40,7 +41,9 @@ describe("shots", () => {
       stepQuiet(a);
       ended = a.events.shotsEnded.slice();
     }
-    expect(ended).toEqual([{ id: 1, hit: true }]);
+    expect(ended).toMatchObject([{ id: 1, hit: true }]);
+    // It ends where it met the bug's edge, not at the end of its step.
+    expect(ended[0]!.travelled).toBeLessThan(PER_TICK * 2);
     expect(a.events.kills).toEqual([expect.objectContaining({ bug: near.id, by: p.id, points: KILL_POINTS })]);
     expect(a.bugs.map((b) => b.id)).toEqual([far.id]);
     expect([p.score, p.kills, p.streak]).toEqual([KILL_POINTS, 1, 1]);
@@ -57,7 +60,7 @@ describe("shots", () => {
     placeBug(a, 1200 + BARREL + 14, 1200);
     hold(p, { fire: true });
     stepQuiet(a);
-    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: true }]);
+    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: true, travelled: 0 }]);
     expect(a.bugs).toEqual([]);
   });
 
@@ -76,7 +79,7 @@ describe("shots", () => {
     }
     expect(p.streak).toBe(7);
     stepQuiet(a);
-    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: false }]);
+    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: false, travelled: SHOT_RANGE }]);
     expect(a.shots).toEqual([]);
     expect(p.streak).toBe(0);
   });
@@ -95,6 +98,53 @@ describe("shots", () => {
     }
     expect(ended).toBeGreaterThan(0);
     expect([p2.hits, p2.alive, p1.hits]).toEqual([0, true, 0]);
+  });
+
+  test("a shot that reaches a wall ends there as a miss", () => {
+    const { a, ps } = arenaWith([2300, 1200]);
+    const p = ps[0]!;
+    p.streak = 3;
+    hold(p, { fire: true });
+    stepQuiet(a);
+    hold(p, {});
+    // 2320 at the barrel, 2365 after the firing step, past the wall at 2400 on the next.
+    stepQuiet(a);
+    expect(a.events.shotsEnded).toMatchObject([{ id: 1, hit: false }]);
+    expect(a.events.shotsEnded[0]!.travelled).toBeLessThan(SHOT_RANGE);
+    expect(p.streak).toBe(0);
+  });
+
+  test("a shot whose owner left flies on: its kill scores nothing for anyone", () => {
+    const { a, ps } = arenaWith([1200, 1200], [2200, 1200]);
+    const [p1, p2] = [ps[0]!, ps[1]!];
+    placeBug(a, 1400, 1200);
+    hold(p1, { fire: true });
+    stepQuiet(a);
+    leavePlayer(a, p1.id);
+    stepQuiet(a, 4);
+    expect(a.bugs).toEqual([]);
+    expect(p2.score).toBe(0);
+  });
+
+  test("a shot in flight when its owner's life ends scores nothing (the life is saved as it ended)", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    placeBug(a, 1500, 1200);
+    hold(p, { fire: true });
+    stepQuiet(a);
+    hold(p, {});
+    // The life ends on the next tick, with the shot still flying at the bug.
+    p.hits = HITS_PER_LIFE - 1;
+    placeBug(a, 1180, 1200);
+    stepQuiet(a);
+    expect(a.events.livesEnded).toEqual([{ id: p.id, score: 0, kills: 0, ticks: 1 }]);
+    let kill = null;
+    for (let i = 0; i < 20 && !kill; i++) {
+      stepQuiet(a);
+      kill = a.events.kills[0] ?? null;
+    }
+    expect(kill).toMatchObject({ by: 0, points: 0 });
+    expect([p.score, p.kills, p.streak]).toEqual([0, 0, 0]);
   });
 });
 
@@ -132,6 +182,18 @@ describe("heat", () => {
       expect(p.lockTicks).toBe(0);
     }
     expect(shots).toBeGreaterThan(150);
+  });
+
+  test("tapping fire faster than the gun cools still overheats it", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    let locked = false;
+    for (let t = 0; t < 10 / DT && !locked; t++) {
+      hold(p, { fire: t % 3 === 0 });
+      stepQuiet(a);
+      locked = p.lockTicks > 0;
+    }
+    expect(locked).toBe(true);
   });
 
   test("heat cools only while fire is released", () => {

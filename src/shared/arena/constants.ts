@@ -65,8 +65,12 @@ export const MAX_SHOTS = 256;
 
 /** Heat one shot adds (heat runs 0 to 1): a held trigger locks on its 18th shot, about 2.4 s. */
 export const HEAT_PER_SHOT = 1 / 18;
-/** Heat lost per second on ticks with fire not held. */
-export const HEAT_COOL_PER_S = 0.6;
+/**
+ * Heat lost per second while fire is released and the shot cooldown has run out (so tapping fire
+ * does not dodge heat). Bursts kept under the lock sustain about 4.6 shots/s, the held trigger's
+ * average with its lock, without ever locking.
+ */
+export const HEAT_COOL_PER_S = 0.75;
 /** How long full heat locks the gun, seconds; heat drains to 0 over the lock. */
 export const HEAT_LOCK_S = 1.5;
 /** Heat from which the HUD arc flashes, warning of the lock. */

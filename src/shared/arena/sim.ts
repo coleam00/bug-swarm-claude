@@ -93,6 +93,8 @@ export type Shot = {
   id: number;
   /** The player who fired it. */
   owner: number;
+  /** The owner's lifeStartTick when fired: only that life is credited (a later life is not). */
+  life: number;
   x: number;
   y: number;
   /** Unit direction. */
@@ -104,8 +106,9 @@ export type Shot = {
 
 /** A shot fired this tick: where it left the barrel and its angle (spread included). */
 export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number };
-/** A shot that ended this tick: on a bug (a hit) or at its range or a wall (a miss). */
-export type ShotEnded = { id: number; hit: boolean };
+/** A shot that ended this tick: on a bug (a hit) or at its range or a wall (a miss), `travelled` units from the barrel. */
+export type ShotEnded = { id: number; hit: boolean; travelled: number };
+/** A bug killed this tick, at (x, y). `by` is the shot's owner, 0 if that life is over (no points). */
 export type Kill = { bug: number; by: number; x: number; y: number; points: number };
 /** A finished life, as the server saves it. */
 export type LifeEnd = { id: number; score: number; kills: number; ticks: number };

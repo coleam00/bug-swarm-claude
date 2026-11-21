@@ -18,7 +18,7 @@ import {
   WORLD_W,
 } from "./constants";
 import { nextRandom } from "./rng";
-import type { ArenaState, Bug, Player } from "./sim";
+import type { ArenaState, Bug, Player, Shot } from "./sim";
 
 /** The streak multiplier for `streak` hits in a row: x1, x1.5 from 5, x2 from 10, x3 from 20. */
 export function mult(streak: number): number {
@@ -54,7 +54,8 @@ export function stepFire(state: ArenaState, p: Player): void {
     return;
   }
   if (!p.input.fire) {
-    p.heat = Math.max(0, p.heat - HEAT_COOL_PER_S * DT);
+    // The gun cools only once its cooldown has run out, so tapping fire between shots does not dodge heat.
+    if (p.fireCooldown <= 0) p.heat = Math.max(0, p.heat - HEAT_COOL_PER_S * DT);
     p.fireCooldown = Math.max(p.fireCooldown - DT, 0);
     return;
   }
@@ -78,7 +79,7 @@ function fireShot(state: ArenaState, p: Player): void {
   const id = state.nextShotId++;
   const x = p.x + Math.cos(p.aim) * BARREL;
   const y = p.y + Math.sin(p.aim) * BARREL;
-  state.shots.push({ id, owner: p.id, x, y, dx, dy, travelled: 0 });
+  state.shots.push({ id, owner: p.id, life: p.lifeStartTick, x, y, dx, dy, travelled: 0 });
   state.events.shotsFired.push({ id, owner: p.id, x, y, angle });
 }
 
@@ -102,8 +103,9 @@ export function segmentHit(x: number, y: number, dx: number, dy: number, len: nu
   return t <= len ? t : -1;
 }
 
-function findPlayer(state: ArenaState, id: number): Player | null {
-  for (const p of state.players) if (p.id === id) return p;
+/** The player credited for `s`: its owner, still in the life that fired it; else null. */
+function creditFor(state: ArenaState, s: Shot): Player | null {
+  for (const p of state.players) if (p.id === s.owner) return p.alive && p.lifeStartTick === s.life ? p : null;
   return null;
 }
 
@@ -112,7 +114,7 @@ function findPlayer(state: ArenaState, id: number): Player | null {
  * distance; ties: the lower index) and ends: the bug loses a hit point, the owner's streak grows,
  * and a kill scores KILL_POINTS times the multiplier of the streak including this hit. A shot that
  * reaches SHOT_RANGE or a wall ends as a miss and resets its owner's streak. Shots never touch
- * players. A shot whose owner left flies on and scores nothing.
+ * players. A shot whose owner left, or whose life ended, flies on and scores nothing.
  */
 export function stepShots(state: ArenaState): void {
   const ev = state.events;
@@ -131,7 +133,7 @@ export function stepShots(state: ArenaState): void {
         hitBug = b;
       }
     }
-    const owner = findPlayer(state, s.owner);
+    const owner = creditFor(state, s);
     if (hitBug) {
       hitBug.hp--;
       if (owner) {
@@ -145,7 +147,7 @@ export function stepShots(state: ArenaState): void {
       } else if (hitBug.hp <= 0) {
         ev.kills.push({ bug: hitBug.id, by: 0, x: hitBug.x, y: hitBug.y, points: 0 });
       }
-      ev.shotsEnded.push({ id: s.id, hit: true });
+      ev.shotsEnded.push({ id: s.id, hit: true, travelled: s.travelled + best });
       continue;
     }
     s.x += s.dx * len;
@@ -153,7 +155,7 @@ export function stepShots(state: ArenaState): void {
     s.travelled += len;
     if (s.travelled >= SHOT_RANGE - 1e-9 || s.x < 0 || s.x > WORLD_W || s.y < 0 || s.y > WORLD_H) {
       if (owner) owner.streak = 0;
-      ev.shotsEnded.push({ id: s.id, hit: false });
+      ev.shotsEnded.push({ id: s.id, hit: false, travelled: s.travelled });
       continue;
     }
     state.shots[keep++] = s;
