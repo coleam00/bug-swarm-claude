@@ -4,7 +4,10 @@ import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, ty
 import { UPGRADES } from "./game/config";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { saveNotice, upgradeLevels, type SaveState } from "./over";
-import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
+import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeRefusedName, type Player } from "./player";
+
+/** Shown on name entry when a name the player already had is refused now. */
+const NAME_NOW_REFUSED = "Your name isn't allowed any more. Pick another.";
 import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
 
@@ -30,6 +33,7 @@ const TOP_POLL_MS = 4000;
 
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
+  const [notice, setNotice] = useState<string | null>(() => (takeRefusedName() !== null ? NAME_NOW_REFUSED : null));
   const runs = useRef(1);
   const phaseFor = (run: number): Phase => (nextScreen(loadPlayer(), STRESS > 0) === "play" ? { kind: "playing", run } : { kind: "setup" });
   const [phase, setPhase] = useState<Phase>(() => phaseFor(1));
@@ -43,7 +47,9 @@ export function App() {
     return (
       <SetupScreen
         player={player}
+        notice={notice}
         onDone={(name, team) => {
+          setNotice(null);
           setPlayerName(name);
           setPlayer(setPlayerTeam(team));
           play();
@@ -56,7 +62,10 @@ export function App() {
       <Game
         key={phase.run}
         player={player}
-        onNameRefused={() => setPlayer(setPlayerName(null))}
+        onNameRefused={() => {
+          setNotice(NAME_NOW_REFUSED);
+          setPlayer(setPlayerName(null));
+        }}
         // The save settles after the over screen shows; drop it if the player has moved on.
         onOver={(over) => setPhase((p) => (p.kind !== "setup" && p.run === phase.run ? { kind: "over", run: phase.run, over } : p))}
       />
@@ -70,10 +79,11 @@ export function App() {
  * a name, so they see only the team buttons, once; a tap picks and plays. A name the server
  * refused comes back here with the team kept.
  */
-function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string, team: Team) => void }) {
+function SetupScreen(props: { player: Player; notice: string | null; onDone: (name: string, team: Team) => void }) {
+  const { player, onDone } = props;
   const [value, setValue] = useState("");
   const [team, setTeam] = useState<Team | null>(player.team);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(props.notice);
   const known = player.name;
 
   if (known !== null) {

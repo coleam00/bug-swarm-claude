@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { TEAMS } from "../server/rules";
-import { forgetPlayerForTests, loadPlayer, nextScreen, setPlayerName, setPlayerTeam } from "./player";
+import { forgetPlayerForTests, loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeRefusedName } from "./player";
 
 // A stand-in for the browser's localStorage.
 let store: Map<string, string>;
@@ -60,6 +60,17 @@ test("a stored name that breaks the rules is dropped, so name entry asks again",
   expect(loadPlayer()).toEqual({ id: "0123456789abcdef0123456789abcdef", name: null, team: null });
   store.set("bugswarm.player", JSON.stringify({ id: "0123456789abcdef0123456789abcdef", name: "x" }));
   expect(loadPlayer().name).toBeNull();
+});
+
+test("a dropped stored name is reported once, so name entry can say why it asks again", () => {
+  store.set("bugswarm.player", JSON.stringify({ id: "0123456789abcdef0123456789abcdef", name: "sh1t" }));
+  loadPlayer();
+  loadPlayer(); // the name is gone from storage now; the report stays until it is taken
+  expect(takeRefusedName()).toBe("sh1t");
+  expect(takeRefusedName()).toBeNull();
+  store.set("bugswarm.player", JSON.stringify({ id: "0123456789abcdef0123456789abcdef", name: "Robo" }));
+  loadPlayer();
+  expect(takeRefusedName()).toBeNull();
 });
 
 test("a first visit gets a new random id and no name", () => {

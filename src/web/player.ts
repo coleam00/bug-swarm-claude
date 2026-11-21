@@ -7,6 +7,7 @@ export type Player = { id: string; name: string | null; team: Team | null };
 
 const KEY = "bugswarm.player";
 let memory: Player | null = null;
+let refused: string | null = null;
 
 /** The stored player, else the one kept in memory, else a new one. A stored invalid name or team is dropped. */
 export function loadPlayer(): Player {
@@ -19,8 +20,19 @@ export function loadPlayer(): Player {
   const s = (stored ?? memory) as Partial<Player> | null;
   const id = typeof s?.id === "string" && /^[0-9a-f]{32}$/.test(s.id) ? s.id : newId();
   const name = typeof s?.name === "string" && checkName(s.name).ok ? s.name : null;
+  if (typeof s?.name === "string" && name === null) refused = s.name;
   const team = isTeam(s?.team) ? s.team : null;
   return save({ id, name, team });
+}
+
+/**
+ * The stored name the last load dropped because the name rules now refuse it, once: name entry
+ * says why it is asking again, instead of looking like the game forgot the player.
+ */
+export function takeRefusedName(): string | null {
+  const name = refused;
+  refused = null;
+  return name;
 }
 
 export function setPlayerName(name: string | null): Player {
@@ -43,6 +55,7 @@ export function nextScreen(player: Player, stress: boolean): "setup" | "play" {
 /** For tests: forget the player kept in memory, as a fresh page load would. */
 export function forgetPlayerForTests(): void {
   memory = null;
+  refused = null;
 }
 
 function save(player: Player): Player {

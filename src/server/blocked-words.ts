@@ -18,9 +18,9 @@
 //   collapsed, which is what keeps "boob" from blocking "Bob" and "coon" from blocking "Connor".
 //   So a doubled letter in an entry means "at least two": write the shortest spelling you want
 //   caught ("fagot" catches "faggot" too; "faggot" would let "fagot" through). The same rule
-//   runs into real names with a doubled letter: "polack" matches "Pollack", "boner" "Bonner",
-//   "midget" "Midgett". That is what most EXCEPTIONS below are for; a short whole-word entry
-//   that stretches into a common name ("cok" into "Cook") is left out instead.
+//   runs into real names with a doubled letter: "polack" matches "Pollack", "boner" "Bonner".
+//   Common ones are EXCEPTIONS below; rare ones ("Midgett", "Spickett") are left refused; a
+//   short whole-word entry that stretches into a common name ("cok" into "Cook") is left out.
 //
 // Why there are three lists (the Scunthorpe problem): plain "does the name contain it" blocks
 // real names. "cunt" sits inside "Scunthorpe", "ass" inside "Cassie" and "Classic", "rape" inside
@@ -37,18 +37,38 @@
 // - EXCEPTIONS: real words cut out of each word before BLOCKED_ANYWHERE is checked
 //   ("therapist" would otherwise be refused for "rapist", "Sushi Time" for "shit"). An exception
 //   is replaced by a separator, not deleted, so it can't be used to join two halves of a word.
-//   Keep exceptions specific: an exception is cut out wherever it appears, so one that is a
-//   blocked word plus a letter or two hides that word in front of any word starting with those
-//   letters ("gookin" would let "GookInvader" through). Such a rare name is left refused
-//   instead. Where the name is common, the exception stays and the leak is accepted, for the
-//   owner to hide with `bun run hide`:
-//   - "ishita" and "oshita" let "IShitAgain" and "NoShitAsshole" through;
-//   - "ashit" lets "YouAShit" through;
-//   - "nazir" and "nazim" let "NaziRule" and "NaziMaster" through;
-//   - "fagan", "fagen", "fager" and "fagel" let "FagAndy", "FagEric" and "FagElite" through;
-//   - "kuntal" lets "KuntAlways" through, and "coonan" lets "CoonAndy" through;
-//   - the Cooney family lets "CoonEy" and "CoonTs" through.
-//   No exception may contain another: the longer one would never be the one that cuts.
+//   Keep exceptions specific: an exception is cut out wherever it appears, so it hides any
+//   blocked word it holds, or shares letters with, whatever letters stand around it. A rare
+//   name that is a blocked word plus a few letters ("Fagner", "Slutsky", "Kuntz", "Pakize") is
+//   therefore not an exception: it stays refused, and so do "FagNerd", "SlutSky", "KuntZone"
+//   and "PakiZombie". Where the name or word is common, the exception stays and the leak is
+//   accepted, for the owner to hide live with `bun run hide`.
+//   Accepted exception leaks. The lists test in src/server/rules.test.ts derives this list from
+//   EXCEPTIONS and fails if an exception it finds is not named here:
+//   - a blocked word at the start or end of the exception, which passes before or after the
+//     exception's other letters:
+//     - "shit": pushit, mishit, shiitake, shitake, harshit, akshit, shitij, ashit, joshit
+//       ("YouAShit", "HarShit", "ShitIjust", "PuShit");
+//     - "rapist": therapist ("TheRapist"); "penis": peniston ("PenisTongue");
+//     - "pussy": pussycat, pussywillow, pussyfoot ("PussyCat"); "milf": milford ("MilfOrder");
+//     - "twat": twater, twatch ("TwatEric", "TwatChamp"); "wank": swank, wankhede
+//       ("ThisWanker", "WankHeder");
+//     - "dyke": vandyke ("IvanDyke"); "boob": booboo ("BoobOoh"); "phuk": phuket ("PhukEt");
+//     - "paki": pakistan ("PakiStank"); "nazi": nazir, nazim, antinazi ("NaziRule",
+//       "NaziMaster");
+//     - "coon": raccoon, racoon, cocoon, tycoon, cooney, coonhound ("CoonEy", "TyCoon");
+//     - "fag": fagan, fagen ("FagAndy", "FagEnd"); "hardon": chardon ("CHardOn");
+//     - "boner" and "polack": bonner and pollack are those words' own doubled spellings;
+//   - three or more letters shared with a blocked word that starts or ends outside the
+//     exception: sushi ("SuShit"), pushit, mishit, harshit, akshit, ashit and joshit
+//     ("PusHitler"), booboo ("JigaBooboo"), fagan ("FaGangbang"), pussyfoot
+//     ("PussyFootjob"), carbon ("CarBoner", "CarBondage"), ishita ("FetIshita");
+//   - a blocked word inside, with the exception's own letters on both sides: scunthorpe,
+//     ignazio, takeshita, oshita, ishita, toshitsugu ("IShitAgain", "NoShitAsshole").
+//   Two shared letters are not listed: there are dozens ("TwatChink" hides "chink" behind
+//   "twatch") and the names they make are contrived.
+//   No exception may contain another: where the longer one appears the shorter one does too
+//   and already lets the name through, so the longer one only adds places for a word to hide.
 // Numbers: a name that starts or ends with a number (one digit or more) is also read without it
 // (an age, a year, a "2"), and refused if either reading is: "ass2", "2fag", "1 Admin" and
 // "Cole Medin 2" are refused, and "pen15" and "5hit" still read "penis" and "shit". A word made
@@ -60,8 +80,13 @@
 // "Fagg", "Fago" and "Faggi" (an exception for them would let "coons", "faggot", "fagot" and
 // "faggit" through), "Japp" (exceptions are not applied to BLOCKED_WHOLE), "Twatt", "Wanke",
 // "Cunto", "Cuntz" and "Pecker", the rare names "Chinkin", "Gookin", "Kikel", "Kyker",
-// "Fagin", "Faggin", "Kunta", "Cooner" and "Nazionale" (see "Keep exceptions specific"), a whole word such as
-// "Moby Dick" or "DeHoe", and two names glued into one word ("AnnaZiegler"): only spaces,
+// "Fagin", "Faggin", "Kunta", "Cooner" and "Nazionale", and the rarer names dropped from
+// EXCEPTIONS for the same reason (see "Keep exceptions specific"): "Darshit", "Pakize",
+// "Coonan", "Coonawarra", "Coontz", "Coonts", "Coonrod", "Coonley", "Coonradt", "Kuntz",
+// "Kuntal", "Fager", "Fagel", "Faggio", "Fagioli", "Fagundes", "Fagnani", "Fagner",
+// "Faggiano", "Spazio", "Spaziani", "Spazzoli", "Shittu", "Shitara", "Bonerjee", "Midgett",
+// "Spickett", "Spickard", "Spickler", "Spickermann", "Slutsky", "Slutzky", "Wankowski",
+// "Pennison" and "Yoshito"; a whole word such as "Moby Dick" or "DeHoe", and two names glued into one word ("AnnaZiegler"): only spaces,
 // "-" and "_" separate words for BLOCKED_ANYWHERE, because splitting at capitals would let
 // "CunTface" through. Gluing short words to their neighbours also refuses some initials and
 // two-letter names beside a word: "F Aguilar" and "Rafa G" (fag), "T Watson" (twat), "Anna L"
@@ -475,37 +500,21 @@ export const EXCEPTIONS: readonly string[] = [
   "booboo",
   "phuket",
   "harshit",
-  "darshit",
   "akshit",
   "pakistan",
-  "pakiz",
   "nazir",
   "nazim",
   "raccoon",
   "racoon",
   "cocoon",
   "tycoon",
-  "coonan",
   "fagan",
   "fagen",
-  "fager",
-  "faggio",
-  "fagio",
-  "fagund",
   "ignazio",
   "antinazi",
-  "coonawarra",
-  "coontz",
   "cooney",
-  "coonts",
-  "coonrod",
-  "coonley",
-  "kuntz",
-  "kuntal",
   "coonhound",
-  "spazio",
   "shitij",
-  "shittu",
   "ashit",
   "joshit",
   "wankhede",
@@ -513,31 +522,12 @@ export const EXCEPTIONS: readonly string[] = [
   "carbon",
   "milford",
   "bonner",
-  "bonerjee",
   "pollack",
-  "midgett",
-  "spickett",
-  "spickard",
-  "spickler",
-  "spickermann",
   "chardon",
-  "spaziani",
-  "spazzoli",
-  "faggiano",
-  "fagel",
-  "fagnani",
-  "fagner",
-  "coonrad",
-  "slutsky",
-  "slutzky",
-  "wankowski",
-  "pennison",
   "takeshita",
   "oshita",
   "ishita",
-  "yoshito",
   "toshitsugu",
-  "shitara",
 ];
 
 export const RESERVED_NAMES: readonly string[] = ["colemedin", "dynamous", "archon", "admin", "moderator"];

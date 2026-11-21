@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
 import {
   MAX_UPGRADES,
@@ -107,11 +109,12 @@ describe("name rules", () => {
   test("an exception doesn't hide a blocked word beside it, and cutting it out joins nothing", () => {
     refuses(["Scunthorpefuck", "Therapist rapist", "Sushi shit"]);
     expect(checkName("fuscunthorpeck").ok).toBe(true); // "fu|ck", not "fuck"
-    // No exception is a slur plus a letter or two, which would hide it before ordinary words.
-    refuses(["ChinkInvader", "Chinkins", "GookInvasion", "Gooking", "KikeLover", "KykeRaider", "FagInvader"]);
-    refuses(["KuntAgain", "NaziOnline", "CoonEric"]);
-    // Accepted, documented in blocked-words.ts: "ishita" is kept for the name Ishita.
-    expect(checkName("IShitAgain").ok).toBe(true);
+    // A rare name that is a slur plus a few letters is not an exception, so the slur is refused
+    // before ordinary words. The common ones that stay (nazir, fagan, cooney...) are listed as
+    // accepted leaks in blocked-words.ts, and the lists test below keeps that list complete.
+    refuses(["ChinkInvader", "Chinkins", "GookInvasion", "Gooking", "KikeLover", "KykeRaider", "FagInvader", "FaggInvader"]);
+    refuses(["KuntAgain", "NaziOnline", "CoonEric", "FagNerd", "FagUnder", "FagIota", "SlutSky", "KuntZone"]);
+    refuses(["PakiZombie", "YoShitOnYou", "ShitAra", "ShittUp", "CoonRadio", "CoonRodeo", "CoonLey", "SpazIoli", "DarShit"]);
   });
 
   test("a number at the end of a longer name is a number, not letters", () => {
@@ -133,7 +136,7 @@ describe("name rules", () => {
     ...["Scunthorpe", "Cassie", "Dickens", "Dickson", "Benedick", "Hancock", "Cockburn", "Peacock", "Essex"],
     ...["Grape", "Spicy", "Classic", "Analyst", "Assistant", "Therapist", "Bass", "Glass", "Sussex"],
     ...["Cumberland", "Document", "Cucumber", "Scrape", "Drapery", "Shuttlecock", "Assassin"],
-    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit", "Ashit", "Akshit", "Lakshit", "Rakshit", "Darshit"],
+    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit", "Ashit", "Akshit", "Lakshit", "Rakshit"],
     ...["Bob", "Connor", "Helen", "Booboo", "Shelly", "Hello"],
     ...["Titan", "Raccoon", "Cocoon", "Tycoon", "Pedro", "Homer", "Arsenal", "Butterfly", "Penelope"],
     ...["Ashley", "Sasha", "Nikita", "Cockatoo", "Hitchcock", "Phoebe", "Saltwater", "Atwater"],
@@ -143,17 +146,15 @@ describe("name rules", () => {
     ...["Pussycat", "Penistone", "Peniston", "Milford", "Carbonara", "Wankhede", "Nazir", "Sextant"],
     ...["Mongoose", "Tardis", "Stardust", "Leotard", "Pedometer", "Speedo", "Homophone", "Spice"],
     ...["Hispanic", "Specific", "Cockpit", "Scumm", "Analog", "Titanic", "Hoedown", "Sambuca"],
-    ...["Fagan", "Fagen", "Fagioli", "Fagundes", "Fagerstrom", "Ignazio"],
-    ...["Nazim", "Benazir", "Antinazi", "Pakize", "Coonan", "Coonawarra", "Coontz", "Cooney", "Coonts"],
-    ...["Coonrod", "Coonley", "Kuntz", "Kuntal", "Racoon", "Faggio", "Pussywillow", "Shittu"],
+    ...["Fagan", "Fagen", "Ignazio"],
+    ...["Nazim", "Benazir", "Antinazi", "Cooney", "Racoon", "Pussywillow"],
     ...["Pussyfoot", "Carbon"],
     // Surnames an entry runs into through a doubled letter, or sits inside.
-    ...["Cook", "Cooks", "Tim Cook", "Pollack", "Bonner", "Bonerjee", "Midgett", "Spickett", "Spickard"],
-    ...["Spickler", "Chardonnay", "Spaziani", "Faggiano", "Fagel", "Slutsky"],
+    ...["Cook", "Cooks", "Tim Cook", "Pollack", "Bonner", "Chardonnay"],
     // Japanese and Indian names with "shit" inside.
-    ...["Kinoshita", "Morishita", "Takeshita", "Oshita", "Kishita", "Ishita", "Yoshitaka", "Yoshitomi"],
-    ...["Toshitsugu", "Hoshitani", "Shitara", "Nishita"],
-    ...["Coonhound", "Spazio", "Tycoons", "Kakkar", "McDonald", "LaToya", "DiCaprio", "DeAndre", "LeBron"],
+    ...["Kinoshita", "Morishita", "Takeshita", "Oshita", "Kishita", "Ishita", "Yoshitaka"],
+    ...["Toshitsugu", "Hoshitani", "Nishita"],
+    ...["Coonhound", "Tycoons", "Kakkar", "McDonald", "LaToya", "DiCaprio", "DeAndre", "LeBron"],
     ...["Ali Butt", "Sambo", "Day Spas", "Mong Kok"],
   ];
 
@@ -187,10 +188,34 @@ describe("name rules", () => {
     const anywhere = BLOCKED_ANYWHERE.map((w) => [w, new RegExp(entryPattern(w))] as const);
     const redundant = [...BLOCKED_ANYWHERE, ...BLOCKED_WHOLE].filter((w) => anywhere.some(([o, re]) => o !== w && re.test(w)));
     expect(redundant).toEqual([]);
-    // No exception contains another: the longer one would never be the one that cuts.
+    // No exception contains another: the shorter one already lets the longer word through, so
+    // the longer one would only add places for a blocked word to hide.
     expect(EXCEPTIONS.filter((e) => EXCEPTIONS.some((o) => o !== e && e.includes(o)))).toEqual([]);
     // No exception is itself a whole-word block or a reserved name.
     expect(EXCEPTIONS.filter((w) => w.length <= 16 && !checkName(w).ok)).toEqual([]);
+  });
+
+  test("every exception that can hide a blocked word is named in blocked-words.ts's list of accepted leaks", () => {
+    // Derived, so the documented list is complete by construction: an exception that holds a
+    // blocked word, or shares three or more letters with the start or end of one, lets that
+    // word through when the exception is written around it.
+    const leaky = EXCEPTIONS.filter((e) =>
+      BLOCKED_ANYWHERE.some((w) => {
+        if (new RegExp(entryPattern(w)).test(e)) return true;
+        for (let k = 3; k < Math.min(e.length, w.length); k++) {
+          if (e.endsWith(w.slice(0, k)) || e.startsWith(w.slice(w.length - k))) return true;
+        }
+        return false;
+      }),
+    );
+    expect(leaky.length).toBeGreaterThan(0);
+    const header = readFileSync(join(import.meta.dir, "blocked-words.ts"), "utf8");
+    const from = header.indexOf("Accepted exception leaks.");
+    const to = header.indexOf("Two shared letters are not listed");
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const listed = header.slice(from, to);
+    expect(leaky.filter((e) => !new RegExp(`\\b${e}\\b`).test(listed))).toEqual([]);
   });
 });
 

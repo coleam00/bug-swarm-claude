@@ -23,7 +23,7 @@
 
 ## Shape
 - Browser game -> HTTP API -> one SQLite file.
-- `src/web/App.tsx`: name and team entry, the canvas, the game-over screen (with the Tabs vs Spaces race bar). `player.ts` keeps the player in local storage and decides when to ask: a name and a team on a first visit, only the team (once) for a player from before teams. `teams.ts` gives each team its label and colour.
+- `src/web/App.tsx`: name and team entry, the canvas, the game-over screen (with the Tabs vs Spaces race bar). `player.ts` keeps the player in local storage and decides when to ask: a name and a team on a first visit, only the team (once) for a player from before teams, and a new name, with a message saying why, when the name rules now refuse the stored one. `teams.ts` gives each team its label and colour.
 - `src/web/over.ts`: the game-over screen's list of upgrades taken, each with its level.
 - `src/web/game/`: the game in plain TypeScript.
   - The simulation (robot, bugs, shots, hits, upgrades, spawn ramp) is pure: it advances by a time step from input and state, with no canvas, DOM or clock access, so `bun test` covers it.
