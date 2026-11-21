@@ -1,6 +1,7 @@
 // The dasher policy (#60), called directly on a hand-built observation: it dashes only when ready
 // and a bug is about to touch it, and then away from the bug. The fill bot (#66): its reaction,
 // its wobble, and walking to a downed player, on hand-built observations and in a stepped arena.
+// Going for pickups (#73): the aimer and the dasher do, the fill bot does not.
 import { describe, expect, test } from "bun:test";
 import { MAX_BUG_RADIUS } from "./bugs/registry";
 import { DOWN_TICKS, PLAYER_RADIUS, WORLD_H, WORLD_W } from "./constants";
@@ -10,6 +11,9 @@ import {
   FILL_REACT_MIN_TICKS,
   FILL_WOBBLE,
   KEEP_DIST,
+  PICKUP_SEEK,
+  aimer,
+  aimerBase,
   createFillMemory,
   createMemory,
   createObservation,
@@ -17,11 +21,15 @@ import {
   fillBot,
   observe,
   setObservedBug,
+  setObservedPickup,
+  type FillMemory,
+  type Observation,
+  type Policy,
   type PolicyInput,
 } from "./policies";
-import { createRng } from "./rng";
+import { createRng, type Rng } from "./rng";
 import { clampInput } from "./sim";
-import { arenaWith, downNow, placeBug, stepQuiet } from "./testkit";
+import { arenaWith, downNow, placeBug, placePickup, stepQuiet } from "./testkit";
 
 /** The dasher at (1200, 1200), ready or not, with one still bug `gap` units to its right. */
 function decide(gap: number, ready = true): PolicyInput {
@@ -174,5 +182,71 @@ describe("fill bot", () => {
       expect(r.closest).toBeLessThan(KEEP_DIST);
       expect([seed, r.by]).toEqual([seed, r.bot]);
     }
+  });
+});
+
+describe("going for pickups (#73)", () => {
+  /** A policy at (1200, 1200) with a pickup 200 units right and, if given, a still bug `bugGap` units up. */
+  function decidePickup(policy: Policy | ((o: Observation, m: FillMemory, r: Rng, out: PolicyInput) => void), bugGap: number | null): PolicyInput {
+    const obs = createObservation();
+    obs.world.w = 2400;
+    obs.world.h = 2400;
+    obs.self.x = 1200;
+    obs.self.y = 1200;
+    obs.self.alive = true;
+    setObservedPickup(obs, 0, 1400, 1200);
+    obs.pickupCount = 1;
+    if (bugGap !== null) {
+      setObservedBug(obs, 0, 1200, 1200 - bugGap, 0, 0);
+      obs.bugCount = 1;
+    }
+    const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
+    policy(obs, createFillMemory(), createRng(1), out);
+    return out;
+  }
+
+  test("the aimer walks at full speed to a pickup 200 units off with no bug near, aim and fire unchanged", () => {
+    const out = decidePickup(aimer, 500);
+    expect(out.mx).toBeCloseTo(1, 9);
+    expect(out.my).toBeCloseTo(0, 9);
+    const base = decidePickup(aimerBase, 500);
+    expect([out.aim, out.fire]).toEqual([base.aim, base.fire]);
+    expect(decidePickup(dasher, null).mx).toBeCloseTo(1, 9);
+  });
+
+  test("with a bug inside KEEP_DIST it evades instead; past PICKUP_SEEK it ignores the pickup", () => {
+    const out = decidePickup(aimer, KEEP_DIST - 20);
+    // Evading straight down, away from the bug above.
+    expect(out.my).toBeGreaterThan(0.9);
+    const obs = createObservation();
+    obs.world.w = 2400;
+    obs.world.h = 2400;
+    obs.self.x = 1200;
+    obs.self.y = 1200;
+    obs.self.alive = true;
+    setObservedPickup(obs, 0, 1200 + PICKUP_SEEK + 1, 1200);
+    obs.pickupCount = 1;
+    const far: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
+    aimer(obs, createMemory(), createRng(1), far);
+    expect(Math.abs(far.mx)).toBeLessThan(0.5);
+  });
+
+  test("the fill bot does not go for pickups", () => {
+    expect(decidePickup(fillBot, 500).mx).not.toBeCloseTo(1, 2);
+    const fill = decidePickup(fillBot, null);
+    const base = decidePickup(aimerBase, null);
+    expect([fill.mx, fill.my]).toEqual([base.mx, base.my]);
+  });
+
+  test("observe sees the floor's pickups", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    placePickup(a, 1500, 1300, "shield");
+    placePickup(a, 900, 1000, "laser");
+    const obs = observe(a, ps[0]!.id, WORLD_W, WORLD_H, createObservation());
+    expect(obs.pickupCount).toBe(2);
+    expect(obs.pickups.slice(0, 2)).toEqual([
+      { x: 1500, y: 1300 },
+      { x: 900, y: 1000 },
+    ]);
   });
 });

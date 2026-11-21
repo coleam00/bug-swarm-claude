@@ -57,8 +57,8 @@ describe("the review laser", () => {
     const { ended } = fireOne(a, p);
     expect(d.hp).toBe(1);
     expect(a.bugs).toContain(d);
-    // It flew on through and ended at its range, as a hit, the streak kept.
-    expect(ended.hit).toBe(true);
+    // It flew on through and ended at its range (not on a bug: no spark there), the streak kept.
+    expect(ended.hit).toBe(false);
     expect(ended.travelled).toBeCloseTo(SHOT_RANGE, 6);
     expect(p.streak).toBe(1);
   });

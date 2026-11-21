@@ -80,7 +80,7 @@ function fireShot(state: ArenaState, p: Player): void {
   // The review laser (#73, pickups/laser.ts) is stamped on the shot as it leaves.
   const pierce = laserPierce(p);
   state.shots.push({ id, owner: p.id, life: p.lifeStartTick, x, y, dx, dy, travelled: 0, pierce, laser: pierce > 1, hitA: 0, hitB: 0, hits: 0 });
-  state.events.shotsFired.push({ id, owner: p.id, x, y, angle });
+  state.events.shotsFired.push({ id, owner: p.id, x, y, angle, laser: pierce > 1 });
 }
 
 /**
@@ -113,9 +113,9 @@ function creditFor(state: ArenaState, s: Shot): Player | null {
  * scores its kind's points times the multiplier of the streak including this hit. A normal shot
  * ends on that hit. A review laser shot (#73) may hit `pierce` bugs: after a hit it looks on along
  * the same step's path for the next bug it has not hit yet, and ends on its last allowed hit. A
- * shot that reaches SHOT_RANGE or a wall ends: as a miss that resets its owner's streak if it hit
- * nothing, else as a hit (a laser shot that hit fewer than its pierce), streak kept. Shots never
- * touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
+ * shot that reaches SHOT_RANGE or a wall ends there (`hit` false: it did not end on a bug, so the
+ * browser draws no spark), resetting its owner's streak only if it hit nothing (a laser shot that
+ * hit fewer bugs than its pierce keeps the streak). Shots never touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
  */
 export function stepShots(state: ArenaState): void {
   const ev = state.events;
@@ -151,6 +151,7 @@ export function stepShots(state: ArenaState): void {
       } else if (hitBug.hp <= 0) {
         ev.kills.push({ bug: hitBug.id, by: 0, x: hitBug.x, y: hitBug.y, points: 0, kind: hitBug.kind });
       }
+      if (s.laser) ev.laserHits.push(s.owner);
       if (s.hits === 0) s.hitA = hitBug.id;
       else s.hitB = hitBug.id;
       s.hits++;
@@ -166,7 +167,7 @@ export function stepShots(state: ArenaState): void {
     s.travelled += len;
     if (s.travelled >= SHOT_RANGE - 1e-9 || s.x < 0 || s.x > WORLD_W || s.y < 0 || s.y > WORLD_H) {
       if (owner && s.hits === 0) owner.streak = 0;
-      ev.shotsEnded.push({ id: s.id, hit: s.hits > 0, travelled: s.travelled });
+      ev.shotsEnded.push({ id: s.id, hit: false, travelled: s.travelled });
       continue;
     }
     state.shots[keep++] = s;

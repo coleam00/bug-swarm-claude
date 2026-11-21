@@ -30,8 +30,8 @@ describe("drops", () => {
     expect(dropFor("crawler", shield.drop.crawler)).toBe("laser");
     expect(dropFor("crawler", shield.drop.crawler + laser.drop.crawler - 1e-9)).toBe("laser");
     expect(dropFor("crawler", shield.drop.crawler + laser.drop.crawler)).toBeNull();
-    expect(dropFor("dasher", 0.05)).toBe("laser");
-    expect(dropFor("dasher", 0.07)).toBeNull();
+    expect(dropFor("dasher", shield.drop.dasher + laser.drop.dasher / 2)).toBe("laser");
+    expect(dropFor("dasher", shield.drop.dasher + laser.drop.dasher)).toBeNull();
   });
 
   test("a kill whose draw lands drops a pickup at the kill, lying for its floor time", () => {

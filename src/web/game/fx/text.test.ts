@@ -6,9 +6,11 @@ import {
   TEXT_MERGE_PX,
   TEXT_RISE,
   TEXT_SECONDS,
+  WORD_SECONDS,
   createTexts,
   setTextScale,
   spawnText,
+  spawnWord,
   textLabel,
   updateTexts,
   type Texts,
@@ -132,5 +134,38 @@ describe("points other than a squash's", () => {
     spawnText(t, 100, 100);
     expect(textLabel(t, 0)).toBe(TEXT_LABELS[t.count[0]!]!);
     expect(textLabel(t, 0)).toBe("+20");
+  });
+});
+
+describe("word labels (#73)", () => {
+  const WORDS = ["Test shield!", "Review laser!"];
+
+  test("a word label shows its prebuilt word, lives WORD_SECONDS, and never merges either way", () => {
+    const t = createTexts(TEXT_CAPACITY, WORDS);
+    spawnText(t, 100, 100);
+    spawnWord(t, 100, 100, 1);
+    spawnText(t, 100, 100);
+    spawnWord(t, 100, 100, 0);
+    expect(t.live).toBe(3);
+    const labels: string[] = [];
+    for (let i = 0; i < t.life.length; i++) if (t.life[i]! > 0) labels.push(textLabel(t, i));
+    // The second squash merged into the first label, never into the word.
+    expect(labels).toEqual(["+20", "Review laser!", "Test shield!"]);
+    expect(textLabel(t, 1)).toBe(WORDS[1]!);
+    expect(textLabel(t, 1)).toBe(textLabel(t, 1));
+    updateTexts(t, TEXT_SECONDS + 0.01);
+    expect(t.live).toBe(2);
+    updateTexts(t, WORD_SECONDS - TEXT_SECONDS);
+    expect(t.live).toBe(0);
+  });
+
+  test("a points label reusing a word's slot reads as points again; an unknown word is ignored", () => {
+    const t = createTexts(1, WORDS);
+    spawnWord(t, 0, 0, 0);
+    updateTexts(t, WORD_SECONDS + 0.1);
+    spawnText(t, 0, 0, 25);
+    expect(textLabel(t, 0)).toBe("+25");
+    spawnWord(t, 0, 0, 7);
+    expect(textLabel(t, 0)).toBe("+25");
   });
 });

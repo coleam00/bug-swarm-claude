@@ -16,12 +16,14 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 
 /**
  * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
- * going down, and a revive (who, by whom, the points; both v4). Hits, kills and shots travel in snapshots,
- * and so does who is down now (`d`), for a late joiner. A later item appends pickup.
+ * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
+ * index in PICKUP_IDS) and a test shield blocking a hit (whose; both v7). Hits, kills and shots
+ * travel in snapshots, and so do who is down now (`d`) and the pickups on the floor (`f`), for a
+ * late joiner.
  */
-export const EVENT_KINDS = ["join", "leave", "over", "down", "revive"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER, DOWN, REVIVE] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
@@ -85,8 +87,10 @@ export type Welcome = {
 
 /**
  * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable after a hit or a
- * revive (0/1), dashing (0/1, v3), spawn-protected (0/1, v5, #58). Positions and velocities to
- * 0.01, aim to 0.001. Fields are only ever appended, never reordered.
+ * revive (0/1), dashing (0/1, v3), spawn-protected (0/1, v5, #58), effects (v7, #73: bit i set
+ * while the pickup PICKUP_IDS[i] is active on a player in a life, so everyone sees a shield bubble
+ * or a laser). Positions and velocities to 0.01, aim to 0.001. Fields are only ever appended, never
+ * reordered.
  */
 export type SnapshotPlayer = [
   id: number,
@@ -99,6 +103,7 @@ export type SnapshotPlayer = [
   invulnerable: 0 | 1,
   dashing: 0 | 1,
   spawnProtected: 0 | 1,
+  effects: number,
 ];
 /**
  * One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). v6: a bug whose phase is not 0 (its
@@ -107,8 +112,11 @@ export type SnapshotPlayer = [
  * crawler for one, costs no more bytes than before.
  */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number] | [id: number, kind: number, x: number, y: number, phase: number, angle: number, ticksIn: number];
-/** A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001). It flies per shotTravelAt. */
-export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number];
+/**
+ * A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001), and a review
+ * laser shot (1) or not (0, v7). It flies per shotTravelAt.
+ */
+export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number, laser: 0 | 1];
 /** A shot ended this tick: id, hit (1) or miss (0), units flown from the barrel (to 0.1). */
 export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
 /** A bug killed this tick: bug id, by (0: nobody scores), x, y, points, its kind's index in BUG_KINDS (v6). */
@@ -118,6 +126,8 @@ export type SnapshotKill = [bug: number, by: number, x: number, y: number, point
  * progress (0: none), and that progress, 0 to 1 (to 0.01). Only downed players have a row.
  */
 export type SnapshotDown = [id: number, secondsLeft: number, reviver: number, progress: number];
+/** A pickup on the floor (v7, #73): id, its index in PICKUP_IDS, x, y (to 0.1), ticks before it goes. */
+export type SnapshotPickup = [id: number, pickup: number, x: number, y: number, ticksLeft: number];
 
 /** Your own numbers, in your snapshots only. */
 export type SnapshotMe = {
@@ -138,6 +148,8 @@ export type SnapshotMe = {
   dc: number;
   /** Down (1): waiting for a revive (v4). */
   dn: 0 | 1;
+  /** Ticks left of each pickup's effect, by its index in PICKUP_IDS (0: not active; v7). */
+  fx: number[];
 };
 
 export type Snapshot = {
@@ -155,6 +167,8 @@ export type Snapshot = {
   k: SnapshotKill[];
   /** Every downed player now. */
   d: SnapshotDown[];
+  /** Every pickup on the floor now (at most MAX_PICKUPS_PER_ARENA; v7). */
+  f: SnapshotPickup[];
   /** The arena's wave. */
   w: number;
   me: SnapshotMe;
@@ -170,6 +184,8 @@ export type ArenaEvent = {
   by?: number;
   /** With "revive": the points it scored. */
   points?: number;
+  /** With "pickup": the pickup's index in PICKUP_IDS (v7). */
+  pickup?: number;
   /** With "over": the life's score, kills and length. */
   score?: number;
   kills?: number;
@@ -271,15 +287,25 @@ type PlayerRow = {
   downTick: number;
   reviver: number;
   reviveTicks: number;
+  /** Ticks left of each pickup's effect, by its index in PICKUP_IDS. */
+  effect: readonly number[];
 };
 
-/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash,prot],...]`, quantized. */
+/** A player's effects as a bitmask: bit i while effect i is active in a life (v7). */
+function effectBits(p: PlayerRow): number {
+  if (!p.alive) return 0;
+  let bits = 0;
+  for (let i = 0; i < p.effect.length; i++) if (p.effect[i]! > 0) bits |= 1 << i;
+  return bits;
+}
+
+/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash,prot,effects],...]`, quantized. */
 export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
   let s = "[";
   for (let i = 0; i < players.length; i++) {
     const p = players[i]!;
     if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0},${p.alive && p.protectTicks > 0 ? 1 : 0}]`;
+    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0},${p.alive && p.protectTicks > 0 ? 1 : 0},${effectBits(p)}]`;
   }
   return s + "]";
 }
@@ -289,8 +315,9 @@ export type SharedSource = {
   tick: number;
   players: readonly PlayerRow[];
   bugs: readonly { id: number; kind: string; x: number; y: number; phase: number; phaseTicks: number; dx: number; dy: number }[];
+  floor: readonly { id: number; kind: string; x: number; y: number; ticksLeft: number }[];
   events: {
-    shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number }[];
+    shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number; laser: boolean }[];
     shotsEnded: readonly { id: number; hit: boolean; travelled: number }[];
     kills: readonly { bug: number; by: number; x: number; y: number; points: number; kind: string }[];
   };
@@ -298,12 +325,12 @@ export type SharedSource = {
 
 /**
  * The part of a snapshot every socket in an arena shares, built once per tick: `"p":...,"b":...,
- * "s":...,"e":...,"k":...,"d":...,"w":...` (no braces). `kinds` is BUG_KINDS, passed in so this
- * file imports no simulation; `wave` is the arena's wave. `src.tick` is the tick after the step
+ * "s":...,"e":...,"k":...,"d":...,"f":...,"w":...` (no braces). `kinds` is BUG_KINDS and `pickups`
+ * PICKUP_IDS, passed in so this file imports no simulation; `wave` is the arena's wave. `src.tick` is the tick after the step
  * (the snapshot's tick), so a player who went down in the step just run shows DOWN_S less one
  * tick left.
  */
-export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[], wave: number): string {
+export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[], wave: number, pickups: readonly string[]): string {
   let b = "[";
   for (let i = 0; i < src.bugs.length; i++) {
     const g = src.bugs[i]!;
@@ -317,7 +344,7 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
   for (let i = 0; i < ev.shotsFired.length; i++) {
     const f = ev.shotsFired[i]!;
     if (i > 0) s += ",";
-    s += `[${f.id},${f.owner},${q2(f.x)},${q2(f.y)},${q3(f.angle)}]`;
+    s += `[${f.id},${f.owner},${q2(f.x)},${q2(f.y)},${q3(f.angle)},${f.laser ? 1 : 0}]`;
   }
   s += "]";
   let e = "[";
@@ -343,12 +370,19 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
     d += `[${p.id},${q2(left)},${p.reviver},${q2(p.reviveTicks / REVIVE_TICKS)}]`;
   }
   d += "]";
-  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"d":${d},"w":${wave}`;
+  let f = "[";
+  for (let i = 0; i < src.floor.length; i++) {
+    const x = src.floor[i]!;
+    if (i > 0) f += ",";
+    f += `[${x.id},${pickups.indexOf(x.kind)},${q1(x.x)},${q1(x.y)},${x.ticksLeft}]`;
+  }
+  f += "]";
+  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"d":${d},"f":${f},"w":${wave}`;
 }
 
 /** One socket's snapshot: its own ack and numbers around the shared part. */
 export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared: string): string {
-  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dk":${me.dk},"dc":${me.dc},"dn":${me.dn}},${shared}}`;
+  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dk":${me.dk},"dc":${me.dc},"dn":${me.dn},"fx":[${me.fx.join(",")}]},${shared}}`;
 }
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean, build = ""): string {

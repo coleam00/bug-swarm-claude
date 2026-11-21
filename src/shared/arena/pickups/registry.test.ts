@@ -26,10 +26,10 @@ describe("pickups", () => {
     }
   });
 
-  test("the starting numbers: a crawler kill drops a pickup 3% of the time, a dasher's 6%, split evenly", () => {
+  test("the numbers set by the late-joiner gate: a crawler kill drops a pickup 1.5% of the time, a dasher's 3%, split evenly", () => {
     const total = (k: (typeof BUG_KINDS)[number]) => PICKUP_IDS.reduce((s, id) => s + pickupDef(id).drop[k], 0);
-    expect(total("crawler")).toBeCloseTo(0.03, 12);
-    expect(total("dasher")).toBeCloseTo(0.06, 12);
-    for (const id of PICKUP_IDS) expect(pickupDef(id).drop.crawler).toBeCloseTo(0.03 / PICKUP_IDS.length, 12);
+    expect(total("crawler")).toBeCloseTo(0.015, 12);
+    expect(total("dasher")).toBeCloseTo(0.03, 12);
+    for (const id of PICKUP_IDS) expect(pickupDef(id).drop.crawler).toBeCloseTo(0.015 / PICKUP_IDS.length, 12);
   });
 });

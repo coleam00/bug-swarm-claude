@@ -2,7 +2,7 @@
 // policy bot sees (from snapshots), and the summary. No network here, so `bun test` covers it;
 // `bots.ts` opens the sockets.
 import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
-import { createObservation, setObservedBug, type Observation } from "../src/shared/arena/policies";
+import { createObservation, setObservedBug, setObservedPickup, type Observation } from "../src/shared/arena/policies";
 import type { Snapshot } from "../src/shared/arena/protocol";
 import { nextRandom, type Rng } from "../src/shared/arena/rng";
 import { TEAMS, type Team } from "../src/server/rules";
@@ -127,8 +127,9 @@ export function randomPlayerId(): string {
 }
 
 /**
- * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`) and every
- * bug, with each bug's velocity derived from how far it moved since the last snapshot that had it.
+ * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`), every
+ * bug, with each bug's velocity derived from how far it moved since the last snapshot that had it,
+ * and every pickup on the floor (`f`, #73), as `bun run skill`'s observe sees them.
  */
 export type ObservationTracker = { obs: Observation; update(m: Snapshot, you: number): void };
 
@@ -165,6 +166,8 @@ export function createObservationTracker(): ObservationTracker {
         next.set(id, { x, y, tick: m.tick });
       }
       obs.bugCount = m.b.length;
+      for (let i = 0; i < m.f.length; i++) setObservedPickup(obs, i, m.f[i]![2], m.f[i]![3]);
+      obs.pickupCount = m.f.length;
       [last, next] = [next, last];
     },
   };

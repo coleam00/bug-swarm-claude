@@ -28,6 +28,8 @@ export type ClientShots = {
   /** How far it flew in all, once ended. */
   endTravel: Float32Array;
   hit: Uint8Array;
+  /** A review laser shot (#73): drawn as a longer, brighter beam. */
+  laser: Uint8Array;
   used: Uint8Array;
   /** Shot id to its slot. */
   slots: Map<number, number>;
@@ -47,6 +49,7 @@ export function createShots(capacity = SHOT_CAPACITY): ClientShots {
     endTick: new Float64Array(capacity),
     endTravel: new Float32Array(capacity),
     hit: new Uint8Array(capacity),
+    laser: new Uint8Array(capacity),
     used: new Uint8Array(capacity),
     slots: new Map(),
     live: 0,
@@ -67,8 +70,8 @@ function free(s: ClientShots, i: number): void {
   s.live--;
 }
 
-/** A shot fired, from a snapshot's `s`. A full pool overwrites the oldest slot. */
-export function addShot(s: ClientShots, id: number, owner: number, x: number, y: number, angle: number, tick: number): void {
+/** A shot fired, from a snapshot's `s` (`laser`: a review laser shot, v7). A full pool overwrites the oldest slot. */
+export function addShot(s: ClientShots, id: number, owner: number, x: number, y: number, angle: number, tick: number, laser = false): void {
   const cap = s.used.length;
   const i = s.cursor;
   s.cursor = (i + 1) % cap;
@@ -85,6 +88,7 @@ export function addShot(s: ClientShots, id: number, owner: number, x: number, y:
   s.endTick[i] = -1;
   s.endTravel[i] = SHOT_RANGE;
   s.hit[i] = 0;
+  s.laser[i] = laser ? 1 : 0;
   s.slots.set(id, i);
 }
 

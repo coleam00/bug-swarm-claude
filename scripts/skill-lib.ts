@@ -5,9 +5,11 @@
 // every arena age (newcomers joining seeded arenas that aimer bots have played in). The dasher
 // (#60) is printed beside the first gate and against the aimer, not gated; so is the server's fill
 // bot (#66), placed between 2x the mover and the aimer. Per bug kind (#65) it also prints how many
-// of each spawned in a life and how many hits each landed (the first gate's lives, played alone).
-// Tested in skill-lib.test.ts on a few seeds.
-import { BUG_KINDS, DASH_TICKS, DT, WORLD_H, WORLD_W, type BugKind } from "../src/shared/arena/constants";
+// of each spawned in a life and how many hits each landed (the first gate's lives, played alone),
+// and per pickup (#73) how many the player took, how many hits a shield blocked and how many bugs
+// its review laser shots hit. Every gate is played with pickups dropping. Tested in
+// skill-lib.test.ts on a few seeds.
+import { BUG_KINDS, DASH_TICKS, DT, PICKUP_IDS, WORLD_H, WORLD_W, type BugKind, type PickupId } from "../src/shared/arena/constants";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
   AIMER,
@@ -33,6 +35,28 @@ function perKind(): PerKind {
   return Object.fromEntries(BUG_KINDS.map((k) => [k, 0])) as PerKind;
 }
 
+/** A count per pickup id. */
+export type PerPickup = Record<PickupId, number>;
+
+function perPickup(): PerPickup {
+  return Object.fromEntries(PICKUP_IDS.map((k) => [k, 0])) as PerPickup;
+}
+
+/** One life's pickups (#73): taken by id, hits its shields blocked, bugs its laser shots hit. */
+export type PickupCounts = { taken: PerPickup; blocks: number; laserHits: number };
+
+function pickupCounts(): PickupCounts {
+  return { taken: perPickup(), blocks: 0, laserHits: 0 };
+}
+
+/** Adds the last step's pickups for player `id` to `c`. */
+function countPickups(state: ArenaState, id: number, c: PickupCounts): void {
+  const ev = state.events;
+  for (const x of ev.pickups) if (x.player === id) c.taken[x.kind]++;
+  for (const b of ev.blocks) if (b === id) c.blocks++;
+  for (const o of ev.laserHits) if (o === id) c.laserHits++;
+}
+
 /** One life's result: what the drop-in gates read. */
 export type DropInLife = { score: number; kills: number; seconds: number; capped: boolean; dashes: number };
 
@@ -42,6 +66,7 @@ export type LifeResult = DropInLife & {
   spawned: PerKind;
   /** Hits the player took from each kind. */
   touches: PerKind;
+  pickups: PickupCounts;
 };
 
 /**
@@ -88,6 +113,7 @@ function playLifeWith<M extends PolicyMemory>(
   let dashes = 0;
   const spawned = perKind();
   const touches = perKind();
+  const pickups = pickupCounts();
   for (let t = 0; t < maxTicks; t++) {
     observe(state, p.id, WORLD_W, WORLD_H, obs);
     act(obs, mem, rng, out);
@@ -97,10 +123,11 @@ function playLifeWith<M extends PolicyMemory>(
     // A dash the simulation started this tick (not one the policy merely asked for).
     if (p.dashTicks === DASH_TICKS) dashes++;
     countKinds(state, firstNew, p.id, spawned, touches);
+    countPickups(state, p.id, pickups);
     const ended = state.events.livesEnded[0];
-    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches };
+    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches, pickups };
   }
-  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches };
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches, pickups };
 }
 
 /** The value at fraction `q` (0 to 1) of sorted numbers, interpolated. */
@@ -129,6 +156,8 @@ export type PolicySummary = {
   medianSpawned: PerKind;
   /** Hits taken from each kind in a life, median. */
   medianTouches: PerKind;
+  /** Pickups a life (#73): taken by id, shield blocks and laser hits, median and mean. */
+  pickups: { median: PickupCounts; mean: PickupCounts };
 };
 
 export type SkillReport = {
@@ -166,7 +195,23 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
     capped: lives.filter((l) => l.capped).length,
     medianSpawned: medianOf((l) => l.spawned),
     medianTouches: medianOf((l) => l.touches),
+    pickups: pickupStats(lives.map((l) => l.pickups)),
   };
+}
+
+/** The median and mean of each pickup count over `lives`. */
+export function pickupStats(lives: readonly PickupCounts[]): { median: PickupCounts; mean: PickupCounts } {
+  const median = pickupCounts();
+  const mean = pickupCounts();
+  const n = Math.max(1, lives.length);
+  const of = (pick: (c: PickupCounts) => number) => {
+    const v = lives.map(pick).sort((a, b) => a - b);
+    return [quantile(v, 0.5), v.reduce((s, x) => s + x, 0) / n] as const;
+  };
+  for (const id of PICKUP_IDS) [median.taken[id], mean.taken[id]] = of((c) => c.taken[id]);
+  [median.blocks, mean.blocks] = of((c) => c.blocks);
+  [median.laserHits, mean.laserHits] = of((c) => c.laserHits);
+  return { median, mean };
 }
 
 /** The gate's verdict on a set of policy summaries: the aimer's median against the mover's. */
@@ -240,6 +285,14 @@ export function formatSkill(r: SkillReport): string[] {
   lines.push("bug kinds, median a life: spawned / hits landed on the player");
   for (const p of r.policies) {
     lines.push(`${p.policy.padEnd(8)}${BUG_KINDS.map((k) => `${k} ${p.medianSpawned[k]} / ${p.medianTouches[k]}`).join(", ")}`);
+  }
+  lines.push("pickups a life, median (mean): taken by id, hits blocked by a shield, bugs hit by laser shots");
+  for (const p of r.policies) {
+    const { median: m, mean: a } = p.pickups;
+    const v = (x: number, y: number) => `${x} (${y.toFixed(1)})`;
+    lines.push(
+      `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}`,
+    );
   }
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");
   return lines;

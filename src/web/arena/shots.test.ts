@@ -79,3 +79,11 @@ describe("kills", () => {
     expect(q.live).toBe(0);
   });
 });
+
+test("a review laser shot (#73) is marked in its slot, and a slot reused by a normal shot is not", () => {
+  const s = createShots(1);
+  addShot(s, 1, 1, 0, 0, 0, 10, true);
+  expect(s.laser[0]).toBe(1);
+  addShot(s, 2, 1, 0, 0, 0, 11);
+  expect(s.laser[0]).toBe(0);
+});

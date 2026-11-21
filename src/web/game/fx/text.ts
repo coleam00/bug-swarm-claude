@@ -3,7 +3,8 @@
 // it is full the label with the least life left is overwritten. Pure (no DOM, no canvas). A
 // kill scores POINTS_PER_SQUASH (a crawler's points, #65) unless told otherwise (the streak
 // multiplier, #55): a label sums its points, and `textLabel` gives its text without building a
-// string per frame.
+// string per frame. A word label (#73, "Test shield!") shows one of the pool's prebuilt `words`
+// and never merges with anything.
 import { crawler } from "../../../shared/arena/bugs/crawler";
 
 /** A crawler kill's points before any multiplier (the default when a label is given none). */
@@ -15,6 +16,8 @@ export const TEXT_CAPACITY = 12;
 export const TEXT_RISE = 40;
 /** Seconds a label lives, fading as it goes; a merge starts it again. */
 export const TEXT_SECONDS = 0.8;
+/** Seconds a word label lives (longer than a score: it is read, not glanced at). */
+export const WORD_SECONDS = 1.4;
 /** A squash joins a label merged into (or made) at most this many seconds ago... */
 export const TEXT_MERGE_SECONDS = 0.25;
 /** ...and at most this many CSS px away: about one "+10" wide, so two labels never overlap. */
@@ -35,13 +38,19 @@ export type Texts = {
   points: Uint16Array;
   /** Seconds since the label last took a squash. */
   since: Float32Array;
+  /** A word label's index in `words`, or -1 for a points label. */
+  word: Int8Array;
+  /** The words a word label can show, built once. */
+  words: readonly string[];
   /** TEXT_MERGE_PX in arena units at the current layout (setTextScale). */
   mergeRadius: number;
   live: number;
 };
 
-export function createTexts(capacity = TEXT_CAPACITY): Texts {
+export function createTexts(capacity = TEXT_CAPACITY, words: readonly string[] = []): Texts {
   return {
+    word: new Int8Array(capacity).fill(-1),
+    words,
     x: new Float32Array(capacity),
     y: new Float32Array(capacity),
     life: new Float32Array(capacity),
@@ -73,7 +82,7 @@ export function spawnText(t: Texts, x: number, y: number, points: number = POINT
       continue;
     }
     if (life < t.life[weakest]! || t.life[weakest]! <= 0) weakest = i;
-    if (t.since[i]! >= TEXT_MERGE_SECONDS || t.count[i]! >= TEXT_MAX_SQUASHES) continue;
+    if (t.word[i]! >= 0 || t.since[i]! >= TEXT_MERGE_SECONDS || t.count[i]! >= TEXT_MAX_SQUASHES) continue;
     const dx = t.x[i]! - x;
     const dy = t.y[i]! - y;
     const d2 = dx * dx + dy * dy;
@@ -98,13 +107,40 @@ export function spawnText(t: Texts, x: number, y: number, points: number = POINT
   t.count[i] = 1;
   t.points[i] = Math.min(65535, points);
   t.since[i] = 0;
+  t.word[i] = -1;
+}
+
+/** A word label at x, y showing `words[word]` (#73): a label of its own, never merged into or with. */
+export function spawnWord(t: Texts, x: number, y: number, word: number): void {
+  if (word < 0 || word >= t.words.length) return;
+  const cap = t.life.length;
+  let free = -1;
+  let weakest = 0;
+  for (let i = 0; i < cap; i++) {
+    if (t.life[i]! <= 0) {
+      free = i;
+      break;
+    }
+    if (t.life[i]! < t.life[weakest]!) weakest = i;
+  }
+  const i = free >= 0 ? free : weakest;
+  if (free >= 0) t.live++;
+  t.x[i] = x;
+  t.y[i] = y;
+  t.life[i] = WORD_SECONDS;
+  t.count[i] = 0;
+  t.points[i] = 0;
+  t.since[i] = 0;
+  t.word[i] = word;
 }
 
 /** Labels for point sums that are not in TEXT_LABELS, built once each, the first time one shows. */
 const otherLabels = new Map<number, string>();
 
-/** Label `i`'s text: "+" and its points. */
+/** Label `i`'s text: its word, or "+" and its points. */
 export function textLabel(t: Texts, i: number): string {
+  const w = t.word[i]!;
+  if (w >= 0) return t.words[w]!;
   const pts = t.points[i]!;
   if (pts % POINTS_PER_SQUASH === 0 && pts / POINTS_PER_SQUASH <= TEXT_MAX_SQUASHES) return TEXT_LABELS[pts / POINTS_PER_SQUASH]!;
   let label = otherLabels.get(pts);
