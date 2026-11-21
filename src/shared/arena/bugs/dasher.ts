@@ -37,7 +37,7 @@ export const DASHER_SHARE_START = 0.15;
 export const DASHER_SHARE_RAMP = 0.005;
 export const DASHER_SHARE_MAX = 0.35;
 /** The most dashers alive in one arena. */
-export const DASHER_MAX_PER_ARENA = 30;
+export const DASHER_MAX_PER_ARENA = 8;
 
 export const DASHER_PHASES = ["approach", "tell", "lunge", "recover"] as const;
 export const [APPROACH, TELL, LUNGE, RECOVER] = [0, 1, 2, 3] as const;
