@@ -49,6 +49,8 @@ export const FIRST_LIFE_EASY_S = 10;
 
 /** The most players in one arena. */
 export const MAX_PLAYERS_PER_ARENA = 20;
+/** An arena with people in it is topped up with server fill bots to this many players (#66). */
+export const FILL_TARGET = 4;
 /** Inputs the server queues per player; one is applied each tick, the oldest dropped past this. */
 export const INPUT_BUFFER = 4;
 /** Ticks with no new input after which a player's move is zeroed (500 ms). */

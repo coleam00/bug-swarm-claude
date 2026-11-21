@@ -22,6 +22,8 @@ export type ServerOptions = {
   buildId: string;
   /** How the arena pings sockets and drops silent ones; defaults to the real timings (tests shorten them). */
   liveness?: Liveness;
+  /** People plus fill bots per arena; defaults to FILL_TARGET (tests that count players pass 0). */
+  arenaFill?: number;
   /** How often live arenas are checked for hidden names, ms; defaults to the real one (tests shorten it). */
   hideSweepMs?: number;
 };
@@ -113,7 +115,7 @@ export function startServer(opts: ServerOptions): RunningServer {
   const app = createApp(opts.db, opts.appOptions);
   // Finished lives are saved as runs, off the tick (lives.ts).
   const lives = createLifeSaver(opts.db);
-  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save });
+  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill });
   // Before servePages: its catch-all answers every path it reaches.
   mountArenaRoutes(app, rooms);
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).

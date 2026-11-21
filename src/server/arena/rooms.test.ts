@@ -3,6 +3,7 @@ import {
   DASH_COOLDOWN_TICKS,
   DASH_SPAWN_LOCK_TICKS,
   DASH_TICKS,
+  FILL_TARGET,
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
   MAX_PLAYERS_PER_ARENA,
@@ -13,13 +14,18 @@ import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import { DOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
 import { placeBug } from "../../shared/arena/testkit";
-import { meOf, type LifeRecord } from "./room";
-import { Rooms } from "./rooms";
+import { isBotName } from "../rules";
+import { Room, meOf, type LifeRecord } from "./room";
+import { Rooms, arenaSeed } from "./rooms";
+import { createTickLog } from "./ticks";
 
 const INFO = { playerKey: "0".repeat(32), touch: false };
 
-/** Rooms on a fake clock and fake timers: `tick()` fires every running timer once. */
-function setup(saveLife?: (r: LifeRecord) => void) {
+/**
+ * Rooms on a fake clock and fake timers: `tick()` fires every running timer once. No fill bots
+ * unless `fillTo` is given, so the counts below are people only.
+ */
+function setup(saveLife?: (r: LifeRecord) => void, fillTo = 0) {
   let now = 1_000_000;
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
@@ -28,6 +34,7 @@ function setup(saveLife?: (r: LifeRecord) => void) {
     clock: () => 0,
     buildId: "test-build",
     saveLife,
+    fillTo,
     startTimer: (fn) => {
       const id = nextTimer++;
       timers.set(id, fn);
@@ -363,4 +370,121 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.lockTicks = 0;
   p.streak = 20;
   expect(meOf(p, me)).toMatchObject({ mu: 3, lk: 0 });
+});
+
+describe("fill bots (#66)", () => {
+  const joins = (got: ServerMessage[]) => got.filter((m) => m.t === "event" && m.kind === "join");
+  const leaves = (got: ServerMessage[]) => got.filter((m) => m.t === "event" && m.kind === "leave");
+  const bots = (rooms: Rooms, id: number) => rooms.room(id)!.state.players.filter((p) => isBotName(p.name));
+  /** Saves into `saved`, failing the test on any bot life. */
+  const spy = (saved: LifeRecord[]) => (r: LifeRecord) => {
+    expect(isBotName(r.name)).toBe(false);
+    saved.push(r);
+  };
+
+  test("one person is topped up to 4 on the next tick, after their welcome; stats count people and bots apart", () => {
+    const { rooms, tick } = setup(undefined, FILL_TARGET);
+    const a = client();
+    const j = rooms.join("Ada", "tabs", INFO, a.send);
+    expect(j.welcome.roster).toEqual([{ id: j.entity, name: "Ada", team: "tabs" }]);
+    expect(a.got).toEqual([]);
+    tick();
+    // Three joins, then the tick's snapshot with all four.
+    expect(a.got.map((m) => (m.t === "event" ? m.kind : m.t))).toEqual(["join", "join", "join", "snapshot"]);
+    expect(joins(a.got)).toEqual([
+      { t: "event", kind: "join", id: 2, name: "bot Ada", team: "spaces" },
+      { t: "event", kind: "join", id: 3, name: "bot Linus", team: "tabs" },
+      { t: "event", kind: "join", id: 4, name: "bot Grace", team: "spaces" },
+    ]);
+    expect(snapshots(a.got)[0]!.p.length).toBe(4);
+    expect(rooms.stats()).toMatchObject({ arenas: [{ id: 1, players: 1, bots: 3 }], players: 1, bots: 3 });
+    // Driven by the tick, with no socket: within 30 s the bots are killing bugs.
+    tick(600);
+    expect(bots(rooms, 1).reduce((n, p) => n + p.kills, 0)).toBeGreaterThan(0);
+  });
+
+  test("a person joining marks the newest bot, which leaves once its life ends (unsaved) and never respawns; a person leaving brings one back", () => {
+    const saved: LifeRecord[] = [];
+    const { rooms, tick } = setup(spy(saved), FILL_TARGET);
+    const a = client();
+    rooms.join("Ada", "tabs", INFO, a.send);
+    tick();
+    const jb = rooms.join("Bob", "spaces", INFO, client().send);
+    const room = rooms.room(1)!;
+    tick(3);
+    // The marked bot plays on: 2 people and 3 bots until its life ends.
+    expect(rooms.stats()).toMatchObject({ players: 2, bots: 3 });
+    const grace = bots(rooms, 1).find((p) => p.name === "bot Grace")!;
+    grace.invulnTicks = 0;
+    grace.protectTicks = 0;
+    grace.dashTicks = 0;
+    grace.hits = HITS_PER_LIFE - 1;
+    placeBug(room.state, grace.x + 5, grace.y);
+    tick();
+    expect(grace.down).toBe(true);
+    grace.downTick = room.state.tick - DOWN_TICKS;
+    tick();
+    expect(grace.alive).toBe(false);
+    expect(leaves(a.got)).toEqual([]);
+    tick();
+    expect(leaves(a.got)).toEqual([{ t: "event", kind: "leave", id: grace.id }]);
+    tick(40);
+    expect(room.state.players.some((p) => p.id === grace.id)).toBe(false);
+    expect(rooms.stats()).toMatchObject({ arenas: [{ id: 1, players: 2, bots: 2 }], players: 2, bots: 2 });
+    expect(saved).toEqual([]);
+    // Bob leaves: Ada alone again is topped back up to 3 bots on the next tick.
+    rooms.leave(1, jb.entity);
+    tick();
+    expect(joins(a.got).at(-1)).toMatchObject({ name: "bot Grace" });
+    expect(rooms.stats()).toMatchObject({ players: 1, bots: 3 });
+    expect(saved.map((r) => r.name)).toEqual(["Bob"]);
+  });
+
+  test("a full arena gives a bot's slot to each person at once, so 20 people still fit and no tick sees more than 20", () => {
+    const saved: LifeRecord[] = [];
+    const { rooms, tick } = setup(spy(saved), FILL_TARGET);
+    const a = client();
+    rooms.join("p0", "tabs", INFO, a.send);
+    tick();
+    const room = rooms.room(1)!;
+    for (let i = 1; i < MAX_PLAYERS_PER_ARENA; i++) {
+      expect(rooms.join(`p${i}`, "tabs", INFO, client().send).room).toBe(1);
+      expect(room.state.players.length).toBeLessThanOrEqual(MAX_PLAYERS_PER_ARENA);
+      // Past 17 people each join evicts a bot in the middle of its life, unsaved.
+      expect(room.botCount).toBe(Math.min(3, MAX_PLAYERS_PER_ARENA - (i + 1)));
+    }
+    expect(leaves(a.got).length).toBe(3);
+    tick();
+    expect(snapshots(a.got).at(-1)!.p.length).toBe(MAX_PLAYERS_PER_ARENA);
+    expect(rooms.stats()).toMatchObject({ players: 20, bots: 0 });
+    expect(rooms.join("p20", "tabs", INFO, client().send).room).toBe(2);
+    expect(saved).toEqual([]);
+  });
+
+  test("the last person out closes the arena, bots and all, saving only the person's life", () => {
+    const saved: LifeRecord[] = [];
+    const { rooms, timers, tick } = setup(spy(saved), FILL_TARGET);
+    const j = rooms.join("Ada", "tabs", INFO, client().send);
+    tick(20);
+    expect(rooms.stats().bots).toBe(3);
+    rooms.leave(j.room, j.entity);
+    expect(rooms.room(j.room)).toBeUndefined();
+    expect(timers.size).toBe(0);
+    expect(rooms.stats()).toMatchObject({ arenas: [], players: 0, bots: 0 });
+    expect(saved.map((r) => r.name)).toEqual(["Ada"]);
+  });
+
+  test("tick budget: 20 fill bots in one arena for 60 s of play", () => {
+    const log = createTickLog();
+    const room = new Room(1, arenaSeed(1), 0, log);
+    for (let i = 0; i < MAX_PLAYERS_PER_ARENA; i++) room.addBot();
+    const ticks = 60_000 / TICK_MS;
+    for (let i = 1; i <= ticks; i++) room.tick(i * TICK_MS);
+    const { p50, p95 } = log.percentiles(ticks * TICK_MS);
+    console.log(`20 fill bots, ${ticks} ticks, ${room.state.bugs.length} bugs at the end: tick p50 ${p50!.toFixed(3)} ms, p95 ${p95!.toFixed(3)} ms`);
+    expect(room.botCount).toBe(MAX_PLAYERS_PER_ARENA);
+    expect(room.state.players.length).toBe(MAX_PLAYERS_PER_ARENA);
+    // The PRD's budget, loosely: `check` must stay green on a loaded machine.
+    expect(p95!).toBeLessThan(10);
+  });
 });

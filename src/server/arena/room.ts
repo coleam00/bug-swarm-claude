@@ -3,7 +3,22 @@
 // drives `advance` from its timer, so tests step it by hand. A player going down and a revive are
 // broadcast to everyone. A life that ends (bled out while down, or its player leaving) is handed
 // to `onLifeEnd` as a LifeRecord; the server saves it off the tick (lives.ts).
-import { BUG_KINDS, HITS_PER_LIFE, INPUT_BUFFER, INPUT_STALE_TICKS, TICK_MS } from "../../shared/arena/constants";
+//
+// Fill bots (#66): with `fillTo` above 0, an arena with people in it is topped up with server
+// bots until people plus bots reach it, and a bot is marked to leave for each person past it. A
+// marked bot leaves between its lives (at the start of the tick after its life ends); a person
+// joining a full arena takes a bot's slot at once. Bots are players with no member and no socket:
+// the tick drives them with the fillBot policy, and their lives are never handed to `onLifeEnd`.
+import {
+  BUG_KINDS,
+  HITS_PER_LIFE,
+  INPUT_BUFFER,
+  INPUT_STALE_TICKS,
+  MAX_PLAYERS_PER_ARENA,
+  TICK_MS,
+  WORLD_H,
+  WORLD_W,
+} from "../../shared/arena/constants";
 import { mult } from "../../shared/arena/combat";
 import {
   DOWN,
@@ -31,7 +46,18 @@ import {
   type LifeEnd,
   type Player,
 } from "../../shared/arena/sim";
+import {
+  createFillMemory,
+  createObservation,
+  fillBot,
+  observe,
+  type FillMemory,
+  type Observation,
+  type PolicyInput,
+} from "../../shared/arena/policies";
+import { createRng, type Rng } from "../../shared/arena/rng";
 import type { Team } from "../rules";
+import { botName, botTeam, fillDelta } from "./fill";
 import type { TickLog } from "./ticks";
 
 /** Sends one text frame to a member's socket. */
@@ -65,6 +91,9 @@ type Member = MemberInfo & {
   lastSeq: number;
 };
 
+/** A server fill bot: its player, and what its policy sees and remembers. */
+type Bot = { player: Player; obs: Observation; mem: FillMemory; rng: Rng; out: PolicyInput; leaving: boolean };
+
 /** Ticks a late timer may run at once to catch up; any further lag is dropped, not caught up. */
 export const MAX_CATCH_UP_TICKS = 2;
 
@@ -87,34 +116,93 @@ export function meOf(p: Player, out: SnapshotMe): SnapshotMe {
 export class Room {
   readonly state: ArenaState;
   private readonly members = new Map<number, Member>();
+  /** Fill bots by player id, oldest first. */
+  private readonly bots = new Map<number, Bot>();
   private nextTickAt: number;
   private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0 };
 
   constructor(
     readonly id: number,
-    seed: number,
+    private readonly seed: number,
     startMs: number,
     private readonly ticks: TickLog,
     private readonly clock: () => number = () => performance.now(),
     private readonly onLifeEnd: (r: LifeRecord) => void = () => {},
+    /** People plus fill bots to top the arena up to; 0: no fill bots are managed. */
+    private readonly fillTo = 0,
   ) {
     this.state = createArena(seed);
     this.nextTickAt = startMs + TICK_MS;
   }
 
+  /** People in the arena (members). Bots never count: capacity and closing go by people. */
   get size(): number {
     return this.members.size;
+  }
+
+  get botCount(): number {
+    return this.bots.size;
+  }
+
+  /** Adds a fill bot now and tells everyone. The tick tops arenas up; tests call it directly. */
+  addBot(): Player {
+    const used = (n: string) => this.state.players.some((p) => p.name === n);
+    const player = joinPlayer(this.state, botName(used), botTeam(this.state.players));
+    this.bots.set(player.id, {
+      player,
+      obs: createObservation(),
+      mem: createFillMemory(),
+      // Its own generator, never the arena's, so bots never change the arena's draws.
+      rng: createRng(Math.imul(this.seed ^ player.id, 0x9e3779b1)),
+      out: { mx: 0, my: 0, aim: 0, fire: false, dash: false },
+      leaving: false,
+    });
+    this.broadcast({ t: EVENT, kind: JOIN, id: player.id, name: player.name, team: player.team });
+    return player;
+  }
+
+  /** Takes a fill bot out and tells everyone. Its life, if any, is dropped: bot lives are never saved. */
+  private removeBot(id: number): void {
+    if (!this.bots.delete(id)) return;
+    leavePlayer(this.state, id);
+    this.broadcast({ t: EVENT, kind: LEAVE, id });
+  }
+
+  /** Marks the newest bots past the fill target to leave between lives, and unmarks the rest. */
+  private markLeaving(): void {
+    if (this.fillTo <= 0) return;
+    const leave = Math.max(0, -fillDelta(this.members.size, this.bots.size, this.fillTo));
+    let i = 0;
+    for (const b of this.bots.values()) b.leaving = i++ >= this.bots.size - leave;
+  }
+
+  /** A bot to evict for a person joining a full arena: one already leaving, else one out, else the newest. */
+  private botToEvict(): number {
+    let out = -1;
+    let newest = -1;
+    for (const b of this.bots.values()) {
+      if (b.leaving) return b.player.id;
+      if (out < 0 && !b.player.alive) out = b.player.id;
+      newest = b.player.id;
+    }
+    return out >= 0 ? out : newest;
   }
 
   roster(): RosterEntry[] {
     return this.state.players.map((p) => ({ id: p.id, name: p.name, team: p.team }));
   }
 
-  /** Adds a member and tells everyone else. Returns their player. */
+  /**
+   * Adds a member and tells everyone else. Returns their player. In a full arena a bot gives up
+   * its slot first; bots past the fill target are marked to leave. Bots are never added here: the
+   * caller sends the welcome after this returns, and nothing may reach the newcomer before it.
+   */
   add(name: string, team: Team, info: MemberInfo, send: Send): Player {
+    if (this.bots.size > 0 && this.state.players.length >= MAX_PLAYERS_PER_ARENA) this.removeBot(this.botToEvict());
     const player = joinPlayer(this.state, name, team);
     this.broadcast({ t: EVENT, kind: JOIN, id: player.id, name, team });
     this.members.set(player.id, { playerKey: info.playerKey, touch: info.touch, player, send, queue: [], ack: 0, lastSeq: 0 });
+    this.markLeaving();
     return player;
   }
 
@@ -135,6 +223,7 @@ export class Room {
     const left = leavePlayer(this.state, id);
     if (left?.life) this.lifeEnded(m, left.life, nowMs);
     this.broadcast({ t: EVENT, kind: LEAVE, id });
+    this.markLeaving();
     return Boolean(left?.life);
   }
 
@@ -164,7 +253,37 @@ export class Room {
   }
 
   /**
-   * One tick: each member's next queued input becomes its current one (a held input repeats
+   * Fill bots, at the start of a tick: bots marked to leave go once out of a life (never
+   * respawning first: a respawn takes RESPAWN_DELAY_S of presses), the arena is topped up to the
+   * fill target (their joins go out before this tick's snapshot), and every bot's policy writes
+   * its input for this step, in place (no new input objects; adding a bot allocates its state).
+   */
+  private driveBots(): void {
+    if (this.fillTo > 0 && this.members.size > 0) {
+      for (const b of this.bots.values()) if (b.leaving && !b.player.alive) this.removeBot(b.player.id);
+      const add = Math.min(fillDelta(this.members.size, this.bots.size, this.fillTo), MAX_PLAYERS_PER_ARENA - this.state.players.length);
+      for (let i = 0; i < add; i++) this.addBot();
+      this.markLeaving();
+    }
+    for (const b of this.bots.values()) {
+      const p = b.player;
+      observe(this.state, p.id, WORLD_W, WORLD_H, b.obs);
+      fillBot(b.obs, b.mem, b.rng, b.out);
+      const o = b.out;
+      const input = p.input;
+      input.seq = 0;
+      input.mx = o.mx;
+      input.my = o.my;
+      input.aim = o.aim;
+      input.fire = o.fire;
+      input.dash = o.dash;
+      clampInput(input);
+      p.idleTicks = 0;
+    }
+  }
+
+  /**
+   * One tick: fill bots first (driveBots), then each member's next queued input becomes its current one (a held input repeats
    * while the queue is empty, its move and fire stopped once INPUT_STALE_TICKS pass with nothing
    * new), the arena steps, everyone is told of each player who went down and then of each
    * revive, every life that ended is handed on and its player told, and every member gets a
@@ -173,6 +292,7 @@ export class Room {
    */
   tick(nowMs: number): void {
     const t0 = this.clock();
+    this.driveBots();
     for (const m of this.members.values()) {
       const p = m.player;
       const next = m.queue.shift();
@@ -193,6 +313,7 @@ export class Room {
     for (const id of ev.downs) this.broadcast({ t: EVENT, kind: DOWN, id });
     for (const r of ev.revives) this.broadcast({ t: EVENT, kind: REVIVE, id: r.id, by: r.by, points: r.points });
     for (const life of this.state.events.livesEnded) {
+      // A fill bot is not a member, so its lives end here unsaved and unannounced.
       const m = this.members.get(life.id);
       if (m) this.lifeEnded(m, life, nowMs);
     }
