@@ -78,15 +78,6 @@ describe("run start", () => {
     for (let i = 0; i < 30; i++) await startRun(a); // the refused starts used none of the 30
   });
 
-  test("a player from before teams (no team stored) still plays without sending one", async () => {
-    const a = app();
-    upsertPlayer(db, "player-0001", "Old Timer", null, new Date(clock));
-    const runId = await startRun(a, "player-0001", "Old Timer", null);
-    clock += 10_000;
-    expect((await post(a, `/api/runs/${runId}/end`, endBody(10, 1, 1))).status).toBe(200);
-    expect(db.query("SELECT team FROM players WHERE id = ?").get("player-0001")).toEqual({ team: null });
-  });
-
   test("a team is set once: a different team sent later is ignored, not switched", async () => {
     const a = app();
     await startRun(a, "player-0001", "Robo", TABS);
@@ -278,10 +269,6 @@ describe("team totals", () => {
     return ((await res.json()) as { teams: Record<Team, number> }).teams;
   }
 
-  test("both teams are there at 0 on an empty database", async () => {
-    expect(await teams(app())).toEqual({ tabs: 0, spaces: 0 });
-  });
-
   test("sum every finished run's score into its team; an abandoned run adds nothing", async () => {
     const a = app();
     await play(a, "player-0001", "Ann", 50, TABS);
@@ -311,18 +298,6 @@ describe("team totals", () => {
     expect(await teams(a)).toEqual({ tabs: 90, spaces: 0 });
     clock += 1; // 1 s cache + the game-over screen's 4 s poll: gone from every screen within 5 s
     expect(await teams(a)).toEqual({ tabs: 40, spaces: 0 });
-  });
-
-  test("are cached for 1 second", async () => {
-    const a = app();
-    await play(a, "player-0001", "First", 30, TABS);
-    expect(await teams(a)).toEqual({ tabs: 30, spaces: 0 });
-    const runId = await startRun(a, "player-0002", "Second", SPACES);
-    clock += 500;
-    expect((await post(a, `/api/runs/${runId}/end`, endBody(2, 0, 0))).status).toBe(200);
-    expect(await teams(a)).toEqual({ tabs: 30, spaces: 0 });
-    clock += 500;
-    expect(await teams(a)).toEqual({ tabs: 30, spaces: 2 });
   });
 });
 

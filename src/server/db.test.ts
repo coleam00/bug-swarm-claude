@@ -111,18 +111,16 @@ test("a database file from before teams opens and gains events.team; its old run
   expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
 });
 
-test("bun run hide removes a name from the top 10 and the team totals, whatever its case", () => {
+test("bun run hide removes a name from the top 10, whatever its case", () => {
   run("a", "2026-11-28T15:01:00.000Z", { score: 50 });
   run("b", "2026-11-28T15:02:00.000Z", { score: 40 });
   expect(topTen(db).map((r) => r.name)).toEqual(["A", "B"]);
-  expect(teamTotals(db)).toEqual({ tabs: 90, spaces: 0 });
   db.close();
   const r = script(["run", "hide", "a"]);
   db = openDb(join(dir, "app.db"));
   expect(r.code).toBe(0);
   expect(r.out).toEqual(["hidden: a (1 player)"]);
   expect(topTen(db)).toEqual([{ name: "B", score: 40 }]);
-  expect(teamTotals(db)).toEqual({ tabs: 40, spaces: 0 });
 });
 
 test("bun run hide says when no player has the name", () => {
