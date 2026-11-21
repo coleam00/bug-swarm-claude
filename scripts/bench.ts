@@ -11,7 +11,7 @@
 // 390x844 @3x: mid-run, the same shrunk to a quarter (the stream shown small), and two as the
 // refactor bomb goes off at 15 s. No dependencies: CDP over Bun's WebSocket. Needs a browser, so
 // it isn't part of `bun run check`.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize, sep } from "node:path";
 
@@ -40,6 +40,7 @@ const shotsArg = process.argv.indexOf("--shots");
 const lookArg = process.argv.indexOf("--look");
 const lookDir = lookArg > 0 ? process.argv[lookArg + 1] : undefined;
 const shotsDir = lookDir ?? (shotsArg > 0 ? process.argv[shotsArg + 1] : undefined);
+if (shotsDir) mkdirSync(shotsDir, { recursive: true });
 /** The `--look` sizes: the issue's desktop and phone. */
 const LOOKS: Viewport[] = [
   { label: "Desktop 1280x720", width: 1280, height: 720, dpr: 1, mobile: false },
