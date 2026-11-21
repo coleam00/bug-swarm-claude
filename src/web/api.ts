@@ -68,16 +68,40 @@ export async function finishRun(
   return "failed";
 }
 
-export async function fetchTop(): Promise<TopRow[] | "failed"> {
+/** Where the player stands, as the server ranks them (src/server/db.ts rankOf). */
+export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
+
+/**
+ * The top 10, and with a player id where that player stands (`me`). A malformed `me` is
+ * logged and dropped (null): the top 10 still shows.
+ */
+export async function fetchTop(playerId?: string): Promise<{ top: TopRow[]; me: Me | null } | "failed"> {
   try {
-    const res = await call("/api/top");
-    const body = (await res.json()) as { top?: unknown };
-    if (res.ok && Array.isArray(body.top)) return body.top as TopRow[];
+    const res = await call(playerId === undefined ? "/api/top" : `/api/top?player=${encodeURIComponent(playerId)}`);
+    const body = (await res.json()) as { top?: unknown; me?: unknown };
+    if (res.ok && Array.isArray(body.top)) {
+      const me = playerId === undefined ? null : parseMe(body.me);
+      if (playerId !== undefined && me === null) console.error("top 10: the player's rank was missing or malformed");
+      return { top: body.top as TopRow[], me };
+    }
     console.error(`top 10 failed: HTTP ${res.status}`);
   } catch (err) {
     console.error("top 10 failed", err);
   }
   return "failed";
+}
+
+const count = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+
+function parseMe(v: unknown): Me | null {
+  if (typeof v !== "object" || v === null) return null;
+  const { rank, ranked, next, row } = v as Record<string, unknown>;
+  if (!(rank === null || count(rank)) || !count(ranked) || !(row === null || count(row))) return null;
+  if (next === null) return { rank, ranked, next: null, row };
+  if (typeof next !== "object") return null;
+  const n = next as Record<string, unknown>;
+  if (!count(n.rank) || !count(n.points)) return null;
+  return { rank, ranked, next: { rank: n.rank, points: n.points }, row };
 }
 
 /** Each team's total, as the server counts it. */

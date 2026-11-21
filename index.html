@@ -59,8 +59,10 @@
         padding: max(12px, var(--safe-top)) max(16px, var(--safe-right)) max(12px, var(--safe-bottom)) max(16px, var(--safe-left)); }
       .over p, .over h1, .over h2, .over ol, .over ul { margin: 0; }
       .over-summary { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 24px; }
-      .over h1 { font-size: 40px; }
-      .over-score { font-size: 56px; font-weight: 800; }
+      .over h1 { font-size: 34px; line-height: 1.1; }
+      .over-score { font-size: 52px; font-weight: 800; line-height: 1.1; }
+      /* Where the player stands, under Best: two short lines. */
+      .over-rank { display: flex; flex-direction: column; align-items: center; font-size: 18px; line-height: 1.2; color: #cbd5e1; }
       .over-alert { color: #fda4af; font-size: 22px; line-height: 1.2; }
       .over-hint { font-size: 22px; }
       /* "Play again" and the hint: hidden (space kept) until 800 ms after death (RESTART_DELAY_MS, guard.ts). */
@@ -83,9 +85,12 @@
       .over-race-bar span { flex-basis: 0; min-width: 0; }
       .over-board { width: min(100%, 420px); font-size: 22px; }
       .over h2 { font-size: 26px; margin-bottom: 4px; }
-      .over ol { padding-left: 36px; line-height: 1.4; text-align: left; }
-      .over ol > li > span { display: inline-block; width: calc(100% - 3em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-      .over ol > li > b { display: inline-block; width: 3em; text-align: right; }
+      .over ol { padding-left: 36px; line-height: 1.25; text-align: left; }
+      /* Name and score stay inline blocks: display:flex on the li would drop the list numbers.
+         The score column fits the top score with its separator (15,300). */
+      .over ol > li > span { display: inline-block; width: calc(100% - 3.6em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+      .over ol > li > b { display: inline-block; width: 3.6em; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .over ol > li.mine { background: rgba(34, 211, 238, 0.18); color: #22d3ee; border-radius: 6px; }
       /* The upgrade choice, over the paused run. Portrait: cards stacked. Landscape: in a row. */
       .choice { position: fixed; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
         justify-content: center; gap: 16px; background: rgba(5, 7, 13, 0.72);
@@ -116,6 +121,7 @@
         .over-summary { flex: 1 1 0; gap: 6px; font-size: 20px; }
         .over h1 { font-size: 30px; }
         .over-score { font-size: 44px; }
+        .over-rank { font-size: 15px; line-height: 1.15; }
         .over-alert, .over-hint, .over-upgrades { font-size: 18px; }
         .over-again { gap: 4px; }
         .over-again button { min-height: 44px; padding: 6px 20px; font-size: 18px; }
