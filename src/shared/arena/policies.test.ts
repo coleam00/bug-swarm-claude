@@ -108,12 +108,13 @@ describe("fill bot", () => {
   });
 
   /**
-   * A fill bot at (1000, 1200) and a player downed 250 units to its right, with crawlers placed at
-   * `bugs` (they chase the bot; nothing else spawns). Steps until the downed player is revived or
-   * bleeds out; returns who revived them (0: nobody) and the closest any bug came to the bot.
+   * A fill bot at (1000, 1200) and a player downed `gap` units to its right, with crawlers placed
+   * at `bugs` (they chase the bot; nothing else spawns). Steps until the downed player is revived
+   * or bleeds out; returns who revived them (0: nobody), the closest any bug came to the bot, and
+   * the farthest the bot ever was from the downed player.
    */
-  function reviveRun(bugs: [number, number][], seed: number): { by: number; bot: number; closest: number } {
-    const { a, ps } = arenaWith([1000, 1200], [1250, 1200]);
+  function reviveRun(bugs: [number, number][], seed: number, gap = 250): { by: number; bot: number; closest: number; farthest: number } {
+    const { a, ps } = arenaWith([1000, 1200], [1000 + gap, 1200]);
     const [bot, hurt] = [ps[0]!, ps[1]!];
     downNow(a, hurt);
     a.bugs.length = 0;
@@ -124,6 +125,7 @@ describe("fill bot", () => {
     const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
     let by = 0;
     let closest = Infinity;
+    let farthest = 0;
     for (let t = 0; t < DOWN_TICKS && by === 0; t++) {
       for (const b of a.bugs) closest = Math.min(closest, Math.hypot(b.x - bot.x, b.y - bot.y));
       observe(a, bot.id, WORLD_W, WORLD_H, obs);
@@ -131,13 +133,31 @@ describe("fill bot", () => {
       bot.input = clampInput({ seq: t + 1, ...out });
       stepQuiet(a);
       by = a.events.revives.find((r) => r.id === hurt.id)?.by ?? 0;
+      farthest = Math.max(farthest, Math.hypot(bot.x - hurt.x, bot.y - hurt.y));
     }
-    return { by, bot: bot.id, closest };
+    return { by, bot: bot.id, closest, farthest };
   }
 
   test("it walks to a downed player 250 units off and revives them before they bleed out", () => {
     const r = reviveRun([], 7);
     expect(r.by).toBe(r.bot);
+  });
+
+  test("beside a downed player, it stands still through a swarm closing in and completes the revive", () => {
+    // 12 crawlers in a half ring behind the bot, 200 to 240 units out: inside KEEP_DIST, so the
+    // aimer underneath wants to run from them the whole time.
+    const swarm: [number, number][] = [];
+    for (let i = 0; i < 12; i++) {
+      const angle = Math.PI / 2 + (i / 12) * Math.PI;
+      const r = i % 2 ? 200 : 240;
+      swarm.push([1000 + Math.cos(angle) * r, 1200 + Math.sin(angle) * r]);
+    }
+    for (let seed = 1; seed <= 8; seed++) {
+      const r = reviveRun(swarm, seed, 30);
+      expect(r.closest).toBeLessThan(KEEP_DIST);
+      // It never moved: still 30 units off when the revive completed.
+      expect([seed, r.by, Math.round(r.farthest)]).toEqual([seed, r.bot, 30]);
+    }
   });
 
   test("it breaks off to revive in a live swarm: 30 crawlers chasing it from inside KEEP_DIST", () => {
