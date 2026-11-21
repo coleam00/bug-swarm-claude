@@ -1,10 +1,14 @@
 // Draws an arena frame: the floor grid, the walls, the bugs, every shot as a glowing streak, the
-// sparks, kill bursts and floating scores, every robot with its trail, barrel and name tag, your
-// own ring and heat arc, the HUD (score, multiplier, "streak lost", wave, hits left), the life-over
-// overlay, the sticks, the minimap and the F readout. It reuses release 1's sprites and pooled
+// sparks, kill bursts and floating scores, every robot with its trail, dash afterimage, barrel and
+// name tag, your own ring, heat arc and dash cooldown ring, the dash button, the HUD (score,
+// multiplier, "streak lost", wave, hits left), the life-over overlay, the sticks, the minimap and
+// the F readout. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
+// HELP over it, a ring fills between it and whoever is reviving it, an arrow at the screen's edge
+// points to each one out of view nearby, its minimap dot blinks, and your own HUD says DOWN with
+// the seconds left. It reuses release 1's sprites and pooled
 // effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
 // built on resize only; a frame allocates nothing but the strings of a value that changed.
-import { HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
+import { DOWN_S, HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
 import type { SnapshotMe } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
@@ -36,6 +40,8 @@ import { BUG_SPRITE_HALF, ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildBugSprites, b
 import { STICK_RANGE, stickKnob, type Stick } from "../game/stick";
 import { TEAM_LOOK } from "../teams";
 import type { Camera } from "./camera";
+import type { DashButton } from "./controls";
+import { edgeArrow, minimapDotOn, type EdgeArrow } from "./help";
 import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import { shotTravel, type ClientShots } from "./shots";
@@ -81,6 +87,21 @@ const HEAT_COOL = "#fde047";
 const HEAT_HOT = "#fb923c";
 const HEAT_WARN_ON = "#f87171";
 const HEAT_WARN_OFF = "#ffffff";
+/** A dash's afterimage: this many ghosts along the dash, fading out over AFTERIMAGE_S. */
+const AFTERIMAGE_GHOSTS = 4;
+const AFTERIMAGE_S = 0.25;
+/** The ghost nearest the robot starts this opaque, the farthest GHOST_FAR. */
+const GHOST_NEAR = 0.45;
+const GHOST_FAR = 0.1;
+/** The dash cooldown ring on your robot: the bottom gap of the heat arc, filling as it cools. */
+const DASH_RING_START = Math.PI * 0.3;
+const DASH_RING_SWEEP = Math.PI * 0.4;
+const DASH_READY = "#67e8f9";
+const DASH_COOLING = "rgba(103, 232, 249, 0.55)";
+const DASH_BUTTON_FILL = "rgba(5, 7, 13, 0.55)";
+const DASH_BUTTON_TRACK = "rgba(248, 250, 252, 0.2)";
+const DASH_BUTTON_WIDTH = 4;
+const DASH_FONT = "bold 15px system-ui, sans-serif";
 /** A robot that can't be hit blinks this fast, cycles a second. */
 const BLINK_HZ = 8;
 /**
@@ -110,10 +131,60 @@ const OVER_SHADE = "rgba(5, 7, 13, 0.6)";
 const OVER_TITLE_FONT = "bold 44px system-ui, sans-serif";
 const OVER_SCORE_FONT = "bold 30px system-ui, sans-serif";
 const OVER_LINE_FONT = "bold 20px system-ui, sans-serif";
+// Down and revive (#59).
+/** A downed robot's body: shrunk and squashed, flickering between these alphas. */
+const DOWN_SCALE = 0.85;
+const DOWN_SQUASH = 0.7;
+const DOWN_ALPHA_ON = 0.85;
+const DOWN_ALPHA_OFF = 0.35;
+const DOWN_FLICKER_HZ = 5;
+/** The countdown ring around a downed robot, world units. */
+const COUNTDOWN_RADIUS = PLAYER_RADIUS + 10;
+const COUNTDOWN_WIDTH = 3;
+const COUNTDOWN_TRACK = "rgba(248, 250, 252, 0.18)";
+const HELP_FILL = "#f87171";
+const HELP_FONT = "bold 15px system-ui, sans-serif";
+const HELP_TEXT = "HELP";
+/** HELP's baseline above the robot's centre, world units: over the name tag. */
+const HELP_ABOVE = NAME_ABOVE + 16;
+const REVIVE_WIDTH = 4;
+/** The revive ring is never smaller than this, world units, so it clears the countdown ring. */
+const REVIVE_MIN_RADIUS = COUNTDOWN_RADIUS + 9;
+const REVIVE_TRACK = "rgba(248, 250, 252, 0.15)";
+/** The edge arrow: a triangle this long and wide, CSS px. */
+const ARROW_LENGTH = 26;
+const ARROW_WIDTH = 20;
+const DOWN_FONT = "bold 40px system-ui, sans-serif";
+const DOWN_HINT_FONT = "bold 16px system-ui, sans-serif";
+/** The DOWN line, CSS px below the screen's centre (under your robot), and its hint below it. */
+const DOWN_BELOW = 70;
+const DOWN_HINT = "A player next to you revives you";
 
-/** One robot to draw, world units. `inv`: untouchable, so it blinks. */
-/** A robot to draw. `inv`: untouchable after a hit (the body blinks). `prot`: spawn-protected (a soft shimmer). */
-export type Robot = { id: number; x: number; y: number; aim: number; team: Team; name: string; trail: Trail; inv: boolean; prot: boolean };
+/**
+ * One robot to draw, world units. `inv`: untouchable, so it blinks. `prot`: spawn-protected (a
+ * soft shimmer, not the blink). `dashing`: in a dash now. `dashAt`: when its last dash began,
+ * scene seconds (-1: never), from `dashFromX, dashFromY`. `down`: waiting for a revive, with
+ * `left` seconds before bleeding out, `rev` (0 to 1) of a revive by player `revBy` (0: none).
+ */
+export type Robot = {
+  id: number;
+  x: number;
+  y: number;
+  aim: number;
+  team: Team;
+  name: string;
+  trail: Trail;
+  inv: boolean;
+  prot: boolean;
+  dashing: boolean;
+  dashAt: number;
+  dashFromX: number;
+  dashFromY: number;
+  down: boolean;
+  left: number;
+  rev: number;
+  revBy: number;
+};
 
 /** The bugs to draw this frame, world units, in typed arrays filled by main.ts. */
 export type BugsView = { x: Float32Array; y: Float32Array; heading: Float32Array; phase: Float32Array; kind: Uint8Array; count: number };
@@ -145,6 +216,10 @@ export type Scene = {
   over: OverView | null;
   sticks: readonly Stick[];
   stats: string | null;
+  /** The dash button, CSS px, while you are in a life; else null. */
+  dashButton: DashButton | null;
+  /** How far your dash has cooled, 0 to 1 (1: ready). */
+  dashReady: number;
 };
 
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
@@ -166,6 +241,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let vignette: HTMLCanvasElement | null = null;
   let minimap: MinimapLayout = minimapLayout(1, 1, { top: 0, right: 0, bottom: 0, left: 0 });
   let hud = hudLayout(1, { top: 0, right: 0, bottom: 0, left: 0 });
+  const safe: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+  const arrow: EdgeArrow = { x: 0, y: 0, angle: 0 };
   const knob = { x: 0, y: 0 };
   const dot = { x: 0, y: 0 };
   // HUD strings, rebuilt only when their value changes.
@@ -173,6 +250,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let scoreText = "";
   const multTexts = new Map<number, string>();
   const waveTexts = new Map<number, string>();
+  const downTexts = new Map<number, string>();
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
   let vt = 0;
@@ -183,6 +261,11 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const multText = (m: number) => {
     let s = multTexts.get(m);
     if (s === undefined) multTexts.set(m, (s = `x${m}`));
+    return s;
+  };
+  const downText = (sec: number) => {
+    let s = downTexts.get(sec);
+    if (s === undefined) downTexts.set(sec, (s = "DOWN " + sec));
     return s;
   };
   const waveText = (w: number) => {
@@ -198,6 +281,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     dpr = newDpr;
     minimap = minimapLayout(w, h, insets);
     hud = hudLayout(w, insets);
+    Object.assign(safe, insets);
     const k = dpr * cam.scale;
     if (teams && Math.abs(k - ppu) < 0.01) return;
     ppu = k;
@@ -228,7 +312,52 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
   }
 
+  /** A downed robot: no trail and no barrel, the body slumped and flickering, in its countdown ring. */
+  function drawDowned(r: Robot, t: number): void {
+    const ts = teams![r.team];
+    ctx.lineWidth = COUNTDOWN_WIDTH;
+    ctx.strokeStyle = COUNTDOWN_TRACK;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, COUNTDOWN_RADIUS, 0, TAU);
+    ctx.stroke();
+    ctx.strokeStyle = HELP_FILL;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, COUNTDOWN_RADIUS, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, Math.max(0, r.left / DOWN_S)));
+    ctx.stroke();
+    const rh = PLAYER_RADIUS * ROBOT_SPRITE_HALF * DOWN_SCALE;
+    ctx.globalAlpha = flashOn(t + r.id * 0.37, DOWN_FLICKER_HZ) ? DOWN_ALPHA_ON : DOWN_ALPHA_OFF;
+    ctx.drawImage(ts.body, r.x - rh, r.y - rh * DOWN_SQUASH + PLAYER_RADIUS * 0.2, rh * 2, rh * 2 * DOWN_SQUASH);
+    ctx.globalAlpha = 1;
+  }
+
+  /** The revive's progress: a ring around the downed robot and its reviver, filling in the reviver's colour. */
+  function drawRevive(r: Robot, robots: readonly Robot[], count: number): void {
+    if (r.revBy === 0) return;
+    let h: Robot | null = null;
+    for (let i = 0; i < count; i++) if (robots[i]!.id === r.revBy) h = robots[i]!;
+    if (!h) return;
+    const mx = (r.x + h.x) / 2;
+    const my = (r.y + h.y) / 2;
+    const radius = Math.max(REVIVE_MIN_RADIUS, Math.hypot(h.x - r.x, h.y - r.y) / 2 + PLAYER_RADIUS);
+    ctx.lineWidth = REVIVE_WIDTH;
+    ctx.strokeStyle = REVIVE_TRACK;
+    ctx.beginPath();
+    ctx.arc(mx, my, radius, 0, TAU);
+    ctx.stroke();
+    if (r.rev <= 0) return;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = TEAM_LOOK[h.team].color;
+    ctx.beginPath();
+    ctx.arc(mx, my, radius, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, r.rev));
+    ctx.stroke();
+    ctx.lineCap = "butt";
+  }
+
   function drawRobot(r: Robot, t: number): void {
+    if (r.down) {
+      drawDowned(r, t);
+      return;
+    }
     const ts = teams![r.team];
     // Trail, newest first, skipping the point under the robot.
     ctx.globalCompositeOperation = "lighter";
@@ -253,6 +382,26 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    // A dash's afterimage: ghosts of the body along the dash, fainter the farther back, fading out.
+    const since = t - r.dashAt;
+    if (r.dashAt >= 0 && since < AFTERIMAGE_S) {
+      const fade = 1 - since / AFTERIMAGE_S;
+      const rh = PLAYER_RADIUS * ROBOT_SPRITE_HALF;
+      const gs = PLAYER_RADIUS * 1.3;
+      for (let g = 0; g < AFTERIMAGE_GHOSTS; g++) {
+        // g = 0 at the start of the dash, the last one just behind the robot.
+        const f = g / AFTERIMAGE_GHOSTS;
+        const gx = r.dashFromX + (r.x - r.dashFromX) * f;
+        const gy = r.dashFromY + (r.y - r.dashFromY) * f;
+        const alpha = fade * (GHOST_FAR + (GHOST_NEAR - GHOST_FAR) * f);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(ts.body, gx - rh, gy - rh, rh * 2, rh * 2);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.drawImage(ts.glow, gx - gs, gy - gs, gs * 2, gs * 2);
+        ctx.globalCompositeOperation = "source-over";
+      }
+      ctx.globalAlpha = 1;
+    }
     // Untouchable: the body blinks (the trail, halo and ring stay, so you never lose it).
     if (r.inv && !flashOn(t, BLINK_HZ)) return;
     // The barrel under the body, so it reads as coming out of it.
@@ -370,6 +519,51 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineCap = "butt";
   }
 
+  /** Your dash cooling: a short arc in the heat arc's bottom gap, filling up; gone once ready. */
+  function drawDashRing(me: Robot, ready: number): void {
+    if (ready >= 1) return;
+    ctx.lineCap = "round";
+    ctx.lineWidth = HEAT_WIDTH;
+    ctx.strokeStyle = HEAT_TRACK;
+    ctx.beginPath();
+    ctx.arc(me.x, me.y, HEAT_RADIUS, DASH_RING_START, DASH_RING_START + DASH_RING_SWEEP);
+    ctx.stroke();
+    if (ready > 0) {
+      ctx.strokeStyle = DASH_COOLING;
+      ctx.beginPath();
+      ctx.arc(me.x, me.y, HEAT_RADIUS, DASH_RING_START, DASH_RING_START + DASH_RING_SWEEP * ready);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+  }
+
+  /** The dash button, CSS px: a round button with a cooldown sweep around its edge, bright when ready. */
+  function drawDashButton(b: DashButton, ready: number): void {
+    const on = ready >= 1;
+    ctx.fillStyle = DASH_BUTTON_FILL;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r, 0, TAU);
+    ctx.fill();
+    ctx.lineWidth = DASH_BUTTON_WIDTH;
+    ctx.strokeStyle = DASH_BUTTON_TRACK;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.r - DASH_BUTTON_WIDTH / 2, 0, TAU);
+    ctx.stroke();
+    if (ready > 0) {
+      ctx.strokeStyle = on ? DASH_READY : DASH_COOLING;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r - DASH_BUTTON_WIDTH / 2, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, ready));
+      ctx.stroke();
+    }
+    ctx.globalAlpha = on ? 1 : 0.5;
+    ctx.font = DASH_FONT;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = on ? DASH_READY : TEXT_FILL;
+    ctx.fillText("DASH", b.x, b.y + 1);
+    ctx.globalAlpha = 1;
+  }
+
   function drawHud(sc: Scene): void {
     const me = sc.me;
     ctx.textAlign = "left";
@@ -411,14 +605,32 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.fillText("streak lost", hud.left + 58, y);
         ctx.globalAlpha = 1;
       }
-      // Hits left, flashing as one goes.
-      const py = my + 40;
-      const flash = sc.hud.hit > 0 && flashOn(sc.t, 10);
-      for (let i = 0; i < HITS_PER_LIFE; i++) {
-        ctx.beginPath();
-        ctx.arc(hud.left + PIP_RADIUS + i * PIP_GAP, py, PIP_RADIUS, 0, TAU);
-        ctx.fillStyle = i < me.hl ? PIP_FULL : flash ? LOST_FILL : PIP_EMPTY;
-        ctx.fill();
+      // Hits left, flashing as one goes; while down, DOWN and the seconds left instead.
+      const you = sc.self >= 0 ? sc.robots[sc.self] : undefined;
+      if (me.dn === 1 && you?.down) {
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = 5;
+        ctx.font = DOWN_FONT;
+        ctx.fillStyle = HELP_FILL;
+        const label = downText(Math.ceil(you.left));
+        const dy = cssH / 2 + DOWN_BELOW;
+        ctx.strokeText(label, hud.center, dy);
+        ctx.fillText(label, hud.center, dy);
+        ctx.lineWidth = 4;
+        ctx.font = DOWN_HINT_FONT;
+        ctx.fillStyle = TEXT_FILL;
+        ctx.strokeText(DOWN_HINT, hud.center, dy + 34);
+        ctx.fillText(DOWN_HINT, hud.center, dy + 34);
+      } else {
+        const py = my + 40;
+        const flash = sc.hud.hit > 0 && flashOn(sc.t, 10);
+        for (let i = 0; i < HITS_PER_LIFE; i++) {
+          ctx.beginPath();
+          ctx.arc(hud.left + PIP_RADIUS + i * PIP_GAP, py, PIP_RADIUS, 0, TAU);
+          ctx.fillStyle = i < me.hl ? PIP_FULL : flash ? LOST_FILL : PIP_EMPTY;
+          ctx.fill();
+        }
       }
     }
     if (sc.wave > 0) {
@@ -505,7 +717,11 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.setTransform(k, 0, 0, k, ox, oy);
     drawParticles(sc.particles);
 
-    // Robots in view, yours last.
+    // Revive rings under the robots, then the robots in view, yours last.
+    for (let i = 0; i < count; i++) {
+      const r = robots[i]!;
+      if (r.down && inView(r.x, r.y)) drawRevive(r, robots, count);
+    }
     for (let i = 0; i < count; i++) if (i !== self && inView(robots[i]!.x, robots[i]!.y)) drawRobot(robots[i]!, t);
     const me = self >= 0 ? robots[self] : undefined;
     if (me) {
@@ -515,9 +731,12 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
       drawRobot(me, t);
-      const mh = PLAYER_RADIUS * ROBOT_MARK_HALF;
-      ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);
-      if (sc.me) drawHeat(me, sc.me, t);
+      if (!me.down) {
+        const mh = PLAYER_RADIUS * ROBOT_MARK_HALF;
+        ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);
+        if (sc.me) drawHeat(me, sc.me, t);
+        drawDashRing(me, sc.dashReady);
+      }
     }
     // Name tags over every robot, as canvas text (never HTML: names are typed by viewers).
     ctx.font = NAME_FONT;
@@ -531,6 +750,20 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       if (!inView(r.x, r.y)) continue;
       ctx.fillStyle = i === self ? NAME_FILL : TEAM_LOOK[r.team].color;
       drawName(r);
+    }
+    // HELP over every downed robot in view, yours too, pulsing.
+    ctx.font = HELP_FONT;
+    ctx.fillStyle = HELP_FILL;
+    const pulse = 1 + 0.18 * Math.sin(t * 7);
+    for (let i = 0; i < count; i++) {
+      const r = robots[i]!;
+      if (!r.down || !inView(r.x, r.y)) continue;
+      ctx.save();
+      ctx.translate(r.x, r.y - HELP_ABOVE);
+      ctx.scale(pulse, pulse);
+      ctx.strokeText(HELP_TEXT, 0, 0);
+      ctx.fillText(HELP_TEXT, 0, 0);
+      ctx.restore();
     }
 
     // Screen space: the vignette, the hit flash, floating scores, the HUD, the sticks, the minimap.
@@ -565,7 +798,33 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
       ctx.globalAlpha = 1;
     }
+    if (sc.dashButton && !sc.over) drawDashButton(sc.dashButton, sc.dashReady);
     for (const s of sc.sticks) drawStick(s);
+
+    // An arrow at the edge to each downed player out of view within reach of you.
+    if (me) {
+      for (let i = 0; i < count; i++) {
+        const r = robots[i]!;
+        if (i === self || !r.down) continue;
+        if (!edgeArrow(cam, cssW, cssH, safe, me.x, me.y, r.x, r.y, arrow)) continue;
+        ctx.save();
+        ctx.translate(arrow.x, arrow.y);
+        ctx.rotate(arrow.angle);
+        ctx.globalAlpha = 0.7 + 0.3 * Math.sin(t * 7);
+        ctx.fillStyle = HELP_FILL;
+        ctx.strokeStyle = TEXT_STROKE;
+        ctx.lineWidth = 3;
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(ARROW_LENGTH / 2, 0);
+        ctx.lineTo(-ARROW_LENGTH / 2, -ARROW_WIDTH / 2);
+        ctx.lineTo(-ARROW_LENGTH / 2, ARROW_WIDTH / 2);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
 
     const m = minimap;
     ctx.fillStyle = MINIMAP_FILL;
@@ -586,6 +845,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     for (let i = 0; i < count; i++) {
       const r = robots[i]!;
+      if (!minimapDotOn(r.down, t)) continue;
       toMinimap(m, r.x, r.y, dot);
       ctx.fillStyle = TEAM_LOOK[r.team].color;
       ctx.beginPath();

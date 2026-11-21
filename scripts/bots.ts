@@ -1,4 +1,4 @@
-// `bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer]`:
+// `bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer|dasher]`:
 // real WebSocket clients named bots-01, bots-02, ... (alternating teams) join the arena 25 ms
 // apart and play, sending one input every 50 ms, for the given time: by default with the aimer
 // policy (src/shared/arena/policies.ts), which aims, fires in bursts and respawns; `wander` walks

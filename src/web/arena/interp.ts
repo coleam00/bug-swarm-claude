@@ -3,7 +3,7 @@
 // server, between two snapshots, and move smoothly at any frame rate. Pure: the frame time comes
 // in as a number.
 import { INTERP_DELAY_MS, TICK_MS } from "../../shared/arena/constants";
-import type { SnapshotBug, SnapshotPlayer } from "../../shared/arena/protocol";
+import type { SnapshotBug, SnapshotDown, SnapshotPlayer } from "../../shared/arena/protocol";
 
 /** Snapshots kept: half a second at 20 Hz. */
 export const INTERP_BUFFER = 10;
@@ -20,6 +20,8 @@ type Frame = {
   b: SnapshotBug[];
   /** The bugs by id, for the frame after the one drawn from. */
   bi: Map<number, SnapshotBug>;
+  /** Who is down, with seconds left and revive progress. */
+  d: SnapshotDown[];
 };
 
 export type Interp = {
@@ -42,12 +44,19 @@ export function resetInterp(it: Interp): void {
 }
 
 /** A snapshot arrived at `nowMs`. Out-of-order or repeated ticks are ignored. */
-export function pushSnapshot(it: Interp, tick: number, players: SnapshotPlayer[], nowMs: number, bugs: SnapshotBug[] = []): void {
+export function pushSnapshot(
+  it: Interp,
+  tick: number,
+  players: SnapshotPlayer[],
+  nowMs: number,
+  bugs: SnapshotBug[] = [],
+  downs: SnapshotDown[] = [],
+): void {
   const newest = it.frames[it.frames.length - 1];
   if (newest && tick <= newest.tick) return;
   const bi = new Map<number, SnapshotBug>();
   for (const b of bugs) bi.set(b[0], b);
-  it.frames.push({ tick, p: players, b: bugs, bi });
+  it.frames.push({ tick, p: players, b: bugs, bi, d: downs });
   if (it.frames.length > INTERP_BUFFER) it.frames.shift();
   const target = tick - nowMs / TICK_MS;
   if (it.offset === null || Math.abs(target - it.offset) > CLOCK_RESET_TICKS) {
@@ -76,8 +85,12 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
-/** Where a player is drawn: position, aim, whether they are in a life, untouchable after a hit, and spawn-protected. */
-export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; prot: boolean };
+/**
+ * Where a player is drawn: position, aim, and whether they are in a life, untouchable, dashing and
+ * spawn-protected then. Past a snapshot, `dash` is the next one's, so a dash shows from where it
+ * starts.
+ */
+export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; dash: boolean; prot: boolean };
 
 /**
  * Where player `id` is at server tick `at`, into `out`: between the two snapshots around it (aim
@@ -105,7 +118,8 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.aim = rb[5];
     out.alive = rb[6] === 1;
     out.inv = rb[7] === 1;
-    out.prot = rb[8] === 1;
+    out.dash = rb[8] === 1;
+    out.prot = rb[9] === 1;
     return true;
   }
   if (ra[6] !== rb[6]) {
@@ -114,7 +128,8 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.aim = ra[5];
     out.alive = ra[6] === 1;
     out.inv = ra[7] === 1;
-    out.prot = ra[8] === 1;
+    out.dash = ra[8] === 1;
+    out.prot = ra[9] === 1;
     return true;
   }
   const t = Math.min(1, Math.max(0, (at - fa.tick) / (fb.tick - fa.tick)));
@@ -123,7 +138,8 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
   out.aim = lerpAngle(ra[5], rb[5], t);
   out.alive = ra[6] === 1;
   out.inv = ra[7] === 1;
-  out.prot = ra[8] === 1;
+  out.dash = (t > 0 ? rb : ra)[8] === 1;
+  out.prot = ra[9] === 1;
   return true;
 }
 
@@ -151,6 +167,30 @@ export function bugSpan(it: Interp, at: number, span: BugSpan): BugSpan {
     span.t = Math.min(1, (at - span.from.tick) / (next.tick - span.from.tick));
   }
   return span;
+}
+
+const findDown = (f: Frame, id: number) => {
+  for (const row of f.d) if (row[0] === id) return row;
+  return undefined;
+};
+
+/**
+ * Player `id`'s down row at tick `at`, from the frame `sample` draws them from (the one at or
+ * before `at`, else the oldest), so a robot slumps on the same tick it is drawn hit. Undefined
+ * when they are not down then.
+ */
+export function downAt(it: Interp, id: number, at: number): SnapshotDown | undefined {
+  const frames = it.frames;
+  let a = frames.length - 1;
+  if (a < 0) return undefined;
+  while (a > 0 && frames[a]!.tick > at) a--;
+  return findDown(frames[a]!, id);
+}
+
+/** Player `id`'s down row in the newest snapshot (your own, drawn at the server's present). */
+export function newestDown(it: Interp, id: number): SnapshotDown | undefined {
+  const f = it.frames[it.frames.length - 1];
+  return f ? findDown(f, id) : undefined;
 }
 
 /** The newest snapshot, for the ids and the minimap. */

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
-import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
+import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, downAt, newestDown, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
-const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, 0];
-const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, prot: false });
+const row = (id: number, x: number, y: number, aim = 0, dash: 0 | 1 = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, dash, 0];
+const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false });
 
 describe("sampling", () => {
   test("halfway between two snapshots is halfway between their positions", () => {
@@ -13,7 +13,7 @@ describe("sampling", () => {
     pushSnapshot(it, 11, [row(1, 110, 180)], 50);
     const o = out();
     expect(sample(it, 1, 10.5, o)).toBe(true);
-    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false, prot: false });
+    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false, dash: false, prot: false });
   });
 
   test("aim turns along the shorter arc, across the -pi/pi seam", () => {
@@ -85,10 +85,24 @@ describe("the tick clock", () => {
 });
 
 describe("lives and bugs", () => {
+  test("a dash shows from the moment the robot starts to move toward its first dashing snapshot", () => {
+    const it = createInterp();
+    pushSnapshot(it, 10, [row(1, 100, 100)], 0);
+    pushSnapshot(it, 11, [row(1, 173, 100, 0, 1)], 50);
+    pushSnapshot(it, 12, [row(1, 247, 100, 0, 0)], 100);
+    const o = out();
+    sample(it, 1, 10, o);
+    expect(o.dash).toBe(false);
+    sample(it, 1, 10.2, o);
+    expect(o.dash).toBe(true);
+    sample(it, 1, 11.5, o);
+    expect(o.dash).toBe(false);
+  });
+
   test("a respawn does not slide across the map: the out snapshot holds until the new one", () => {
     const it = createInterp();
-    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0, 0]], 0);
-    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1, 1]], 50);
+    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0, 0, 0]], 0);
+    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1, 0, 1]], 50);
     const o = out();
     sample(it, 1, 10.9, o);
     expect([o.x, o.alive]).toEqual([100, false]);
@@ -115,5 +129,30 @@ describe("lives and bugs", () => {
     bugSpan(it, 11.2, span);
     expect(span.from!.b.map((b) => b[0])).toEqual([1]);
     expect(span.to).toBeNull();
+  });
+});
+
+describe("downs", () => {
+  test("a down row is read from the frame at or before the drawing time, like the robot's other states", () => {
+    const it = createInterp();
+    pushSnapshot(it, 10, [row(1, 0, 0)], 0, [], []);
+    pushSnapshot(it, 11, [row(1, 0, 0)], 50, [], [[1, 9.95, 0, 0]]);
+    pushSnapshot(it, 12, [row(1, 0, 0)], 100, [], [[1, 9.9, 2, 0.03]]);
+    expect(downAt(it, 1, 10.9)).toBeUndefined();
+    expect(downAt(it, 1, 11)).toEqual([1, 9.95, 0, 0]);
+    expect(downAt(it, 1, 11.5)).toEqual([1, 9.95, 0, 0]);
+    expect(downAt(it, 1, 14)).toEqual([1, 9.9, 2, 0.03]);
+    expect(downAt(it, 1, 2)).toBeUndefined(); // before the buffer: the oldest
+    expect(downAt(it, 2, 12)).toBeUndefined();
+  });
+
+  test("your own down row is the newest snapshot's", () => {
+    const it = createInterp();
+    expect(newestDown(it, 1)).toBeUndefined();
+    pushSnapshot(it, 10, [row(1, 0, 0)], 0, [], [[1, 5, 0, 0]]);
+    pushSnapshot(it, 11, [row(1, 0, 0)], 50);
+    expect(newestDown(it, 1)).toBeUndefined();
+    pushSnapshot(it, 12, [row(1, 0, 0)], 100, [], [[1, 4.9, 0, 0]]);
+    expect(newestDown(it, 1)).toEqual([1, 4.9, 0, 0]);
   });
 });

@@ -56,9 +56,28 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 5;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
+
+// ---- Dash (#60). A press bursts you along your move (your aim if still), untouchable while it lasts. ----
+
+/** How far a dash carries you on open floor, units. */
+export const DASH_DISTANCE = 220;
+/** How long a dash lasts, seconds: DASH_TICKS steps at DASH_SPEED. Untouchable throughout. */
+export const DASH_S = 0.15;
+export const DASH_TICKS = Math.round(DASH_S / DT);
+/** A dash's speed, units per second (73.3 units a tick). */
+export const DASH_SPEED = DASH_DISTANCE / DASH_S;
+/** From one dash's press until the next press is accepted, seconds. A press before then is dropped. */
+export const DASH_COOLDOWN_S = 1.5;
+export const DASH_COOLDOWN_TICKS = Math.round(DASH_COOLDOWN_S / DT);
+/**
+ * A new life cannot dash for this long, seconds, so the press that respawned you (or a second one
+ * sent before your browser sees you alive) never dashes you off the spawn.
+ */
+export const DASH_SPAWN_LOCK_S = 0.5;
+export const DASH_SPAWN_LOCK_TICKS = Math.round(DASH_SPAWN_LOCK_S / DT);
 
 // ---- Shooting (#55). Holding fire shoots travelling shots from the barrel along the aim. ----
 
@@ -98,14 +117,14 @@ export type BugKind = (typeof BUG_KINDS)[number];
 export const [CRAWLER] = BUG_KINDS;
 /** A crawler's collision radius, units. */
 export const CRAWLER_RADIUS = 12;
-/** A crawler's speed, units per second, straight at the nearest alive player. */
+/** A crawler's speed, units per second, straight at the nearest player who is up (not down). */
 export const CRAWLER_SPEED = 160;
 /** Shots a crawler takes to die. */
 export const CRAWLER_HP = 1;
 /** Points for a kill, before the streak multiplier. */
 export const KILL_POINTS = 10;
 
-// ---- Spawning (#55). Pressure is personal: each alive player brings their own spawn budget. ----
+// ---- Spawning (#55). Pressure is personal: each player who is up brings their own spawn budget. ----
 
 /** A new life's spawn rate, bugs per second. */
 export const SPAWN_BASE_PER_S = 0.3;
@@ -134,7 +153,7 @@ export const VIEW_WALL_MARGIN = 60;
 
 // ---- Lives, waves and the streak (#55). ----
 
-/** Hits that end a life (a later item turns this into "down" with a revive). */
+/** Hits that put you down (a revive brings you back with one hit left). */
 export const HITS_PER_LIFE = 3;
 /** Untouchable time after a hit, seconds (a spawn has SPAWN_PROTECT_S instead). */
 export const INVULN_S = 1;
@@ -148,3 +167,22 @@ export const STREAK_STEPS: readonly (readonly [number, number])[] = [
   [10, 2],
   [5, 1.5],
 ];
+
+// ---- Down and revive (#59). The last hit puts you down, not out; anyone can bring you back. ----
+
+/** How long you stay down before the life ends (bleeds out), seconds. */
+export const DOWN_S = 10;
+/** How long a player must stay in range to revive you, seconds. */
+export const REVIVE_S = 2;
+/** How close a reviver must be, centre to centre, units (inclusive). */
+export const REVIVE_RANGE = 60;
+/** Untouchable time after a revive, seconds. */
+export const REVIVE_PROTECT_S = 1.5;
+/** Points a revive scores for the reviver (and so for their team). */
+export const REVIVE_POINTS = 50;
+/** The browser points an arrow at the screen's edge to a downed player out of view within this, units. */
+export const HELP_ARROW_RANGE = 1200;
+/** The same times in ticks. */
+export const DOWN_TICKS = Math.round(DOWN_S / DT);
+export const REVIVE_TICKS = Math.round(REVIVE_S / DT);
+export const REVIVE_PROTECT_TICKS = Math.round(REVIVE_PROTECT_S / DT);

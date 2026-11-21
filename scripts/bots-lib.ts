@@ -7,10 +7,10 @@ import type { Snapshot } from "../src/shared/arena/protocol";
 import { nextRandom, type Rng } from "../src/shared/arena/rng";
 import { TEAMS, type Team } from "../src/server/rules";
 
-export const USAGE = "usage: bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer]";
+export const USAGE = "usage: bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer|dasher]";
 
 /** How bots play: `wander` (#52's walk and aim sweep, never firing) or a policy from policies.ts. */
-export const BOT_POLICIES = ["wander", "mover", "aimer"] as const;
+export const BOT_POLICIES = ["wander", "mover", "aimer", "dasher"] as const;
 export type BotPolicy = (typeof BOT_POLICIES)[number];
 /** Bots aim and fire with the aimer unless told otherwise (#55). */
 export const DEFAULT_BOT_POLICY: BotPolicy = "aimer";
@@ -153,6 +153,7 @@ export function createObservationTracker(): ObservationTracker {
       s.alive = m.me.al === 1;
       s.heat = m.me.he;
       s.locked = m.me.lk === 1;
+      s.dashReady = s.alive && m.me.dc === 0 && m.me.dk === 0;
       next.clear();
       for (let i = 0; i < m.b.length; i++) {
         const [id, , x, y] = m.b[i]!;
