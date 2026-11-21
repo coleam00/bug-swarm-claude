@@ -40,7 +40,13 @@ import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake; pops: Pops };
 
+/** The F readout. loop.ts refreshes the numbers twice a second and bumps `reading` when it does. */
+export type Stats = { show: boolean; fps: number; bugs: number; effects: number; reading: number };
+
 const HUD_FONT = "bold 28px system-ui, sans-serif";
+const STATS_FONT = "bold 16px system-ui, sans-serif";
+/** The readout's line, under the HUD's top row. */
+const STATS_Y = 52;
 const TAU = Math.PI * 2;
 /** Leg frames walked forward then back: 0 1 2 3 2 1. */
 const LEG_CYCLE = [0, 1, 2, 3, 2, 1];
@@ -68,6 +74,8 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
   let scoreText = "";
   let hitsText = "";
   let timeText = "";
+  let statsReading = -1;
+  let statsText = "";
 
   /** Takes the layout loop.ts worked out; rebuilds sprites only when their resolution changes. */
   function resize(newDpr: number, newScale: number, newOffX: number, newOffY: number): void {
@@ -82,7 +90,7 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     }
   }
 
-  function draw(state: State, fx: Fx): void {
+  function draw(state: State, fx: Fx, stats: Stats): void {
     const s = sprites;
     if (!s) return;
     const k = dpr * scale;
@@ -310,6 +318,17 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     ctx.textAlign = "right";
     ctx.fillStyle = "#f43f5e";
     ctx.fillText(hitsText, w - 16, 16);
+
+    if (stats.show) {
+      if (stats.reading !== statsReading) {
+        statsReading = stats.reading;
+        statsText = `${Math.round(stats.fps)} fps · ${stats.bugs} bugs · ${stats.effects} fx`;
+      }
+      ctx.font = STATS_FONT;
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText(statsText, 16, STATS_Y);
+    }
   }
 
   return { resize, draw };

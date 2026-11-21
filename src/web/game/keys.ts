@@ -23,3 +23,6 @@ export const CHOICE_KEYS: ReadonlyMap<string, number> = new Map([
   ["Numpad2", 1],
   ["Numpad3", 2],
 ]);
+
+/** Toggles the frame-rate readout (fps, bugs on screen, effects alive). Desktop: it needs a keyboard. */
+export const STATS_KEY = "KeyF";

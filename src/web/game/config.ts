@@ -69,6 +69,13 @@ export const BUG_KINDS = [
 
 export const BASE_BUG: BugKind = BUG_KINDS[0];
 
+// Stress mode (dev and bench only; such runs are never submitted): the full swarm with every
+// upgrade, for measuring the frame rate. See State.stress in sim.ts and src/web/stress.ts.
+/** Bugs a bare `?stress` holds on screen. */
+export const STRESS_DEFAULT = 150;
+/** Seconds of run time a stress run lasts, so a benchmark has a fixed window. */
+export const STRESS_SECONDS = 60;
+
 // Upgrades. The ids live in rules.ts (UPGRADE_IDS); each array here is indexed by level, 0 to 2.
 /** Seconds of run time between upgrade choices. The choice pauses the run. */
 export const CHOICE_EVERY = 20;

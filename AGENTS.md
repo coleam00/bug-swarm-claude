@@ -10,4 +10,4 @@ A 2-minute browser survival game for a livestream audience: steer a robot throug
 Quick commands:
 - `bun install` then `bun run dev`
 - `bun run check` must pass before any pull request.
-- `bun run stats` prints the bet's numbers. `bun run hide "<name>"` hides a name from every board.
+- `bun run bench` measures the frame rate at 150 bugs in headless Chrome. `bun run stats` prints the bet's numbers. `bun run hide "<name>"` hides a name from every board.

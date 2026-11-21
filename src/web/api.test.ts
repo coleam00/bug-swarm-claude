@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { endRun, fetchBest, fetchTop, startRun } from "./api";
+import { endRun, fetchBest, fetchTop, finishRun, startRun } from "./api";
 import type { RunResult } from "./game/loop";
 import { REVIEW_LASER } from "../server/rules";
 
 const realFetch = globalThis.fetch;
 let respond: () => Response | Promise<Response>;
 let sent: unknown;
+let calls: number;
 beforeEach(() => {
   sent = undefined;
+  calls = 0;
   globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    calls++;
     sent = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     return respond();
   }) as unknown as typeof fetch;
@@ -46,6 +49,21 @@ test("endRun: saved only when the server accepted the score", async () => {
   expect(await endRun("run-1", RESULT)).toBe("failed");
   respond = down;
   expect(await endRun("run-1", RESULT)).toBe("failed");
+});
+
+test("finishRun saves under the run's id, fails without one, and sends nothing for a stress run", async () => {
+  respond = () => json(200, { ok: true });
+  expect(await finishRun(Promise.resolve({ kind: "ok", runId: "run-1" }), RESULT)).toBe("saved");
+  expect(sent).toEqual(RESULT);
+  expect(await finishRun(Promise.resolve({ kind: "failed" }), RESULT)).toBe("failed");
+  expect(await finishRun(Promise.resolve({ kind: "name-refused" }), RESULT)).toBe("failed");
+  respond = down;
+  expect(await finishRun(Promise.resolve({ kind: "ok", runId: "run-1" }), RESULT)).toBe("failed");
+  calls = 0;
+  sent = undefined;
+  expect(await finishRun(null, RESULT)).toBe("not-saved");
+  expect(calls).toBe(0);
+  expect(sent).toBeUndefined();
 });
 
 test("fetchTop and fetchBest report a failure instead of throwing", async () => {

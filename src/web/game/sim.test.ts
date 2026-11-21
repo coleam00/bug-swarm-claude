@@ -15,12 +15,15 @@ import {
   FIRE_INTERVAL,
   INVULN_SECONDS,
   LASER_PIERCE,
+  MAX_BUGS,
+  MAX_HITS,
   MOVING_FIRE_RATE,
   ROBOT_RADIUS,
   ROBOT_SPEED,
   SHIELD_CHARGES,
   SPAWN_MIN,
   SPAWN_START,
+  STRESS_SECONDS,
   spawnInterval,
 } from "./config";
 import { bombCharge, bombRing, choose, createState, droneCount, droneX, droneY, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
@@ -890,5 +893,74 @@ describe("CI drone", () => {
     expect(drones.squashes).toBeGreaterThan(0);
     expect(drones.spawned).toBe(control.spawned);
     expect(drones.rng).toEqual(control.rng);
+  });
+});
+
+describe("stress mode", () => {
+  test("holds the swarm at its count after every step, the one after a bomb blast too", () => {
+    const s = createState(3, TALL, 150);
+    let blasts = 0;
+    let bombAt = s.bombAt;
+    while (!s.over) {
+      step(s, circle(s), DT);
+      expect(s.bugs.length).toBe(150);
+      if (s.bombAt !== bombAt) {
+        blasts++;
+        bombAt = s.bombAt;
+      }
+    }
+    // Charged at the start, then every 15 s (level 2) of the 60 s run.
+    expect(blasts).toBeGreaterThanOrEqual(4);
+    expect(s.bugs.some((b) => b.kind.id === "fast")).toBe(true);
+  });
+
+  test("every upgrade is at its top level, no choice comes up, and the robot can't lose", () => {
+    const s = createState(3, TALL, 150);
+    for (const id of UPGRADE_IDS) expect(s.levels[id]).toBe(UPGRADE_MAX_LEVEL);
+    expect(s.shield).toBe(SHIELD_CHARGES[UPGRADE_MAX_LEVEL]);
+    while (s.time < 59) {
+      step(s, NONE, DT); // standing in the swarm: hit or blocked once every safe window
+      expect(s.choice).toBeNull();
+      expect(s.over).toBe(false);
+    }
+    expect(s.hits).toBeGreaterThan(MAX_HITS);
+    // The bubble comes back after each hit it lets through: more blocks than its charges.
+    expect(s.blocks).toBeGreaterThan(SHIELD_CHARGES[UPGRADE_MAX_LEVEL]);
+  });
+
+  test("ends at its time, with every upgrade taken twice", () => {
+    const s = createState(3, WIDE, 150);
+    while (!s.over && s.time < STRESS_SECONDS + 1) step(s, NONE, DT);
+    expect(s.over).toBe(true);
+    expect(s.time).toBeCloseTo(STRESS_SECONDS, 6);
+    const ups = runResult(s, false).upgrades;
+    expect(ups).toHaveLength(UPGRADE_IDS.length * UPGRADE_MAX_LEVEL);
+    for (const id of UPGRADE_IDS) expect(ups.filter((u) => u === id)).toHaveLength(UPGRADE_MAX_LEVEL);
+  });
+
+  test("its count is a whole number of bugs, at most MAX_BUGS", () => {
+    expect(createState(1, TALL, 999).stress).toBe(MAX_BUGS);
+    expect(createState(1, TALL, 12.7).stress).toBe(12);
+    expect(createState(1, TALL, -5).stress).toBe(0);
+    expect(createState(1, TALL, Number.NaN).stress).toBe(0);
+  });
+
+  test("a normal run plays as it did before stress mode existed", () => {
+    // Pinned from the simulation before stress mode was added: 45 s of circling with choices
+    // taken, past the fast bug's 30 s, so the spawn's draw order is covered too.
+    const s = createState(7, TALL);
+    expect(s.stress).toBe(0);
+    for (let i = 0; i < 2700; i++) {
+      const a = s.time * 1.3;
+      step(s, { kind: "target", x: 225 + 90 * Math.cos(a), y: 400 + 90 * Math.sin(a) }, DT);
+      if (s.choice) choose(s, 0);
+      s.hits = 0;
+    }
+    expect({ spawned: s.spawned, squashes: s.squashes, rng: s.rng.state, taken: s.taken }).toEqual({
+      spawned: 100,
+      squashes: 95,
+      rng: 857295265,
+      taken: [CI_DRONE, REVIEW_LASER],
+    });
   });
 });
