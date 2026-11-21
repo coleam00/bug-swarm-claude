@@ -4,8 +4,8 @@
 // ones (the mover's ratio is reported, not gated); and an idle newcomer living at least 10 s at
 // every arena age (newcomers joining seeded arenas that aimer bots have played in). The dasher
 // (#60) is printed beside the first gate and against the aimer, not gated. Per bug kind (#65) it
-// also prints how many of each spawned in a life and how many hits each landed (first gate's
-// lives). Tested in skill-lib.test.ts on a few seeds.
+// also prints how many of each spawned in a life and how many hits each landed (the first
+// gate's lives, played alone). Tested in skill-lib.test.ts on a few seeds.
 import { BUG_KINDS, DASH_TICKS, DT, WORLD_H, WORLD_W, type BugKind } from "../src/shared/arena/constants";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
@@ -30,13 +30,12 @@ function perKind(): PerKind {
   return Object.fromEntries(BUG_KINDS.map((k) => [k, 0])) as PerKind;
 }
 
-export type LifeResult = {
-  score: number;
-  kills: number;
-  seconds: number;
-  capped: boolean;
-  dashes: number;
-  /** Bugs of each kind that spawned in the arena during the life (alone, all of them were for this player). */
+/** One life's result: what the drop-in gates read. */
+export type DropInLife = { score: number; kills: number; seconds: number; capped: boolean; dashes: number };
+
+/** One life of the first gate: alone in its arena, so every bug that spawned was for this player. */
+export type LifeResult = DropInLife & {
+  /** Bugs of each kind that spawned in the arena during the life. */
   spawned: PerKind;
   /** Hits the player took from each kind. */
   touches: PerKind;
@@ -290,33 +289,29 @@ export function warmArenas(seed: number, agesMin: readonly number[]): AgedArena[
  * Joins a newcomer playing `policy` into a copy of `aged` and steps it with the bots until the
  * newcomer's first life ends or `maxSeconds` pass (reported capped). `aged` itself is untouched.
  */
-export function playNewcomer(aged: AgedArena, policy: PolicyName, seed: number, maxSeconds: number): LifeResult {
+export function playNewcomer(aged: AgedArena, policy: PolicyName, seed: number, maxSeconds: number): DropInLife {
   const { state, bots } = structuredClone(aged);
   const p = joinPlayer(state, "newcomer", "tabs");
   const me = newBot(p.id, seed ^ 0x5bd1e995);
   const act = POLICIES[policy];
   const maxTicks = Math.round(maxSeconds / DT);
   let dashes = 0;
-  const spawned = perKind();
-  const touches = perKind();
   for (let t = 0; t < maxTicks; t++) {
     for (const b of bots) drive(state, b, POLICIES.aimer, true);
     drive(state, me, act, false);
-    const firstNew = state.nextBugId;
     stepArena(state);
     if (p.dashTicks === DASH_TICKS) dashes++;
-    countKinds(state, firstNew, p.id, spawned, touches);
     for (const ended of state.events.livesEnded) {
-      if (ended.id === p.id) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches };
+      if (ended.id === p.id) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes };
     }
   }
-  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches };
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes };
 }
 
 /** Life lengths at one join age: median, quartiles, how many hit the cap, and bugs alive at the join (median). */
 export type AgeSummary = { ageMin: number; lives: number; median: number; p25: number; p75: number; capped: number; bugsAtJoin: number };
 
-function summarizeAge(ageMin: number, lives: readonly LifeResult[], bugs: readonly number[]): AgeSummary {
+function summarizeAge(ageMin: number, lives: readonly DropInLife[], bugs: readonly number[]): AgeSummary {
   const secs = lives.map((l) => l.seconds).sort((a, b) => a - b);
   return {
     ageMin,
@@ -357,9 +352,9 @@ export function runDropIn(
   agesMin: readonly number[] = JOIN_AGES_MIN,
   lateAgeMin: number = LATE_AGE_MIN,
 ): DropInReport {
-  const lives = new Map<string, LifeResult[]>();
+  const lives = new Map<string, DropInLife[]>();
   const bugs = new Map<number, number[]>();
-  const add = (k: string, r: LifeResult) => {
+  const add = (k: string, r: DropInLife) => {
     const l = lives.get(k);
     if (l) l.push(r);
     else lives.set(k, [r]);

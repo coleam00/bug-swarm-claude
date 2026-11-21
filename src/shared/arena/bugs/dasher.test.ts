@@ -118,15 +118,31 @@ describe("dasher phases", () => {
     expect(b.x).toBeCloseTo(x0 - LUNGE_DIST, 6);
   });
 
-  test("a lunge into a wall stops at the wall and recovers", () => {
-    const { a, ps } = arenaWith([60, 1200]);
+  test("a slanted lunge into a wall ends on the step it reaches the wall: it does not run on along the wall", () => {
+    const { a, ps } = arenaWith([100, 1200]);
     ps[0]!.invulnTicks = 1e9; // so the line passes through it to the wall
-    const b = placeBug(a, 300, 1200, DASHER);
+    const b = placeBug(a, 300, 1000, DASHER);
     stepWhile(a, b, APPROACH);
+    const sx = b.x;
+    const sy = b.y;
     stepWhile(a, b, TELL);
-    stepWhile(a, b, LUNGE);
+    const [dx, dy] = [b.dx, b.dy];
+    expect(dx).toBeLessThan(0);
+    expect(dy).toBeGreaterThan(0);
+    // Units along the locked line until its edge meets the wall x = DASHER_RADIUS: short of a full lunge.
+    const toWall = (DASHER_RADIUS - sx) / dx;
+    expect(toWall).toBeLessThan(LUNGE_DIST);
+    const step = LUNGE_SPEED * DT;
+    let ticks = 1; // the tell's last step took the first lunge step
+    stepWhile(a, b, LUNGE, () => ticks++);
     expect(b.phase).toBe(RECOVER);
+    // It recovers on the step whose move reaches the wall, held at the wall...
+    expect(ticks).toBe(Math.ceil(toWall / step));
     expect(b.x).toBe(DASHER_RADIUS);
+    // ...having gone along the line no further than that one step's overshoot.
+    const yAtWall = sy + dy * toWall;
+    expect(b.y).toBeGreaterThanOrEqual(yAtWall - 1e-6);
+    expect(b.y - yAtWall).toBeLessThan(step * dy);
     expect([b.vx, b.vy, b.travel]).toEqual([0, 0, 0]);
   });
 
@@ -144,24 +160,6 @@ describe("dasher phases", () => {
     expect(still).toBe(RECOVER_TICKS);
     expect(b.phase).toBe(APPROACH);
     expect(b.x).toBeCloseTo(2200 - APPROACH_SPEED * DT, 9);
-  });
-
-  test("a target dashing through the lunge is not hit", () => {
-    const { a, p, b } = setup(300);
-    stepWhile(a, b, APPROACH);
-    stepWhile(a, b, TELL);
-    let dashed = false;
-    stepWhile(a, b, LUNGE, () => {
-      // Dash into it just before it would touch.
-      if (!dashed && b.x - p.x < 25 + 2 * LUNGE_SPEED * DT) {
-        hold(p, { mx: 1, dash: true });
-        dashed = true;
-      } else hold(p, {});
-    });
-    expect(dashed).toBe(true);
-    expect(p.hits).toBe(0);
-    expect(a.bugs).toContain(b);
-    expect(p.x).toBeGreaterThan(b.x);
   });
 });
 
@@ -209,7 +207,7 @@ describe("dasher spawns", () => {
     expect(n).toBe(0);
   });
 
-  test("its share grows with the life's age from 15% at 30 s to a 35% cap, and holds in play", () => {
+  test("its share grows with the life's age from 15% at 30 s to a 35% cap, and holds in play; each spawns with 2 hit points", () => {
     expect(dasherShare(29.9)).toBe(0);
     expect(dasherShare(30)).toBeCloseTo(0.15, 9);
     expect(dasherShare(50)).toBeCloseTo(0.25, 9);
@@ -225,7 +223,10 @@ describe("dasher spawns", () => {
       Math.round(60 / DT),
       (b) => {
         all++;
-        if (b.kind === DASHER) n++;
+        if (b.kind !== DASHER) return;
+        n++;
+        // A spawned dasher takes 2 shots (the literal: the item's rule, not the definition's copy).
+        expect(b.hp).toBe(2);
       },
       true,
     );

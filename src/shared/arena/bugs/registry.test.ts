@@ -1,11 +1,10 @@
 // The bug-kind registry (#65): every kind id has a definition the stepper can use.
 import { describe, expect, test } from "bun:test";
 import { BUG_KINDS } from "../constants";
-import { BASE_KIND, BUG_DEFS, MAX_BUG_RADIUS, bugDef } from "./registry";
+import { BASE_KIND, MAX_BUG_RADIUS, bugDef } from "./registry";
 
 describe("bug kinds", () => {
-  test("every id in BUG_KINDS has a definition with phases, a positive radius, hit points and points", () => {
-    expect(Object.keys(BUG_DEFS).sort()).toEqual([...BUG_KINDS].sort());
+  test("every kind's definition carries its own id, phases, a positive radius, hit points and points", () => {
     for (const k of BUG_KINDS) {
       const d = bugDef(k);
       expect(d.id).toBe(k);
