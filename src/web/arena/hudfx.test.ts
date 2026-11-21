@@ -3,7 +3,7 @@ import { HEAT_WARN } from "../../shared/arena/constants";
 import type { SnapshotMe } from "../../shared/arena/protocol";
 import { HIT_FLASH_S, PULSE_S, STREAK_LOST_S, createHudFx, flashOn, heatWarning, noteMe, pulseScale, resetHudFx, updateHudFx } from "./hudfx";
 
-const me = (o: Partial<SnapshotMe> = {}): SnapshotMe => ({ sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 3, al: 1, ...o });
+const me = (o: Partial<SnapshotMe> = {}): SnapshotMe => ({ sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 3, al: 1, dk: 0, dc: 0, ...o });
 
 describe("HUD moments", () => {
   test("the multiplier pulses when it rises, and only then", () => {

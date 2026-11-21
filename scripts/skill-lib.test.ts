@@ -12,7 +12,8 @@ describe("bun run skill", () => {
     expect(by("mover").capped).toBe(0);
     expect(by("aimer").capped).toBeLessThan(8);
     expect(by("idle").medianScore).toBe(0);
-    expect(formatSkill(r).at(-1)).toContain("PASS");
+    expect(formatSkill(r).find((l) => l.startsWith("gate:"))).toContain("PASS");
+    expect(by("dasher").medianDashes).toBeGreaterThan(0);
   });
 
   test("the gate is 2x: an aimer at 19 against a mover at 10 fails, at 20 it passes", () => {
@@ -34,6 +35,16 @@ describe("bun run skill", () => {
   test("a life replays exactly from its seed", () => {
     expect(playLife("aimer", 3, 60)).toEqual(playLife("aimer", 3, 60));
     expect(playLife("mover", 3, 60)).not.toEqual(playLife("mover", 4, 60));
+  });
+
+  test("idle, mover and aimer never dash in a life; the dasher does, and its life differs from the aimer's", () => {
+    for (const policy of ["idle", "mover", "aimer"] as const) {
+      for (const seed of [0, 1, 2]) expect(playLife(policy, seed, 60).dashes).toBe(0);
+    }
+    const dasher = playLife("dasher", 1, 120);
+    const aimer = playLife("aimer", 1, 120);
+    expect(dasher.dashes).toBeGreaterThan(0);
+    expect([dasher.score, dasher.seconds]).not.toEqual([aimer.score, aimer.seconds]);
   });
 
   test("quantiles and arguments", () => {

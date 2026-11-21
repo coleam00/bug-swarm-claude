@@ -114,9 +114,9 @@ describe("parseClientMessage", () => {
 describe("server messages", () => {
   test("a snapshot is built from a shared part and your own numbers, and round-trips, quantized", () => {
     const players = [
-      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3 },
-      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0 },
-      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9 },
+      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3, dashTicks: 0 },
+      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0, dashTicks: 2 },
+      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9, dashTicks: 1 },
     ];
     const src = {
       tick: 9,
@@ -132,7 +132,7 @@ describe("server messages", () => {
       },
     };
     const shared = encodeSnapshotShared(src, ["crawler"], 3);
-    const me = { sc: 120, ki: 9, st: 6, mu: 1.5, he: 0.4567, lk: 0 as const, hl: 2, al: 1 as const };
+    const me = { sc: 120, ki: 9, st: 6, mu: 1.5, he: 0.4567, lk: 0 as const, hl: 2, al: 1 as const, dk: 2, dc: 28 };
     expect(shared.startsWith(`"p":${encodeSnapshotPlayers(players)},`)).toBe(true);
     const msg = parseServerMessage(encodeSnapshot(9, 4, me, shared));
     expect(msg).toEqual({
@@ -141,9 +141,9 @@ describe("server messages", () => {
       ack: 4,
       me: { ...me, he: 0.46 },
       p: [
-        [1, 10.12, 20.5, -3, 0, 1.235, 1, 1],
-        [2, 2386, 14, 300, -300, -3.142, 1, 0],
-        [3, 5, 5, 0, 0, 0, 0, 0],
+        [1, 10.12, 20.5, -3, 0, 1.235, 1, 1, 0],
+        [2, 2386, 14, 300, -300, -3.142, 1, 0, 1],
+        [3, 5, 5, 0, 0, 0, 0, 0, 0],
       ],
       b: [[7, 0, 100, 200.1]],
       s: [[11, 1, 30.12, 20.5, 0.123]],

@@ -40,9 +40,28 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
+
+// ---- Dash (#60). A press bursts you along your move (your aim if still), untouchable while it lasts. ----
+
+/** How far a dash carries you on open floor, units. */
+export const DASH_DISTANCE = 220;
+/** How long a dash lasts, seconds: DASH_TICKS steps at DASH_SPEED. Untouchable throughout. */
+export const DASH_S = 0.15;
+export const DASH_TICKS = Math.round(DASH_S / DT);
+/** A dash's speed, units per second (73.3 units a tick). */
+export const DASH_SPEED = DASH_DISTANCE / DASH_S;
+/** From one dash's press until the next press is accepted, seconds. A press before then is dropped. */
+export const DASH_COOLDOWN_S = 1.5;
+export const DASH_COOLDOWN_TICKS = Math.round(DASH_COOLDOWN_S / DT);
+/**
+ * A new life cannot dash for this long, seconds, so the press that respawned you (or a second one
+ * sent before your browser sees you alive) never dashes you off the spawn.
+ */
+export const DASH_SPAWN_LOCK_S = 0.5;
+export const DASH_SPAWN_LOCK_TICKS = Math.round(DASH_SPAWN_LOCK_S / DT);
 
 // ---- Shooting (#55). Holding fire shoots travelling shots from the barrel along the aim. ----
 
