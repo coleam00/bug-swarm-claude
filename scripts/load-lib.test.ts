@@ -193,7 +193,7 @@ test("formatSummary prints a row per route, an overall row, and the verdict", ()
   const lines = formatSummary(summarize([...samples(top, [1, 2, 3]), ...samples(start, [4], 500)]));
   expect(lines[0]).toMatch(/^route\s+requests\s+statuses\s+p50 ms\s+p95 ms\s+p99 ms\s+<200 ms$/);
   expect(lines.length).toBe(1 + Object.keys(ROUTES).length + 1 + 1);
-  expect(lines.find((l) => l.startsWith(top))).toMatch(/GET \/api\/top\s+3\s+200:3\s+2\.0\s+3\.0\s+3\.0\s+100\.0%/);
+  expect(lines.find((l) => l.startsWith(top))).toMatch(/GET \/api\/top\?player=\s+3\s+200:3\s+2\.0\s+3\.0\s+3\.0\s+100\.0%/);
   expect(lines.find((l) => l.startsWith(start))).toContain("500:1");
   expect(lines.at(-2)).toMatch(/^overall\s+4\s+200:3 500:1/);
   expect(lines.at(-1)).toBe("FAIL: 1 5xx response");

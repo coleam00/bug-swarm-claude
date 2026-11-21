@@ -81,14 +81,14 @@ async function player(i: number, deadline: number, hardStop: number): Promise<vo
     while (performance.now() < endAt && performance.now() < hardStop) {
       if (performance.now() >= nextPoll) {
         nextPoll += TOP_POLL_MS;
-        await Promise.all([call("top", ROUTES.top.path()), call("teams", ROUTES.teams.path())]);
+        await Promise.all([call("top", ROUTES.top.path(playerId)), call("teams", ROUTES.teams.path())]);
       } else {
         await sleep(Math.min(nextPoll, endAt) - performance.now());
       }
     }
     if (performance.now() >= hardStop) return;
     await call("end", ROUTES.end.path(id), claimFor((performance.now() - startedAt) / 1000, Math.random));
-    await Promise.all([call("best", ROUTES.best.path(playerId)), call("top", ROUTES.top.path()), call("teams", ROUTES.teams.path())]);
+    await Promise.all([call("best", ROUTES.best.path(playerId)), call("top", ROUTES.top.path(playerId)), call("teams", ROUTES.teams.path())]);
   }
 }
 
