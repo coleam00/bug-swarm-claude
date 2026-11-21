@@ -341,10 +341,20 @@ test("the same seed plays the same run; another seed doesn't", () => {
   expect(play(7)).not.toEqual(play(8));
 });
 
+// The run-length tests play with upgrade choices off: they guard the swarm's own tuning. How long
+// runs last with upgrades is tuned once all four have landed (engineering.md, "Run-length tests").
+
+/** A run with no upgrade choices, for the run-length tests. */
+function swarmOnly(seed: number, arena: Arena): State {
+  const s = createState(seed, arena);
+  s.nextChoiceAt = Infinity;
+  return s;
+}
+
 test("an idle player loses within 30 to 60 seconds, portrait, landscape and 4:3", () => {
   for (const arena of [TALL, WIDE, FOUR_THREE]) {
     for (let seed = 1; seed <= 10; seed++) {
-      const s = createState(seed, arena);
+      const s = swarmOnly(seed, arena);
       while (!s.over && s.time < 120) advance(s, NONE);
       expect(s.over).toBe(true);
       expect(s.time).toBeGreaterThanOrEqual(30);
@@ -360,7 +370,7 @@ test("a player who keeps moving survives 1 to 3 minutes, portrait and landscape"
     for (const player of [circle, dodge]) {
       const times: number[] = [];
       for (let seed = 1; seed <= 10; seed++) {
-        const s = createState(seed, arena);
+        const s = swarmOnly(seed, arena);
         while (!s.over && s.time < 240) advance(s, player(s));
         times.push(s.time);
       }
