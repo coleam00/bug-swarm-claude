@@ -4,6 +4,7 @@
 import type { Database } from "bun:sqlite";
 import { createApp, type AppOptions } from "./app";
 import { mountArenaRoutes } from "./arena/http";
+import { createLifeSaver } from "./arena/lives";
 import { Rooms } from "./arena/rooms";
 import { createArenaSockets, newSocketData, type Liveness, type SocketData } from "./arena/sockets";
 import { servePages } from "./ui";
@@ -25,7 +26,7 @@ export type RunningServer = {
   url: string;
   server: ReturnType<typeof Bun.serve>;
   rooms: Rooms;
-  /** Stops every arena timer and closes every socket and the listener. */
+  /** Stops every arena timer, closes every socket and the listener, and writes any queued life. */
   stop(): Promise<void>;
 };
 
@@ -36,7 +37,9 @@ export function buildIdFrom(env: Record<string, string | undefined>, startedAt: 
 
 export function startServer(opts: ServerOptions): RunningServer {
   const app = createApp(opts.db, opts.appOptions);
-  const rooms = new Rooms({ buildId: opts.buildId });
+  // Finished lives are saved as runs, off the tick (lives.ts).
+  const lives = createLifeSaver(opts.db);
+  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save });
   // Before servePages: its catch-all answers every path it reaches.
   mountArenaRoutes(app, rooms);
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).
@@ -62,6 +65,8 @@ export function startServer(opts: ServerOptions): RunningServer {
     async stop() {
       rooms.close();
       await server.stop(true);
+      // Lives queued before the stop are written before the caller closes the database.
+      lives.flush();
     },
   };
 }

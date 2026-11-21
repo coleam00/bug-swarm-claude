@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION } from "../../shared/arena/constants";
 import { encodeHello, encodeInput, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
-import { openDb } from "../db";
+import { computeStats, findPlayer, openDb, playerBest, teamTotals } from "../db";
 import { startServer, type RunningServer } from "../serve";
 import type { ArenaStats } from "./rooms";
 
@@ -294,6 +294,22 @@ test(
   async () => {
     expect((await fetch(`${srv.url}/ws`)).status).toBe(426);
     expect(await (await fetch(`${srv.url}/health`)).text()).toBe("ok");
+  },
+  TIMEOUT,
+);
+
+test(
+  "a life ended by leaving is saved as a run with the hello's player id, team and touch flag",
+  async () => {
+    const key = "f".repeat(32);
+    const c = await connect();
+    c.send(encodeHello(PROTOCOL_VERSION, "Toucher", "spaces", key, true));
+    await c.waitFor("a snapshot", () => c.got.some((m) => m.t === "snapshot"));
+    await c.close();
+    await c.waitFor("the life saved", () => playerBest(db, key) !== null);
+    expect(findPlayer(db, key)).toEqual({ name: "Toucher", team: "spaces" });
+    expect(computeStats(db)).toMatchObject({ players: 1, finishedRuns: 1, touchShare: 100 });
+    expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
   },
   TIMEOUT,
 );

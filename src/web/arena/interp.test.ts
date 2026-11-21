@@ -3,7 +3,7 @@ import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
 import { DELAY_TICKS, INTERP_BUFFER, createInterp, pushSnapshot, renderTick, sample } from "./interp";
 
-const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim];
+const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0];
 const out = () => ({ x: 0, y: 0, aim: 0 });
 
 describe("sampling", () => {

@@ -68,7 +68,7 @@ export function createArenaSockets(rooms: Rooms, opts: { now?: () => number; liv
     if (!isTeam(m.team)) return refuse(ws, ERROR_TEAM);
     if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
     ws.data.helloTimer = null;
-    const joined = rooms.join(name.name, m.team, (msg) => void ws.send(msg));
+    const joined = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => void ws.send(msg));
     ws.data.room = joined.room;
     ws.data.entity = joined.entity;
     ws.send(JSON.stringify(joined.welcome));

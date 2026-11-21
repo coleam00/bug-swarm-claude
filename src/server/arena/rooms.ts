@@ -6,7 +6,7 @@ import { MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, TICK_MS, WORLD_H, WORLD_W } fr
 import { WELCOME, type Welcome } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import type { Team } from "../rules";
-import { Room, type Send } from "./room";
+import { Room, type LifeRecord, type MemberInfo, type Send } from "./room";
 import { createTickLog, type TickLog } from "./ticks";
 
 /** Starts calling `fn` every `ms`; returns the function that stops it. */
@@ -20,6 +20,12 @@ export type RoomsOptions = {
   startTimer?: StartTimer;
   /** Sent in every welcome, so a client can tell the server was redeployed. */
   buildId?: string;
+  /**
+   * Called with every finished life, from inside a tick or a leave, so it must not touch the
+   * database there (lives.ts queues the write). Server fill bots, when they come, are skipped
+   * before this. Defaults to dropping it.
+   */
+  saveLife?: (r: LifeRecord) => void;
 };
 
 export type ArenaStats = {
@@ -48,18 +54,20 @@ export class Rooms {
   private readonly startTimer: StartTimer;
   readonly buildId: string;
   readonly ticks: TickLog = createTickLog();
+  private readonly saveLife: (r: LifeRecord) => void;
 
   constructor(opts: RoomsOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.clock = opts.clock ?? (() => performance.now());
     this.startTimer = opts.startTimer ?? realTimer;
     this.buildId = opts.buildId ?? String(Date.now());
+    this.saveLife = opts.saveLife ?? (() => {});
   }
 
   /** Puts a player in an arena; everyone already there gets a join event. */
-  join(name: string, team: Team, send: Send): Joined {
+  join(name: string, team: Team, info: MemberInfo, send: Send): Joined {
     const room = this.pick();
-    const player = room.add(name, team, send);
+    const player = room.add(name, team, info, send);
     const welcome: Welcome = {
       t: WELCOME,
       v: PROTOCOL_VERSION,
@@ -78,7 +86,7 @@ export class Rooms {
   leave(roomId: number, entity: number): void {
     const entry = this.rooms.get(roomId);
     if (!entry) return;
-    entry.room.remove(entity);
+    entry.room.remove(entity, this.now());
     if (entry.room.size === 0) {
       entry.stop();
       this.rooms.delete(roomId);
@@ -118,7 +126,7 @@ export class Rooms {
     }
     if (best) return best;
     const id = this.nextId++;
-    const room = new Room(id, arenaSeed(id), this.now(), this.ticks, this.clock);
+    const room = new Room(id, arenaSeed(id), this.now(), this.ticks, this.clock, this.saveLife);
     const stop = this.startTimer(() => room.advance(this.now()), TICK_MS);
     this.rooms.set(id, { room, stop });
     return room;
