@@ -18,9 +18,10 @@ function quiet(): State {
 function frame(s: State, c: Changes, steps: number) {
   const squashed: Bug[] = [];
   const hits: { x: number; y: number }[] = [];
+  const blocks: { x: number; y: number }[] = [];
   for (let i = 0; i < steps; i++) step(s, NONE, DT);
-  detectChanges(c, s, (b) => squashed.push(b), (x, y) => hits.push({ x, y }));
-  return { squashed, hits };
+  detectChanges(c, s, (b) => squashed.push(b), (x, y) => hits.push({ x, y }), (x, y) => blocks.push({ x, y }));
+  return { squashed, hits, blocks };
 }
 
 describe("changes between frames", () => {
@@ -47,6 +48,20 @@ describe("changes between frames", () => {
     expect(s.hits).toBe(1);
     expect(hits).toEqual([{ x: 300, y: 550 }]);
     expect(squashed).toHaveLength(0);
+  });
+
+  test("a bug the test shield blocked is a block at the robot, not a squash or a hit", () => {
+    const s = quiet();
+    const c = createChanges(createRng(1));
+    s.shield = 1;
+    s.bugs.push({ x: 300, y: 550, hp: 1000, kind: BASE_BUG });
+    frame(s, c, 0);
+    const { squashed, hits, blocks } = frame(s, c, 1);
+    expect(s.blocks).toBe(1);
+    expect(blocks).toEqual([{ x: 300, y: 550 }]);
+    expect(hits).toHaveLength(0);
+    expect(squashed).toHaveLength(0);
+    expect(frame(s, c, 1).blocks).toHaveLength(0); // and not again
   });
 
   test("two squashes in one frame are both reported", () => {
@@ -103,26 +118,29 @@ describe("changes between frames", () => {
       for (let i = 0; i < 1800 && !s.over; i++) {
         step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
         if (s.choice) choose(s, 0);
-        if (detect) detectChanges(c, s, () => {}, () => {});
+        if (detect) detectChanges(c, s, () => {}, () => {}, () => {});
       }
       return s;
     };
     expect(play(true)).toEqual(play(false));
   });
 
-  test("over a whole run, every squash and every hit is reported exactly once", () => {
+  test("over a whole run, every squash, hit and block is reported exactly once", () => {
     const s = createState(7, { w: 1100, h: 600 });
     const c = createChanges(createRng(1));
     let squashes = 0;
     let hits = 0;
+    let blocks = 0;
     for (let i = 0; i < 7200 && !s.over; i++) {
       step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
       if (s.choice) choose(s, 0);
-      detectChanges(c, s, () => squashes++, () => hits++);
+      detectChanges(c, s, () => squashes++, () => hits++, () => blocks++);
     }
     expect(s.squashes).toBeGreaterThan(10);
-    expect(s.hits).toBeGreaterThan(1);
+    expect(s.hits).toBeGreaterThan(0);
+    expect(s.blocks).toBeGreaterThan(0);
     expect(squashes).toBe(s.squashes);
     expect(hits).toBe(s.hits);
+    expect(blocks).toBe(s.blocks);
   });
 });

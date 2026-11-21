@@ -1,6 +1,6 @@
 // Every tuning number in the game, in one place. Distances are arena units, times seconds.
 // The simulation (sim.ts), the arena (arena.ts) and the drawing (look.ts, render.ts, sprites.ts) import from here.
-import { REVIEW_LASER, type UpgradeId } from "../../server/rules";
+import { REVIEW_LASER, TEST_SHIELD, type UpgradeId } from "../../server/rules";
 
 // The arena: the same area on every screen, in the screen's ratio between 9:16 and 16:9.
 export const ARENA_AREA = 360_000;
@@ -78,8 +78,14 @@ export const CHOICE_CARDS = 3;
 export const LASER_PIERCE = [0, 1, 3] as const;
 /** Review laser: how much longer the shot is drawn. */
 export const LASER_BEAM = [1, 1.8, 2.6] as const;
+/**
+ * Test shield: the hits the bubble holds when it is taken at each level. A pick renews the
+ * bubble at its level's charges (a spent one too); charges never come back on their own.
+ */
+export const SHIELD_CHARGES = [0, 1, 2] as const;
 
 /** What each upgrade's card says. A Record over the ids, so an id without a card fails tsc. */
 export const UPGRADES: Record<UpgradeId, { name: string; line: string }> = {
   [REVIEW_LASER]: { name: "Review laser", line: "Shots pierce through bugs" },
+  [TEST_SHIELD]: { name: "Test shield", line: "Blocks the next hit" },
 };
