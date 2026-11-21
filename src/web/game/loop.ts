@@ -6,13 +6,21 @@ import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "./fx/
 import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
-import { STEERING_KEYS, keysToInput } from "./keys";
+import type { UpgradeId } from "../../server/rules";
+import { CHOICE_KEYS, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, bugLookId } from "./look";
 import { createRenderer, type Fx } from "./render";
 import { createRng } from "./rng";
-import { createState, score, step, type Bug, type Input, type State } from "./sim";
+import { choose, createState, runResult, step, type Bug, type Input, type RunResult, type State } from "./sim";
 
-export type RunResult = { score: number; squashes: number; seconds: number; touch: boolean };
+export type { RunResult };
+
+export type Game = {
+  /** Cancels the loop and removes every listener. */
+  stop: () => void;
+  /** Takes card `index` of the choice on offer; false if there is no such card. */
+  pick: (index: number) => boolean;
+};
 
 const STEP = 1 / 60;
 /** A frame longer than this (a hitch, a hidden tab) only advances the run this far. */
@@ -25,9 +33,13 @@ const NONE: Input = { kind: "none" };
 /**
  * Plays one run on `canvas` and calls `onOver` once when it ends. The simulation advances in
  * fixed steps by real elapsed time, so its clock tracks the server's on 60, 120 or 144 Hz
- * screens. Returns `stop`, which cancels the loop and removes every listener.
+ * screens. While an upgrade choice waits it doesn't advance: `onChoice` gets the cards when one
+ * comes up and null once `pick` (or keys 1-3) takes one.
  */
-export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: RunResult) => void }): () => void {
+export function startGame(
+  canvas: HTMLCanvasElement,
+  opts: { onOver: (result: RunResult) => void; onChoice: (cards: readonly UpgradeId[] | null) => void },
+): Game {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("no 2d canvas");
   const arena: Arena = arenaForViewport(window.innerWidth, window.innerHeight);
@@ -85,7 +97,22 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
     pointerSteers = false;
     updateInput();
   };
+  const pick = (index: number): boolean => {
+    if (stopped || !choose(state, index)) return false;
+    // The finger or mouse that picked steers again only once it moves or touches down.
+    pointerSteers = false;
+    updateInput();
+    shown = null;
+    opts.onChoice(null);
+    return true;
+  };
   const onKeyDown = (e: KeyboardEvent) => {
+    const card = CHOICE_KEYS.get(e.code);
+    if (card !== undefined && state.choice) {
+      e.preventDefault();
+      if (!e.repeat) pick(card);
+      return;
+    }
     if (!STEERING_KEYS.has(e.code)) return;
     e.preventDefault();
     keys.add(e.code);
@@ -129,18 +156,24 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
   let last: number | null = null;
   let acc = 0;
   let stopped = false;
+  /** The choice last reported to `onChoice`, so it is reported once. */
+  let shown: readonly UpgradeId[] | null = null;
   const frame = (ts: number) => {
     if (stopped) return;
     const delta = last === null ? 0 : Math.min((ts - last) / 1000, MAX_FRAME_SECONDS);
     last = ts;
     acc += delta;
     let steps = 0;
-    while (acc >= STEP && steps < MAX_STEPS_PER_FRAME && !state.over) {
+    while (acc >= STEP && steps < MAX_STEPS_PER_FRAME && !state.over && !state.choice) {
       step(state, input, STEP);
       acc -= STEP;
       steps++;
     }
     if (steps === MAX_STEPS_PER_FRAME) acc = 0; // fell behind: drop the rest rather than spiral
+    if (state.choice) {
+      acc = 0; // the pause isn't owed back as a burst of steps when play resumes
+      if (state.choice !== shown) opts.onChoice((shown = state.choice));
+    }
     detectChanges(fx.changes, state, onSquash, onHit);
     updateTrail(fx.trail, state.robot.x, state.robot.y, delta);
     updateParticles(fx.particles, delta);
@@ -149,7 +182,7 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
     renderer.draw(state, fx);
     if (state.over) {
       stop();
-      opts.onOver({ score: score(state), squashes: state.squashes, seconds: state.time, touch });
+      opts.onOver(runResult(state, touch));
       return;
     }
     raf = requestAnimationFrame(frame);
@@ -169,5 +202,5 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
     window.removeEventListener("blur", onBlur);
     window.removeEventListener("resize", resize);
   }
-  return stop;
+  return { stop, pick };
 }

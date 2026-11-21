@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkName, checkScore, nameKey, normalizeName } from "./rules";
+import { MAX_UPGRADES, UPGRADE_IDS, UPGRADE_MAX_LEVEL, checkName, checkScore, isUpgradeId, nameKey, normalizeName } from "./rules";
 
 describe("name rules", () => {
   test("a valid name passes and comes back normalized", () => {
@@ -74,5 +74,16 @@ describe("score plausibility", () => {
     expect(checkScore({ score: 10, squashes: -1, seconds: 1 }, 30).ok).toBe(false);
     expect(checkScore({ score: 10, squashes: 1, seconds: -1 }, 30).ok).toBe(false);
     expect(checkScore({ score: 10, squashes: 1, seconds: Number.NaN }, 30).ok).toBe(false);
+  });
+});
+
+describe("upgrades", () => {
+  test("every upgrade at its top level fits in what a finished run may report", () => {
+    expect(UPGRADE_IDS.length * UPGRADE_MAX_LEVEL).toBeLessThanOrEqual(MAX_UPGRADES);
+  });
+
+  test("only the listed ids are upgrades", () => {
+    for (const id of UPGRADE_IDS) expect(isUpgradeId(id)).toBe(true);
+    for (const v of ["", "Review-Laser", "laser", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
   });
 });

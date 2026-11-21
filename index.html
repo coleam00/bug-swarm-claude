@@ -16,17 +16,34 @@
       .over-score { font-size: 56px; font-weight: 800; }
       .over-alert { color: #fda4af; font-size: 22px; }
       .over-hint { font-size: 22px; }
+      .over-upgrades { font-size: 20px; max-width: 420px; }
       .over-board { width: min(100%, 420px); font-size: 22px; }
       .over h2 { font-size: 26px; margin-bottom: 8px; }
       .over ol { padding-left: 36px; line-height: 1.5; text-align: left; }
       .over li > span { display: inline-block; width: calc(100% - 3em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
       .over li > b { display: inline-block; width: 3em; text-align: right; }
+      /* The upgrade choice, over the paused run. Portrait: cards stacked. Landscape: in a row. */
+      .choice { position: fixed; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
+        justify-content: center; gap: 16px; padding: 16px; background: rgba(5, 7, 13, 0.72); font-family: system-ui, sans-serif;
+        text-align: center; user-select: none; touch-action: manipulation; }
+      .choice h2 { margin: 0; font-size: 30px; }
+      .choice-cards { display: flex; flex-direction: column; gap: 12px; width: min(100%, 360px); }
+      .choice button { min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 16px;
+        border-radius: 12px; border: 2px solid #22d3ee; background: #0f172a; color: #f8fafc; font: inherit; cursor: pointer; }
+      .choice button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
+      .choice b { font-size: 24px; }
+      .choice span { font-size: 20px; opacity: 0.85; }
+      .choice kbd { font: inherit; font-size: 16px; opacity: 0.6; }
+      @media (orientation: landscape) {
+        .choice-cards { flex-direction: row; width: min(100%, 900px); }
+        .choice button { flex: 1 1 0; justify-content: center; }
+      }
       @media (orientation: landscape) and (max-height: 520px) {
         .over { flex-direction: row; gap: 24px; padding: 8px 24px; }
         .over-summary { flex: 1 1 0; gap: 6px; font-size: 20px; }
         .over h1 { font-size: 30px; }
         .over-score { font-size: 44px; }
-        .over-alert, .over-hint { font-size: 18px; }
+        .over-alert, .over-hint, .over-upgrades { font-size: 18px; }
         .over-board { flex: 1 1 0; max-width: 420px; font-size: 18px; }
         .over h2 { font-size: 20px; margin-bottom: 4px; }
         .over ol { line-height: 1.3; }

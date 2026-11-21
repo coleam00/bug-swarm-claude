@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import { NAME_MAX, checkName } from "../server/rules";
+import { NAME_MAX, checkName, type UpgradeId } from "../server/rules";
 import { endRun, fetchBest, fetchTop, startRun, type RunStart, type TopRow } from "./api";
-import { startGame, type RunResult } from "./game/loop";
+import { UPGRADES } from "./game/config";
+import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { loadPlayer, setPlayerName, type Player } from "./player";
 
 // The thin shell around the canvas: name entry, the run, and the game-over screen.
@@ -109,6 +110,8 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   const start = useRef<Promise<RunStart> | null>(null);
   const latest = useRef(props);
   latest.current = props;
+  const game = useRef<Running | null>(null);
+  const [cards, setCards] = useState<readonly UpgradeId[] | null>(null);
 
   useEffect(() => {
     const { player } = latest.current;
@@ -119,7 +122,8 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
       });
     }
     const runStart = start.current;
-    const stop = startGame(canvas.current!, {
+    const running = startGame(canvas.current!, {
+      onChoice: setCards,
       onOver: (result) => {
         const report = (over: Over) => latest.current.onOver(over);
         report({ result, saved: "saving", best: "loading", top: "loading" });
@@ -132,10 +136,46 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
         })();
       },
     });
-    return stop;
+    game.current = running;
+    return () => {
+      running.stop();
+      game.current = null;
+    };
   }, []);
 
-  return <canvas ref={canvas} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", touchAction: "none", display: "block" }} />;
+  return (
+    <>
+      <canvas ref={canvas} style={{ position: "fixed", inset: 0, width: "100%", height: "100%", touchAction: "none", display: "block" }} />
+      {cards && <ChoiceScreen cards={cards} onPick={(i) => game.current?.pick(i)} />}
+    </>
+  );
+}
+
+/** The upgrade choice, over the paused run: a big card per upgrade, tap one or press 1-3. No timer. */
+function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: (index: number) => void }) {
+  // Layout and sizes live in index.html (.choice). It covers the canvas, so a tap here never steers.
+  return (
+    <section className="choice" aria-label="Pick an upgrade">
+      <h2>Pick an upgrade</h2>
+      <div className="choice-cards">
+        {cards.map((id, i) => (
+          <button key={id} type="button" onClick={() => onPick(i)}>
+            <kbd>{i + 1}</kbd>
+            <b>{UPGRADES[id].name}</b>
+            <span>{UPGRADES[id].line}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** "Review laser x2, ..." in the order first taken, or "No upgrades". */
+function upgradesLine(taken: readonly UpgradeId[]): string {
+  const counts = new Map<UpgradeId, number>();
+  for (const id of taken) counts.set(id, (counts.get(id) ?? 0) + 1);
+  if (counts.size === 0) return "No upgrades";
+  return `Upgrades: ${[...counts].map(([id, n]) => (n > 1 ? `${UPGRADES[id].name} x${n}` : UPGRADES[id].name)).join(", ")}`;
 }
 
 function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) {
@@ -183,6 +223,7 @@ function OverScreen({ over, onRestart }: { over: Over; onRestart: () => void }) 
       <div className="over-summary">
         <h1>Game over</h1>
         <p className="over-score">{over.result.score}</p>
+        <p className="over-upgrades">{upgradesLine(over.result.upgrades)}</p>
         {over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>}
         {over.saved === "failed" && (
           <p role="alert" className="over-alert">
