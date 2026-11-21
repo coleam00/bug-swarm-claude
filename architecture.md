@@ -3,7 +3,8 @@
 ## Stack
 - Bun (runtime, package manager, test runner), TypeScript strict, Vite for the browser build, Canvas 2D for the game, Hono on Bun for a small API, SQLite through `bun:sqlite` for runs and scores.
 - Why: the bootcamp's supported stack, with the same commands on Windows, macOS and Linux. A game loop needs no UI framework; the server exists for the shared leaderboard and the bet.
-- The scaffolded React screen stays only as a thin shell for name entry and the game-over screen around the canvas. No React in the game loop.
+- The scaffolded React screen stays only as a thin shell for the start screen and the life-over screen around the canvas. No React in the game loop.
+- Release 2 adds Bun's built-in WebSocket server for the arena (no new networking dependency).
 
 ## How it runs
 - Install: `bun install`
@@ -48,6 +49,34 @@
 - `scripts/stats.ts`, `scripts/hide.ts`, `scripts/reset.ts` (each a one-line wrapper around its command in `scripts/admin-lib.ts`, which returns the exit code and output lines and is tested in-process in `src/server/db.test.ts`), `scripts/pacing.ts`, `scripts/bench.ts`, `scripts/load.ts` (with `scripts/load-lib.ts`, its tested pure half).
 - Tests are `*.test.ts` beside the code.
 
+## Arena (release 2)
+
+Release 2 is built beside release 1 and then replaces it. Until the item that switches `/` to the arena merges, release 1's sections above still describe `/`; after it, they describe retired code that the switch item removes.
+
+### Target layout (built up item by item)
+- `src/shared/arena/`: the arena simulation, pure and deterministic, used by the server (authoritative) and by the client (prediction of its own robot only). Fixed 50 ms step (20 Hz), a seeded generator, no clock, `Math.random` or DOM. All tuning numbers in one `constants.ts`. World 2400 x 2400 units with walls at the edges.
+- `src/shared/arena/protocol.ts`: versioned message types and one validator. Client to server: `hello` (name, team, player id, touch flag), `input` (sequence number, move vector clamped to length 1, aim angle, fire held, dash pressed). Server to client: `welcome` (your entity id, arena id, build id, constants the client needs), `snapshot` (tick, the last input sequence it applied for you, entities in view), `event` (hits, kills, downs, revives, pickups, life over), `error`. Malformed, unknown or oversized (over 1 KiB) client messages are dropped; a client sending more than 30 inputs a second is throttled.
+- `src/server/arena/`: the room manager (at most 20 players per arena counting bots; join the fullest arena with room for a person, else open a new one; close empty arenas), one 20 Hz tick loop per arena, the `/ws` upgrade on the existing Bun server, server-side fill bots, saving finished lives, and `GET /api/arena/stats` (arenas, people and bots per arena, tick p50/p95 over the last minute).
+- `src/web/arena/`: the client: connection and reconnect, input (keyboard, mouse, twin-stick touch, dash button), prediction and reconciliation for your robot, ~100 ms interpolation for everything else, camera, minimap, HUD, and the renderer. The renderer reuses release 1's sprites and pooled effects in `src/web/game/` (robot, bugs, trails, particles, floating text, shake) rather than redrawing them from scratch.
+- `scripts/bots.ts` (`bun run bots -- --url <base> --count <n> --seconds <s> [--policy wander|mover|aimer]`): real WebSocket clients for load tests and filling arenas from outside. Prints joins, arenas used, messages per second, errors, and the server's tick p50/p95.
+- `scripts/skill.ts` (`bun run skill`): plays seeded arenas in-process with scripted policies and checks the skill gates in `PRD.md`. Its policies (idle, mover, aimer) live in `src/shared/arena/policies.ts`, shared with the server's fill bots and `bun run bots`.
+
+### Lives and scores
+- A **life** runs from spawn to out (10 s down with no revive, or the server shutting down). When it ends, the server saves it as a run (player id, team, score, kills, length, touch flag) through the existing `db.ts`, so top 10, best, team totals, `/board` and `stats` keep working. Bot lives are never saved.
+- Release 1's run API and its plausibility caps stay only for release 1 until the switch; arena lives are trusted because the server scored them.
+
+### Bug kinds (the recipe)
+The first item that adds a second kind builds the seam; every later kind follows it. A kind is one file in `src/shared/arena/bugs/` exporting its constants (hit points, speed, radius, score), its behaviour as a pure step function with explicit phases (for example idle, tell, act, recover), and its spawn rules (which wave unlocks it, its weight in the mix, a cap per arena). One registry lists the kinds; the protocol carries a kind id and phase per bug; the renderer has one draw function per kind in `src/web/arena/draw/bugs/`. Adding a kind touches its own files, the registry, a draw function and tests.
+
+### Pickups (the recipe)
+Same shape as bugs: one file per pickup in `src/shared/arena/pickups/` (drop chance by bug kind, how long it lies on the floor, its effect and duration on the player), a registry, a protocol id, a draw function, and a small HUD timer while it is active.
+
+### Redeploys
+The server reads its build id from `RAILWAY_GIT_COMMIT_SHA`, else `BUILD_ID`, else the start time. On SIGTERM it ends and saves every life in progress, tells clients `{ type: "error", code: "restarting" }`, then exits. Clients reconnect with backoff (0.5 s doubling to 5 s) and reload the page only when the build id in `welcome` changed.
+
+### Load
+Snapshots carry only what is in a player's view plus a margin, quantized positions, and full keyframes every second with deltas between. The budgets: tick p95 under 10 ms with 200 players, and under 40 KB/s per player.
+
 ## Data
 - **Player:** a random id the browser creates on first visit and keeps in local storage, with a name and a team. No account. The server requires a team for a player id it hasn't seen, stores it once and never switches it; a player from before teams still plays with none.
 - **Run:** `run_started` (run id, player id, server time, team) and `run_ended` (run id, score, squashes, seconds, upgrades, touch or not, and the team copied from the start). A run counts for the team its player had when it started; runs with no team (from before teams) count for nobody. A run with no `run_ended` was abandoned.
@@ -68,7 +97,8 @@ The run start limit counts by client IP, and behind Railway the socket address i
 ## Boundaries
 - No API keys and no outside services. The app starts and `bun run check` passes with no `.env`.
 - Public on the internet during the stream: the API accepts only well-formed requests with capped sizes, at most one score per run id, scores that pass the plausibility check, and at most 300 run starts per client IP and 40 per player id per 10 minutes, each refused with 429 and `Retry-After` (sized for many phone viewers behind one carrier IP; `RUN_STARTS_PER_WINDOW` raises both for `bun run load` only; never set in production). A refused start spends neither budget; the game still plays, and game over says "Too many runs right now. Your next run will save."
-- Nothing the player does depends on a server response; a run plays with the API down.
+- Release 1 only: nothing the player does depends on a server response; a run plays with the API down. The arena (release 2) needs its WebSocket by design; when the connection drops it shows "Reconnecting..." and rejoins on its own.
+- The `/ws` endpoint is public too: names pass `rules.ts` before joining, the `bot ` name prefix is refused from clients, and inputs are validated and rate-limited.
 
 ## Decisions deferred
 - Spawn rates, bug speed and upgrade strength: tuned in `src/web/game/config.ts` to the PRD's targets: an idle player loses within 30 to 60 s, and a player who keeps moving survives 1 to 3 minutes, because the gun reloads faster while the robot moves (and the CI drone slower while it stands still). From 60 s the swarm surges: the spawn interval falls again to its last floor and every bug speeds up with run time (`swarmSpeed`), so no upgrade build holds forever. `sim.test.ts` holds both targets with scripted players and upgrade choices off, so they guard the swarm alone. Run length with upgrades is measured by `bun run pacing` (`src/web/game/pacing.ts`): an idle player and a realistic mover (sees bugs within 200 units, reacts 0.25 s late, drifts to the centre, wobbles) through each upgrade order, over seeds 0-49 and both screen shapes; its targets: idle lasts 30 to 60 s on every run, the mover's overall median is 75-120 s, every order's median 55-150 s, and no run passes 240 s; `pacing.test.ts` asserts them on 8 seeds. It also prints the most squashes per run second and the longest run; `bun run pacing --broad` plays seeds 0-124 (2,000 mover runs), and the server's plausibility caps in `rules.ts` are measured from it. How it feels to a human is still the Phase 2 playtest.
