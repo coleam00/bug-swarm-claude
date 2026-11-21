@@ -92,15 +92,24 @@ describe("score plausibility", () => {
     expect(checkScore({ score: 0, squashes: 0, seconds: 300.5 }, 400).ok).toBe(false);
   });
 
-  test("every run of the default pacing matrix is accepted, claimed the moment it ends (no pause)", () => {
-    const seeds = Array.from({ length: 50 }, (_, i) => i); // `bun run pacing`'s seeds
-    const runs = playAll(seeds);
-    expect(runs).toHaveLength(900);
-    for (const { group, seed, shape, result } of runs) {
-      const { score, squashes, seconds } = result;
-      expect({ group, seed, shape, check: checkScore({ score, squashes, seconds }, seconds) }).toEqual({ group, seed, shape, check: { ok: true } });
-    }
+  // `bun run pacing`'s seeds 0-49, 900 runs, in chunks of 5 seeds: one test playing all 900 takes
+  // about 3 s, and under CPU load it ran past the test timeout (#41). Each chunk is its own test.
+  const SEED_CHUNKS = Array.from({ length: 10 }, (_, c) => Array.from({ length: 5 }, (_, i) => c * 5 + i));
+
+  test("the chunks below cover the default pacing matrix's seeds 0-49, each once", () => {
+    expect(SEED_CHUNKS.flat()).toEqual(Array.from({ length: 50 }, (_, i) => i));
   });
+
+  for (const seeds of SEED_CHUNKS) {
+    test(`every run of the default pacing matrix is accepted, claimed the moment it ends (no pause): seeds ${seeds[0]}-${seeds.at(-1)}`, () => {
+      const runs = playAll(seeds);
+      expect(runs).toHaveLength(90); // 900 over the 10 chunks
+      for (const { group, seed, shape, result } of runs) {
+        const { score, squashes, seconds } = result;
+        expect({ group, seed, shape, check: checkScore({ score, squashes, seconds }, seconds) }).toEqual({ group, seed, shape, check: { ok: true } });
+      }
+    });
+  }
 
   test("claiming more seconds than really passed (plus 2 s slack) is refused", () => {
     expect(checkScore({ score: 0, squashes: 0, seconds: 32.5 }, 30).ok).toBe(false);

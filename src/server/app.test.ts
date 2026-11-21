@@ -570,7 +570,9 @@ describe("icons and link preview", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe(type);
     expect(res.headers.get("cache-control")).toBe("public, max-age=86400");
-  });
+    // The first /og.png request draws the 1200x630 preview (0.4 s alone, near 5 s under CPU load);
+    // it is one heavy render, not a timing test, so it gets room past the 5 s default (#41).
+  }, 30_000);
 
   test("the favicon is an SVG of the robot, in its rim colour", async () => {
     const svg = await (await app().request("/favicon.svg")).text();
