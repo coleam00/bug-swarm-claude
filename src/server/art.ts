@@ -214,16 +214,16 @@ export function robotSvg(): string {
   const s = 1.6; // px per arena unit: the body fills 70% of the square
   const c = 32;
   const R = ROBOT_RADIUS * s;
-  const halo = Math.min(ROBOT_SPRITE_HALF * ROBOT_RADIUS * s, 32);
+  const haloR = Math.min(ROBOT_SPRITE_HALF * ROBOT_RADIUS * s, 32);
   const f = (n: number) => +n.toFixed(2);
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">`,
     `<defs>`,
-    `<radialGradient id="halo"><stop offset="${f((ROBOT_RADIUS * 0.8 * s) / halo)}" stop-color="${ROBOT_RIM}" stop-opacity="0.4"/><stop offset="1" stop-color="${ROBOT_RIM}" stop-opacity="0"/></radialGradient>`,
+    `<radialGradient id="halo"><stop offset="${f((ROBOT_RADIUS * 0.8 * s) / haloR)}" stop-color="${ROBOT_RIM}" stop-opacity="0.4"/><stop offset="1" stop-color="${ROBOT_RIM}" stop-opacity="0"/></radialGradient>`,
     `<radialGradient id="core"><stop offset="0" stop-color="#ffffff"/><stop offset="0.3" stop-color="${PALETTE[ROBOT_GLOW]}" stop-opacity="0.9"/><stop offset="1" stop-color="${PALETTE[ROBOT_GLOW]}" stop-opacity="0"/></radialGradient>`,
     `</defs>`,
     `<rect width="64" height="64" rx="12" fill="${LETTERBOX}"/>`,
-    `<circle cx="${c}" cy="${c}" r="${f(halo)}" fill="url(#halo)"/>`,
+    `<circle cx="${c}" cy="${c}" r="${f(haloR)}" fill="url(#halo)"/>`,
     `<rect x="${f(c - R)}" y="${f(c - R)}" width="${f(2 * R)}" height="${f(2 * R)}" rx="${f(R * 0.5)}" fill="${ROBOT_BODY}" stroke="${ROBOT_RIM}" stroke-width="${f(2.5 * s)}"/>`,
     `<circle cx="${c}" cy="${c}" r="${f(R * 0.55)}" fill="${SOCKET}"/>`,
     `<circle cx="${c}" cy="${c}" r="${f(R * 0.8)}" fill="url(#core)"/>`,

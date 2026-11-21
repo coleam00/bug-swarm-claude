@@ -35,7 +35,7 @@ let page: string | null = null;
 try {
   page = readFileSync("./dist/index.html", "utf8");
 } catch {
-  console.log("dist/index.html not found: run bun run build to serve the game");
+  // No build yet (bun run dev): fall back to serving the file, as before.
 }
 const servePage = page
   ? (c: Context) => c.html(withAbsoluteImages(page, requestOrigin((name) => c.req.header(name))))
