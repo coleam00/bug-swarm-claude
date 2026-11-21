@@ -47,5 +47,5 @@
 - Nothing the player does depends on a server response; a run plays with the API down.
 
 ## Decisions deferred
-- Spawn rates, bug speed and upgrade strength: tuned in `src/web/game/config.ts` toward the PRD's targets (idle player loses within 60 s, typical run 1 to 3 minutes); the 1 to 3 minute run is checked by playing, after Phase 2.
+- Spawn rates, bug speed and upgrade strength: tuned in `src/web/game/config.ts` to the PRD's targets: an idle player loses within 30 to 60 s, and a player who keeps moving survives 1 to 3 minutes, because the gun reloads faster while the robot moves. `sim.test.ts` holds both with scripted players; how it feels to a human is still the Phase 2 playtest.
 - Art: drawn in code on the canvas (see `direction.md`, "The look"). Effects live in `src/web/game/fx/` (particles, trails, screen shake, floating text), pooled so they allocate nothing per frame.

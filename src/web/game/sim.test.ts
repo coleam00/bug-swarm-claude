@@ -6,6 +6,7 @@ import {
   BASE_BUG,
   BUG_KINDS,
   FIRE_INTERVAL,
+  MOVING_FIRE_RATE,
   ROBOT_RADIUS,
   ROBOT_SPEED,
   SPAWN_MIN,
@@ -36,6 +37,13 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = sorted.length >> 1;
   return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/** A scripted player that circles the middle of the arena at full speed. */
+function circle(s: State): Input {
+  const r = 0.2 * Math.min(s.arena.w, s.arena.h);
+  const a = (s.time * ROBOT_SPEED) / r;
+  return { kind: "target", x: s.arena.w / 2 + r * Math.cos(a), y: s.arena.h / 2 + r * Math.sin(a) };
 }
 
 /**
@@ -236,6 +244,20 @@ describe("auto-fire", () => {
     run(s, NONE, 60); // shots at 0, 0.25, 0.5 and 0.75 s, each either in flight or spent on the bug
     expect(s.shots.length + (1000 - s.bugs[0]!.hp)).toBe(4);
   });
+
+  test("reloads MOVING_FIRE_RATE times faster while the robot moves, not while it pushes into a wall", () => {
+    const shotsInASecond = (s: State, input: (i: number) => Input) => {
+      s.bugs.push({ x: 225, y: 100, hp: 1000, kind: BASE_BUG });
+      for (let i = 0; i < 60; i++) step(s, input(i), DT);
+      return s.shots.length + (1000 - s.bugs[0]!.hp);
+    };
+    // Side to side, so the robot moves every step: a shot every 0.25 / 1.4 s, 6 in the second.
+    const jiggle = (i: number): Input => ({ kind: "direction", dx: i % 2 ? 1 : -1, dy: 0 });
+    expect(shotsInASecond(quiet(), jiggle)).toBe(6);
+    const walled = quiet();
+    walled.robot.x = 450 - 14;
+    expect(shotsInASecond(walled, () => ({ kind: "direction", dx: 1, dy: 0 }))).toBe(4);
+  });
 });
 
 describe("scoring", () => {
@@ -307,21 +329,20 @@ test("an idle player loses within 30 to 60 seconds, portrait, landscape and 4:3"
   }
 });
 
-test("a player who keeps moving outlasts an idle one", () => {
-  // A scripted player is no human, so this only checks that moving pays, not the 1 to 3 minute
-  // target: that is checked by playing.
+test("a player who keeps moving survives 1 to 3 minutes, portrait and landscape", () => {
+  // Two scripted movers: one circling the middle, as a thumb can, and one dodging. Each run is
+  // bounded, so a tuning change fails rather than hangs.
   for (const arena of [TALL, WIDE]) {
-    const idle: number[] = [];
-    const moving: number[] = [];
-    for (let seed = 1; seed <= 10; seed++) {
-      const a = createState(seed, arena);
-      while (!a.over && a.time < 300) step(a, NONE, DT);
-      idle.push(a.time);
-      const b = createState(seed, arena);
-      while (!b.over && b.time < 300) step(b, dodge(b), DT);
-      moving.push(b.time);
+    for (const player of [circle, dodge]) {
+      const times: number[] = [];
+      for (let seed = 1; seed <= 10; seed++) {
+        const s = createState(seed, arena);
+        while (!s.over && s.time < 240) step(s, player(s), DT);
+        times.push(s.time);
+      }
+      expect(median(times)).toBeGreaterThanOrEqual(60);
+      expect(median(times)).toBeLessThanOrEqual(180);
     }
-    expect(median(moving)).toBeGreaterThanOrEqual(median(idle) + 10);
   }
 });
 
@@ -343,7 +364,7 @@ test("the arena keeps 360,000 units² and the screen's ratio, clamped to 9:16..1
 });
 
 describe("the server's squash cap", () => {
-  test("a shot squashes at most one bug, so the fire rate bounds squashes under the cap", () => {
-    expect(1 / FIRE_INTERVAL).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
+  test("a shot squashes at most one bug, so the fastest fire rate bounds squashes under the cap", () => {
+    expect(MOVING_FIRE_RATE / FIRE_INTERVAL).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
   });
 });

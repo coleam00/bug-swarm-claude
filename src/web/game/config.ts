@@ -11,6 +11,12 @@ export const ARENA_RATIO_MAX = 16 / 9;
 export const ROBOT_RADIUS = 14;
 export const ROBOT_SPEED = 260;
 export const FIRE_INTERVAL = 0.25;
+/**
+ * How much faster the gun reloads while the robot moves. It is what makes moving pay: a robot
+ * that stands still can't keep up with the swarm past about 30 s, one that keeps moving can for
+ * a minute or two more. 4 x 1.4 = 5.6 shots a second stays under the server's squash cap of 6.
+ */
+export const MOVING_FIRE_RATE = 1.4;
 export const SHOT_SPEED = 700;
 export const SHOT_LIFETIME = 1.0;
 export const INVULN_SECONDS = 1.0;
@@ -19,16 +25,23 @@ export const MAX_HITS = 3;
 // The swarm.
 /** A safety cap for the frame budget, not part of the difficulty: an idle run ends long before it. */
 export const MAX_BUGS = 200;
+// The spawn interval falls in two stages: quickly over the first 30 s, past what a robot
+// standing still can shoot down, then slowly, so a robot that keeps moving (and fires faster)
+// is overrun only after a minute or two more.
 /** Seconds between spawns at the start of a run, */
 export const SPAWN_START = 0.62;
-/** the seconds it loses for every second survived, */
+/** and the seconds it loses for every second survived early on. */
 export const SPAWN_RAMP = 0.007;
-/** and the shortest it gets. */
-export const SPAWN_MIN = 0.42;
+/** The late stage: the interval it would have at 0 s, */
+export const SPAWN_LATE = 0.45;
+/** and the seconds it loses for every second survived. */
+export const SPAWN_LATE_RAMP = 0.0015;
+/** The shortest interval, reached at 100 s. */
+export const SPAWN_MIN = 0.3;
 
 /** Seconds between spawns `time` seconds into a run: shorter as the run goes on, down to a floor. */
 export function spawnInterval(time: number): number {
-  return Math.max(SPAWN_MIN, SPAWN_START - SPAWN_RAMP * time);
+  return Math.max(SPAWN_MIN, SPAWN_START - SPAWN_RAMP * time, SPAWN_LATE - SPAWN_LATE_RAMP * time);
 }
 
 /**

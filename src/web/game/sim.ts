@@ -10,6 +10,7 @@ import {
   INVULN_SECONDS,
   MAX_BUGS,
   MAX_HITS,
+  MOVING_FIRE_RATE,
   ROBOT_RADIUS,
   ROBOT_SPEED,
   SHOT_LIFETIME,
@@ -19,8 +20,8 @@ import {
 } from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
 
-// A shot squashes at most one bug, so the robot squashes at most 1 / FIRE_INTERVAL bugs a
-// second. That must stay under the server's plausibility cap (MAX_SQUASHES_PER_SECOND in
+// A shot squashes at most one bug, so the robot squashes at most MOVING_FIRE_RATE / FIRE_INTERVAL
+// bugs a second. That must stay under the server's plausibility cap (MAX_SQUASHES_PER_SECOND in
 // rules.ts); a test in sim.test.ts holds it there.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
@@ -73,18 +74,21 @@ export function score(state: State): number {
 /** Advances the run by `dt` seconds. Mutates `state`; does nothing once the run is over. */
 export function step(state: State, input: Input, dt: number): void {
   if (state.over) return;
-  moveRobot(state, input, dt);
+  const moved = moveRobot(state, input, dt);
   spawnBugs(state, dt);
   moveBugs(state, dt);
-  fire(state, dt);
+  fire(state, dt, moved);
   moveShots(state, dt);
   hitBugs(state);
   hitRobot(state, dt);
   state.time += dt;
 }
 
-function moveRobot(state: State, input: Input, dt: number): void {
+/** Moves the robot and says whether it moved this step (pushing into a wall is not moving). */
+function moveRobot(state: State, input: Input, dt: number): boolean {
   const r = state.robot;
+  const fromX = r.x;
+  const fromY = r.y;
   const reach = ROBOT_SPEED * dt;
   if (input.kind === "direction") {
     const len = Math.hypot(input.dx, input.dy);
@@ -106,6 +110,7 @@ function moveRobot(state: State, input: Input, dt: number): void {
   }
   r.x = clamp(r.x, ROBOT_RADIUS, state.arena.w - ROBOT_RADIUS);
   r.y = clamp(r.y, ROBOT_RADIUS, state.arena.h - ROBOT_RADIUS);
+  return r.x !== fromX || r.y !== fromY;
 }
 
 function spawnBugs(state: State, dt: number): void {
@@ -165,8 +170,9 @@ function moveBugs(state: State, dt: number): void {
   }
 }
 
-function fire(state: State, dt: number): void {
-  state.fireTimer -= dt;
+/** Auto-fire at the nearest bug. The gun reloads faster while the robot moves. */
+function fire(state: State, dt: number, moved: boolean): void {
+  state.fireTimer -= moved ? dt * MOVING_FIRE_RATE : dt;
   if (state.fireTimer > 0) return;
   const { x: rx, y: ry } = state.robot;
   let nearest: Bug | undefined;
