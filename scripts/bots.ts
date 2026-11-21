@@ -6,7 +6,7 @@
 // Not part of `bun run check`: it needs a running server. bots-lib.ts, its pure half, is tested.
 import { PROTOCOL_VERSION, TICK_MS } from "../src/shared/arena/constants";
 import { createRng } from "../src/shared/arena/rng";
-import { encodeHello, encodeInput, parseServerMessage } from "../src/shared/arena/protocol";
+import { ERROR, SNAPSHOT, WELCOME, encodeHello, encodeInput, parseServerMessage } from "../src/shared/arena/protocol";
 import type { ArenaStats } from "../src/server/arena/rooms";
 import {
   USAGE,
@@ -55,18 +55,18 @@ function open(i: number): void {
     tally.messages++;
     const m = parseServerMessage(e.data);
     if (!m) return;
-    if (m.t === "welcome") {
+    if (m.t === WELCOME) {
       tally.joins++;
       tally.arenas.add(m.arena);
       bot.you = m.you;
       console.log(`${botName(i)} joined arena ${m.arena} as entity ${m.you}`);
-    } else if (m.t === "snapshot") {
+    } else if (m.t === SNAPSHOT) {
       for (const p of m.p) {
         if (p[0] !== bot.you) continue;
         bot.x = p[1];
         bot.y = p[2];
       }
-    } else if (m.t === "error") {
+    } else if (m.t === ERROR) {
       tally.errors.push(`error ${m.code}`);
     }
   });

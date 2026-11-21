@@ -5,7 +5,7 @@ import type { Database } from "bun:sqlite";
 import { createApp, type AppOptions } from "./app";
 import { mountArenaRoutes } from "./arena/http";
 import { Rooms } from "./arena/rooms";
-import { createArenaSockets, newSocketData, type SocketData } from "./arena/sockets";
+import { createArenaSockets, newSocketData, type Liveness, type SocketData } from "./arena/sockets";
 import { servePages } from "./ui";
 
 export type ServerOptions = {
@@ -17,6 +17,8 @@ export type ServerOptions = {
   appOptions?: AppOptions;
   /** Sent in every arena welcome. */
   buildId: string;
+  /** How the arena pings sockets and drops silent ones; defaults to the real timings (tests shorten them). */
+  liveness?: Liveness;
 };
 
 export type RunningServer = {
@@ -50,7 +52,7 @@ export function startServer(opts: ServerOptions): RunningServer {
       // The server is passed on: getConnInfo (the client address for the run start limit) reads it.
       return app.fetch(req, srv);
     },
-    websocket: createArenaSockets(rooms),
+    websocket: createArenaSockets(rooms, { liveness: opts.liveness }),
   });
 
   return {

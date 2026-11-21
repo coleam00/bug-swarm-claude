@@ -1,6 +1,8 @@
 // The arena's connection: one WebSocket to /ws on this page's host, a hello on open, the
 // server's messages handed to main.ts, and a rejoin with backoff (0.5 s doubling to 5 s) when the
-// connection drops. A refused name or team, or another protocol version, does not retry.
+// connection drops, or goes silent: the server sends 20 snapshots a second, so SERVER_SILENT_MS
+// with nothing means it is gone even if no close arrived (a half-open connection). A refused name
+// or team, or another protocol version, does not retry.
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
@@ -16,6 +18,13 @@ import {
 
 export const RECONNECT_FIRST_MS = 500;
 export const RECONNECT_MAX_MS = 5000;
+/** A connection that has received nothing for this long is dropped and rejoined, ms. */
+export const SERVER_SILENT_MS = 5000;
+
+/** True when a socket last heard from at `lastHeardMs` has been silent too long at `nowMs`. */
+export function serverSilent(lastHeardMs: number, nowMs: number): boolean {
+  return nowMs - lastHeardMs > SERVER_SILENT_MS;
+}
 
 /** The wait before rejoin attempt `attempt` (0 first): 0.5 s doubling to 5 s. */
 export function reconnectDelay(attempt: number): number {
@@ -53,14 +62,26 @@ export function connectArena(
   let ws: WebSocket | null = null;
   let attempt = 0;
   let final = false;
+  let lastHeard = 0;
+
+  /** Gives up on `socket` (closed, or silent) and schedules a rejoin. */
+  const drop = (socket: WebSocket) => {
+    if (ws !== socket) return;
+    ws = null;
+    if (final) return;
+    on.status("Reconnecting...");
+    setTimeout(open, reconnectDelay(attempt++));
+  };
 
   const open = () => {
     const socket = new WebSocket(socketUrl(location));
     ws = socket;
+    lastHeard = performance.now();
     socket.addEventListener("open", () => {
       socket.send(encodeHello(PROTOCOL_VERSION, hello.name, hello.team, hello.player, hello.touch()));
     });
     socket.addEventListener("message", (e) => {
+      lastHeard = performance.now();
       const m = parseServerMessage(e.data);
       if (!m) return;
       if (m.t === WELCOME) {
@@ -73,17 +94,17 @@ export function connectArena(
       }
       on.message(m);
     });
-    socket.addEventListener("close", () => {
-      if (ws !== socket) return;
-      ws = null;
-      if (final) return;
-      on.status("Reconnecting...");
-      setTimeout(open, reconnectDelay(attempt++));
-    });
+    socket.addEventListener("close", () => drop(socket));
   };
 
   on.status("Connecting...");
   open();
+  setInterval(() => {
+    const socket = ws;
+    if (!socket || !serverSilent(lastHeard, performance.now())) return;
+    drop(socket);
+    socket.close();
+  }, 1000);
   return {
     send(message) {
       if (ws && ws.readyState === WebSocket.OPEN) ws.send(message);

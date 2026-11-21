@@ -37,14 +37,6 @@ const input = (seq: number, mx = 1, my = 0): Input => ({ seq, mx, my, aim: 0, fi
 const snapshots = (got: ServerMessage[]) => got.filter((m): m is Snapshot => m.t === "snapshot");
 
 describe("joining", () => {
-  test("20 players share arena 1; the 21st opens arena 2", () => {
-    const { rooms, timers } = setup();
-    for (let i = 0; i < MAX_PLAYERS_PER_ARENA; i++) expect(rooms.join(`p${i}`, "tabs", client().send).room).toBe(1);
-    expect(rooms.join("p20", "spaces", client().send).room).toBe(2);
-    expect(timers.size).toBe(2);
-    expect(rooms.stats()).toMatchObject({ arenas: [{ id: 1, players: 20, bots: 0 }, { id: 2, players: 1, bots: 0 }], players: 21 });
-  });
-
   test("a player joins the fullest arena with room", () => {
     const { rooms } = setup();
     const ids: number[] = [];

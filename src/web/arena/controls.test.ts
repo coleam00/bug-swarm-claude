@@ -19,14 +19,15 @@ describe("keyboard and mouse", () => {
     expect([o.mx, o.my]).toEqual([0, 0]);
   });
 
-  test("the aim stays where it was when nothing sets it", () => {
+  test("a finger takes the aim from the mouse", () => {
     const c = createControls(1440);
     const o = out();
     pointerMove(c, "mouse", 1, 800, 450);
     readControls(c, 700, 450, o);
     expect(o.aim).toBe(0);
-    pointerDown(c, "touch", 2, 300, 300); // a finger takes over from the mouse
-    readControls(c, 700, 450, o);
+    pointerDown(c, "touch", 2, 300, 300);
+    // Your robot moved on screen: the idle mouse must not re-aim (it would give pi/4).
+    readControls(c, 700, 350, o);
     expect(o.aim).toBe(0);
   });
 });

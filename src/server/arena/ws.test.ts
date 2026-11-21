@@ -12,6 +12,8 @@ import { startServer, type RunningServer } from "../serve";
 import type { ArenaStats } from "./rooms";
 
 const TIMEOUT = 15_000;
+/** Liveness shortened for the tests: ping every 100 ms, drop after 600 ms of silence. */
+const LIVENESS = { pingMs: 100, silentMs: 600 };
 
 let dir: string;
 let db: Database;
@@ -21,7 +23,7 @@ let clients: Client[];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "arena-ws-test-"));
   db = openDb(join(dir, "app.db"));
-  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test" });
+  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS });
   clients = [];
 });
 
@@ -213,6 +215,76 @@ test(
     const acks = c.got.filter((m): m is Snapshot => m.t === "snapshot").map((m) => m.ack);
     expect(Math.max(...acks)).toBe(30);
     expect(c.isClosed()).toBe(false);
+  },
+  TIMEOUT,
+);
+
+const END = "\r\n\r\n";
+
+/**
+ * A raw TCP WebSocket client that does the handshake and sends a hello, then never reads a frame
+ * or answers a ping: a peer that vanished without closing (a phone that lost its network).
+ */
+async function ghost(name: string): Promise<{ end: () => void }> {
+  const url = new URL(srv.url);
+  const handshake = new Promise<void>((resolve) => {
+    let got = "";
+    void Bun.connect({
+      hostname: url.hostname,
+      port: Number(url.port),
+      socket: {
+        open(sock) {
+          sock.write(
+            `GET /ws HTTP/1.1\r\nHost: ${url.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+              `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+          );
+          ghostSocket = sock;
+        },
+        data(sock, chunk) {
+          if (got.includes(END)) return; // after the handshake: read nothing, answer nothing
+          got += chunk.toString("latin1");
+          if (!got.includes(END)) return;
+          // One masked text frame (client frames must be masked) carrying the hello.
+          const payload = new TextEncoder().encode(hello(name));
+          const mask = [1, 2, 3, 4];
+          const frame = new Uint8Array(2 + 4 + payload.length);
+          frame[0] = 0x81;
+          frame[1] = 0x80 | payload.length; // under 126 bytes
+          frame.set(mask, 2);
+          payload.forEach((b, i) => (frame[6 + i] = b ^ mask[i % 4]!));
+          sock.write(frame);
+          resolve();
+        },
+      },
+    });
+  });
+  let ghostSocket: { end: () => void } | null = null;
+  await handshake;
+  return { end: () => ghostSocket?.end() };
+}
+
+test(
+  "a socket that stops answering is dropped and its robot leaves; a quiet live client stays",
+  async () => {
+    const watcher = await enter("Watcher");
+    // A live client that sends nothing after its hello: the browser answers pings for it.
+    const quiet = await enter("Quiet");
+    const g = await ghost("Ghost");
+    try {
+      await watcher.c.waitFor("the ghost to join", () => srv.rooms.stats().players === 3);
+      const ghostId = watcher.c.got.find((m) => m.t === "event" && m.kind === "join" && m.name === "Ghost")!;
+      expect(ghostId).toBeDefined();
+      await watcher.c.waitFor("the ghost to be dropped", () =>
+        watcher.c.got.some((m) => m.t === "event" && m.kind === "leave" && m.id === (ghostId as { id: number }).id),
+      );
+      expect(srv.rooms.stats().players).toBe(2);
+      // Well past the silence limit, the quiet client is still in.
+      await Bun.sleep(LIVENESS.silentMs * 3);
+      expect(quiet.c.isClosed()).toBe(false);
+      expect(srv.rooms.stats().players).toBe(2);
+    } finally {
+      g.end();
+    }
   },
   TIMEOUT,
 );

@@ -20,8 +20,11 @@ describe("sampling", () => {
     const it = createInterp();
     pushSnapshot(it, 1, [row(1, 0, 0, 3.0)], 0);
     pushSnapshot(it, 2, [row(1, 0, 0, -3.0)], 50);
+    pushSnapshot(it, 3, [row(1, 0, 0, 3.0)], 100);
     const o = out();
     sample(it, 1, 1.5, o);
+    expect(Math.abs(Math.abs(o.aim) - Math.PI)).toBeLessThan(1e-9);
+    sample(it, 1, 2.5, o); // and back the other way
     expect(Math.abs(Math.abs(o.aim) - Math.PI)).toBeLessThan(1e-9);
   });
 
@@ -65,11 +68,11 @@ describe("the tick clock", () => {
     expect(renderTick(it, 10_025)).toBe(100.5 - DELAY_TICKS);
   });
 
-  test("never goes backward, even when a snapshot arrives early", () => {
+  test("never goes backward, even when a late snapshot pulls the estimate back", () => {
     const it = createInterp();
     pushSnapshot(it, 100, [], 10_000);
     const a = renderTick(it, 10_040);
-    pushSnapshot(it, 101, [], 10_010); // early: pulls the estimate back a little
+    pushSnapshot(it, 101, [], 10_300); // late: the server seems further behind than estimated
     expect(renderTick(it, 10_041)).toBeGreaterThanOrEqual(a);
   });
 
