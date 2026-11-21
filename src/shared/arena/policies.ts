@@ -25,8 +25,9 @@
 //   only after FILL_REACT_MIN_TICKS to FILL_REACT_MAX_TICKS (drawn per reaction), keeping its last
 //   move and holding fire meanwhile; its aim turns at most FILL_TURN_RATE toward the aimer's plus a
 //   slow wobble of up to FILL_WOBBLE, and it fires only while that aim is within FILL_FIRE_CONE of
-//   the aimer's. With no bug inside KEEP_DIST it walks to the nearest downed player within
-//   FILL_REVIVE_SEEK and stands by it (still shooting), so it revives people it passes near. Not
+//   the aimer's. It walks to the nearest downed player within FILL_REVIVE_SEEK, bugs or not, and
+//   stays within FILL_REVIVE_STAND of them (still shooting), stepping aside only while a bug is
+//   about to touch it, so it revives people it passes near, in a swarm too. Not
 //   in POLICY_NAMES: `bun run skill` reports it on its own line, never in a gate.
 //
 // Every policy presses dash while out, so it respawns; only the dasher presses it in a life.
@@ -360,7 +361,7 @@ export const FILL_WOBBLE_STEP = 0.03;
 export const FILL_FIRE_CONE = 0.2;
 /** It walks to a downed player within this, units. */
 export const FILL_REVIVE_SEEK = 400;
-/** It stops this close to a downed player, inside REVIVE_RANGE, units. */
+/** It stays this close to a downed player, inside REVIVE_RANGE, units (a step aside stays in range). */
 export const FILL_REVIVE_STAND = REVIVE_RANGE * 0.6;
 
 /** The aimer's memory plus the fill bot's human layer. */
@@ -418,8 +419,10 @@ export function fillBot(obs: Observation, mem: FillMemory, rng: Rng, out: Policy
     out.fire = false;
   } else if (out.fire && Math.abs(wrapAngle(mem.applied - wanted)) > FILL_FIRE_CONE) out.fire = false;
 
-  // Revive: with no bug close, walk to the nearest downed player in reach and stand by it.
-  if (!evading && obs.downCount > 0) {
+  // Revive: walk to the nearest downed player in reach, swarm or not, and stay by it. Within
+  // FILL_REVIVE_STAND it stands still, stepping aside (the aimer's evasion) only for a tick while a
+  // bug is about to touch it, then back; that keeps it inside REVIVE_RANGE, so the revive holds.
+  if (obs.downCount > 0) {
     let best = -1;
     let bestD = FILL_REVIVE_SEEK * FILL_REVIVE_SEEK;
     for (let i = 0; i < obs.downCount; i++) {
@@ -432,10 +435,11 @@ export function fillBot(obs: Observation, mem: FillMemory, rng: Rng, out: Policy
     }
     if (best >= 0) {
       const d = obs.downs[best]!;
-      if (bestD <= FILL_REVIVE_STAND * FILL_REVIVE_STAND) {
+      if (bestD > FILL_REVIVE_STAND * FILL_REVIVE_STAND) moveAlong(out, d.x - x, d.y - y, 1);
+      else if (!aboutToTouch(obs)) {
         out.mx = 0;
         out.my = 0;
-      } else moveAlong(out, d.x - x, d.y - y, 1);
+      }
     }
   }
   mem.mx = out.mx;

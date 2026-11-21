@@ -8,6 +8,7 @@ import {
   FILL_REACT_MAX_TICKS,
   FILL_REACT_MIN_TICKS,
   FILL_WOBBLE,
+  KEEP_DIST,
   createFillMemory,
   createMemory,
   createObservation,
@@ -19,7 +20,7 @@ import {
 } from "./policies";
 import { createRng } from "./rng";
 import { clampInput } from "./sim";
-import { arenaWith, downNow, stepQuiet } from "./testkit";
+import { arenaWith, downNow, placeBug, stepQuiet } from "./testkit";
 
 /** The dasher at (1200, 1200), ready or not, with one still bug `gap` units to its right. */
 function decide(gap: number, ready = true): PolicyInput {
@@ -106,24 +107,51 @@ describe("fill bot", () => {
     expect(observe(a, ps[1]!.id, WORLD_W, WORLD_H, createObservation()).downCount).toBe(0);
   });
 
-  test("it walks to a downed player 250 units off and revives them before they bleed out", () => {
+  /**
+   * A fill bot at (1000, 1200) and a player downed 250 units to its right, with crawlers placed at
+   * `bugs` (they chase the bot; nothing else spawns). Steps until the downed player is revived or
+   * bleeds out; returns who revived them (0: nobody) and the closest any bug came to the bot.
+   */
+  function reviveRun(bugs: [number, number][], seed: number): { by: number; bot: number; closest: number } {
     const { a, ps } = arenaWith([1000, 1200], [1250, 1200]);
     const [bot, hurt] = [ps[0]!, ps[1]!];
     downNow(a, hurt);
     a.bugs.length = 0;
+    for (const [x, y] of bugs) placeBug(a, x, y);
     const obs = createObservation();
     const mem = createFillMemory();
-    const rng = createRng(7);
+    const rng = createRng(seed);
     const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
     let by = 0;
+    let closest = Infinity;
     for (let t = 0; t < DOWN_TICKS && by === 0; t++) {
+      for (const b of a.bugs) closest = Math.min(closest, Math.hypot(b.x - bot.x, b.y - bot.y));
       observe(a, bot.id, WORLD_W, WORLD_H, obs);
       fillBot(obs, mem, rng, out);
       bot.input = clampInput({ seq: t + 1, ...out });
       stepQuiet(a);
       by = a.events.revives.find((r) => r.id === hurt.id)?.by ?? 0;
     }
-    expect(by).toBe(bot.id);
-    expect(hurt.down).toBe(false);
+    return { by, bot: bot.id, closest };
+  }
+
+  test("it walks to a downed player 250 units off and revives them before they bleed out", () => {
+    const r = reviveRun([], 7);
+    expect(r.by).toBe(r.bot);
+  });
+
+  test("it breaks off to revive in a live swarm: 30 crawlers chasing it from inside KEEP_DIST", () => {
+    // A half ring behind the bot (away from the downed player), 150 and 250 units out.
+    const swarm: [number, number][] = [];
+    for (let i = 0; i < 30; i++) {
+      const angle = Math.PI / 2 + (i / 30) * Math.PI;
+      const r = i % 2 ? 150 : 250;
+      swarm.push([1000 + Math.cos(angle) * r, 1200 + Math.sin(angle) * r]);
+    }
+    for (let seed = 1; seed <= 8; seed++) {
+      const r = reviveRun(swarm, seed);
+      expect(r.closest).toBeLessThan(KEEP_DIST);
+      expect([seed, r.by]).toEqual([seed, r.bot]);
+    }
   });
 });
