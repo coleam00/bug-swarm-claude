@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { createApp } from "./app";
-import { RUN_ENDED, computeStats, hideName, openDb } from "./db";
-import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS } from "./rules";
+import { RUN_ENDED, computeStats, hideName, openDb, upsertPlayer } from "./db";
+import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, TEAMS, TEST_SHIELD, UPGRADE_IDS, type Team } from "./rules";
+
+const [TABS, SPACES] = TEAMS;
 
 let dir: string;
 let db: Database;
@@ -31,8 +33,9 @@ function post(a: App, path: string, body: unknown) {
   return a.request(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 
-async function startRun(a: App, playerId = "player-0001", name = "Robo"): Promise<string> {
-  const res = await post(a, "/api/runs", { playerId, name });
+/** Starts a run, with a team unless `team` is null (a player from before teams). */
+async function startRun(a: App, playerId = "player-0001", name = "Robo", team: Team | null = TABS): Promise<string> {
+  const res = await post(a, "/api/runs", team ? { playerId, name, team } : { playerId, name });
   expect(res.status).toBe(200);
   return ((await res.json()) as { runId: string }).runId;
 }
@@ -60,6 +63,31 @@ describe("run start", () => {
     expect((await post(a, "/api/runs", [1, 2])).status).toBe(400);
   });
 
+  test("a new player must send a team; a team that isn't one is 400; neither writes or counts toward the rate limit", async () => {
+    const a = app();
+    const res = await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "team" });
+    for (const team of ["Tabs", "", null, 1]) {
+      const bad = await post(a, "/api/runs", { playerId: "player-0001", name: "Robo", team });
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toEqual({ error: "body" });
+    }
+    expect(db.query("SELECT COUNT(*) AS n FROM events").get()).toEqual({ n: 0 });
+    expect(db.query("SELECT COUNT(*) AS n FROM players").get()).toEqual({ n: 0 });
+    for (let i = 0; i < 30; i++) await startRun(a); // the refused starts used none of the 30
+  });
+
+  test("a team is set once: a different team sent later is ignored, not switched", async () => {
+    const a = app();
+    await startRun(a, "player-0001", "Robo", TABS);
+    await startRun(a, "player-0001", "Robo", SPACES);
+    await startRun(a, "player-0001", "Robo", null);
+    expect(db.query("SELECT team FROM players WHERE id = ?").get("player-0001")).toEqual({ team: TABS });
+    const runs = db.query("SELECT team FROM events WHERE player_id = ? ORDER BY id").all("player-0001");
+    expect(runs).toEqual([{ team: TABS }, { team: TABS }, { team: TABS }]);
+  });
+
   test("a blocked name is 400 with the reason", async () => {
     const res = await post(app(), "/api/runs", { playerId: "player-0001", name: "sh1t" });
     expect(res.status).toBe(400);
@@ -69,7 +97,7 @@ describe("run start", () => {
   test("the 31st start from one IP in 10 minutes is 429; other IPs are fine; it resets", async () => {
     const a = app();
     for (let i = 0; i < 30; i++) await startRun(a);
-    expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo" })).status).toBe(429);
+    expect((await post(a, "/api/runs", { playerId: "player-0001", name: "Robo", team: TABS })).status).toBe(429);
     ip = "2.2.2.2";
     await startRun(a);
     ip = "1.1.1.1";
@@ -90,7 +118,7 @@ describe("run start", () => {
       a.request("/api/runs", {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify({ playerId: "player-0001", name: "Robo" }),
+        body: JSON.stringify({ playerId: "player-0001", name: "Robo", team: TABS }),
       });
     for (let i = 0; i < 30; i++) {
       expect((await start({ "x-real-ip": "9.9.9.9", "x-forwarded-for": `10.0.0.${i}` })).status).toBe(200);
@@ -231,6 +259,52 @@ describe("top 10 and best", () => {
     await play(a, "player-0001", "Robo", 40);
     await play(a, "player-0001", "Robo", 20);
     expect(await best("player-0001")).toEqual({ best: 40 });
+  });
+});
+
+describe("team totals", () => {
+  async function play(a: App, playerId: string, name: string, score: number, team: Team | null = TABS) {
+    const runId = await startRun(a, playerId, name, team);
+    clock += 10_000;
+    const res = await post(a, `/api/runs/${runId}/end`, endBody(score, Math.floor(score / 10), 1));
+    expect(res.status).toBe(200);
+  }
+
+  async function teams(a: App) {
+    const res = await a.request("/api/teams");
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { teams: Record<Team, number> }).teams;
+  }
+
+  test("sum every finished run's score into its team; an abandoned run adds nothing", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ann", 50, TABS);
+    await play(a, "player-0001", "Ann", 20, TABS); // every run counts, not just the best
+    await play(a, "player-0002", "Bob", 30, SPACES);
+    await startRun(a, "player-0003", "Cat", SPACES); // abandoned
+    expect(await teams(a)).toEqual({ tabs: 70, spaces: 30 });
+  });
+
+  test("a run from before the player had a team counts for nobody, even after they pick one", async () => {
+    const a = app();
+    upsertPlayer(db, "player-0001", "Old Timer", null, new Date(clock));
+    await play(a, "player-0001", "Old Timer", 40, null);
+    expect(await teams(a)).toEqual({ tabs: 0, spaces: 0 });
+    await play(a, "player-0001", "Old Timer", 25, SPACES);
+    expect(await teams(a)).toEqual({ tabs: 0, spaces: 25 });
+    expect(db.query("SELECT team FROM players WHERE id = ?").get("player-0001")).toEqual({ team: SPACES });
+  });
+
+  test("a hidden name's runs leave the totals once the 1 s cache turns over", async () => {
+    const a = app();
+    await play(a, "player-0001", "Bad Name", 50, TABS);
+    await play(a, "player-0002", "Good", 40, TABS);
+    expect(await teams(a)).toEqual({ tabs: 90, spaces: 0 }); // primes the cache
+    hideName(db, "  bad  NAME ", new Date(clock));
+    clock += 999;
+    expect(await teams(a)).toEqual({ tabs: 90, spaces: 0 });
+    clock += 1; // 1 s cache + the game-over screen's 4 s poll: gone from every screen within 5 s
+    expect(await teams(a)).toEqual({ tabs: 40, spaces: 0 });
   });
 });
 

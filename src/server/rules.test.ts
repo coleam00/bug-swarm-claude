@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_UPGRADES, UPGRADE_IDS, UPGRADE_MAX_LEVEL, checkName, checkScore, isUpgradeId, nameKey, normalizeName } from "./rules";
+import {
+  MAX_UPGRADES,
+  TEAMS,
+  UPGRADE_IDS,
+  UPGRADE_MAX_LEVEL,
+  checkName,
+  checkScore,
+  isTeam,
+  isUpgradeId,
+  nameKey,
+  normalizeName,
+} from "./rules";
 
 describe("name rules", () => {
   test("a valid name passes and comes back normalized", () => {
@@ -85,5 +96,12 @@ describe("upgrades", () => {
   test("only the listed ids are upgrades", () => {
     for (const id of UPGRADE_IDS) expect(isUpgradeId(id)).toBe(true);
     for (const v of ["", "Review-Laser", "laser", "CI-Drone", "drone", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
+  });
+});
+
+describe("teams", () => {
+  test("only the listed teams are teams", () => {
+    for (const t of TEAMS) expect(isTeam(t)).toBe(true);
+    for (const v of ["Tabs", "SPACES", "", "tab", 1, null, undefined]) expect(isTeam(v)).toBe(false);
   });
 });

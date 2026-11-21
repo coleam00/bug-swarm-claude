@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { checkName, checkScore, isUpgradeId, MAX_UPGRADES } from "../src/server/rules";
+import { checkName, checkScore, isTeam, isUpgradeId, MAX_UPGRADES } from "../src/server/rules";
 import {
   ROUTES,
   claimFor,
@@ -7,6 +7,7 @@ import {
   loadName,
   loadPlayerId,
   parseLoadArgs,
+  startBody,
   summarize,
   verdict,
   type Sample,
@@ -66,6 +67,12 @@ describe("load players", () => {
 
   test("player ids fit the server's id pattern", () => {
     for (const i of [0, 1, 499, 4999]) expect(loadPlayerId(i)).toMatch(/^[A-Za-z0-9-]{8,64}$/);
+  });
+
+  test("every start body carries a team, so the server takes it from a new player", () => {
+    const teams = [0, 1, 2, 3].map((i) => startBody(i).team);
+    for (const t of teams) expect(isTeam(t)).toBe(true);
+    expect(new Set(teams).size).toBe(2); // both teams get load
   });
 });
 

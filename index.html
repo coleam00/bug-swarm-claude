@@ -7,6 +7,19 @@
     <title>Bug Swarm</title>
     <style>
       html, body { margin: 0; background: #05070d; color: #f8fafc; overscroll-behavior: none; }
+      /* Setup: the name and the team before the first run (or only the team, once, for a player from before teams). */
+      .setup { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
+        justify-content: center; gap: 24px; padding: 16px; font-family: system-ui, sans-serif; text-align: center; }
+      .setup h1 { font-size: 44px; margin: 0; }
+      .setup form { display: flex; flex-direction: column; gap: 16px; width: min(100%, 360px); }
+      .setup label { font-size: 22px; }
+      .setup input { font-size: 24px; padding: 10px 12px; border-radius: 8px; border: 2px solid #334155; background: #0f172a; color: #f8fafc; }
+      .setup button { min-height: 56px; font: inherit; font-size: 24px; font-weight: 700; border-radius: 8px; cursor: pointer; }
+      .setup button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
+      .setup-play { border: 0; background: #22d3ee; color: #05070d; }
+      .setup-teams { display: flex; gap: 12px; width: min(100%, 360px); }
+      .setup-teams button { flex: 1 1 0; border: 2px solid; }
+      .setup-alert { color: #fda4af; font-size: 20px; margin: 0; }
       /* Game over. Portrait: one column. A phone held sideways: summary and top 10 side by side. */
       .over { min-height: 100dvh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center;
         justify-content: center; gap: 12px; padding: 12px 16px; font-family: system-ui, sans-serif; text-align: center; user-select: none; }
@@ -21,6 +34,11 @@
       ul.over-upgrades { list-style: none; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 8px; }
       ul.over-upgrades li { padding: 2px 10px; border: 1px solid #334155; border-radius: 999px; white-space: nowrap; line-height: 1.3; }
       ul.over-upgrades b { color: #22d3ee; }
+      /* Tabs vs Spaces: one line of totals over a thin bar split by them. */
+      .over-race { width: min(100%, 360px); display: flex; flex-direction: column; gap: 4px; }
+      .over .over-race p { display: flex; justify-content: space-between; gap: 12px; font-size: 16px; line-height: 1.2; }
+      .over-race-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #1e293b; }
+      .over-race-bar span { flex-basis: 0; min-width: 0; }
       .over-board { width: min(100%, 420px); font-size: 22px; }
       .over h2 { font-size: 26px; margin-bottom: 8px; }
       .over ol { padding-left: 36px; line-height: 1.5; text-align: left; }
@@ -51,6 +69,15 @@
         .over-board { flex: 1 1 0; max-width: 420px; font-size: 18px; }
         .over h2 { font-size: 20px; margin-bottom: 4px; }
         .over ol { line-height: 1.3; }
+        .over .over-race p { font-size: 14px; }
+        .over-race-bar { height: 6px; }
+        .setup { gap: 12px; padding: 8px 16px; }
+        .setup h1 { font-size: 30px; }
+        .setup form { gap: 10px; }
+        .setup label { font-size: 18px; }
+        .setup input { font-size: 20px; padding: 6px 12px; }
+        .setup button { min-height: 48px; font-size: 20px; }
+        .setup-alert { font-size: 18px; }
       }
     </style>
   </head>

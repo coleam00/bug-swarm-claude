@@ -1,6 +1,6 @@
-// `bun run hide "<name>"`: hides a name (any case) from the top 10. The server caches the
-// top 10 for one second and the game polls it every 4, so the name is gone from every screen
-// within 5 seconds. It says how many players have the name, so a typo doesn't pass for a hide.
+// `bun run hide "<name>"`: hides a name (any case) from the top 10 and its runs from the team
+// totals. The server caches both for one second and the game polls them every 4, so the name
+// is gone from every screen within 5 seconds. It says how many players have the name, so a typo doesn't pass for a hide.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { hideName, openDb } from "../src/server/db";

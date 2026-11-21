@@ -1,6 +1,6 @@
 // The pure half of `bun run load`: arguments, the players' names and claims, the routes, and
 // the summary math. No network here, so `bun test` covers it; `load.ts` makes the requests.
-import { MAX_UPGRADES, POINTS_PER_SECOND, POINTS_PER_SQUASH, UPGRADE_IDS, type UpgradeId } from "../src/server/rules";
+import { MAX_UPGRADES, POINTS_PER_SECOND, POINTS_PER_SQUASH, TEAMS, UPGRADE_IDS, type Team, type UpgradeId } from "../src/server/rules";
 
 export const USAGE = "usage: bun run load -- --url <base url> [--players 500] [--seconds 60]";
 /** The bar from the PRD: 95% of requests under this many ms, and no 5xx (the load test also fails on any 4xx). */
@@ -79,9 +79,9 @@ export function claimFor(elapsedSeconds: number, rand: () => number): Claim {
   return { score, squashes, seconds, touch, upgrades };
 }
 
-/** The start body. Phase 3's team field joins here when the API takes one (#22). */
-export function startBody(i: number): { playerId: string; name: string } {
-  return { playerId: loadPlayerId(i), name: loadName(i) };
+/** The start body. A new player must send a team; load players alternate between them. */
+export function startBody(i: number): { playerId: string; name: string; team: Team } {
+  return { playerId: loadPlayerId(i), name: loadName(i), team: TEAMS[i % TEAMS.length]! };
 }
 
 /**

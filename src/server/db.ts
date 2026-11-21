@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { nameKey } from "./rules";
+import { TEAMS, isTeam, nameKey, type Team } from "./rules";
 
 // Every event the app records, named once. The server writes them and `bun run stats` reads them,
 // so both import this list instead of typing the strings. A run is a run_started and, if it
@@ -10,9 +10,8 @@ export const EVENT_TYPES = ["run_started", "run_ended"] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 export const [RUN_STARTED, RUN_ENDED] = EVENT_TYPES;
 
-// The two teams (Phase 3 asks players to pick one).
-export const TEAMS = ["tabs", "spaces"] as const;
-export type Team = (typeof TEAMS)[number];
+// The two teams. They live in rules.ts, which the browser imports too; server code finds them here.
+export { TEAMS, type Team } from "./rules";
 
 // Columns added to `events` after the first release. Schema changes are additive: add a table
 // or a column, never drop or rename one. Old rows (such as the scaffold's `opened`) stay and
@@ -25,6 +24,9 @@ const EVENT_COLUMNS: [name: string, type: string][] = [
   ["seconds", "REAL"],
   ["touch", "INTEGER"],
   ["upgrades", "TEXT"],
+  // The team the run's player had when it started, on both rows. NULL (runs from before teams,
+  // or a player with no team yet) counts for nobody.
+  ["team", "TEXT"],
 ];
 
 // One SQLite file holds the app's data. Tables are created here.
@@ -59,29 +61,42 @@ export function openDb(path: string): Database {
   return db;
 }
 
-export function recordRunStarted(db: Database, runId: string, playerId: string, at: Date): void {
-  db.query("INSERT INTO events (type, at, run_id, player_id) VALUES (?, ?, ?, ?)").run(
+export function recordRunStarted(db: Database, runId: string, playerId: string, at: Date, team: Team | null): void {
+  db.query("INSERT INTO events (type, at, run_id, player_id, team) VALUES (?, ?, ?, ?, ?)").run(
     RUN_STARTED,
     at.toISOString(),
     runId,
     playerId,
+    team,
   );
 }
 
-/** Creates the player, or renames them to the name they started this run with. */
-export function upsertPlayer(db: Database, id: string, name: string, at: Date): void {
+/**
+ * Creates the player, or renames them to the name they started this run with. A team is set
+ * once, by the first run that sends one, and never switched.
+ */
+export function upsertPlayer(db: Database, id: string, name: string, team: Team | null, at: Date): void {
   db.query(
-    "INSERT INTO players (id, name, created_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name",
-  ).run(id, name, at.toISOString());
+    `INSERT INTO players (id, name, team, created_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, team = COALESCE(players.team, excluded.team)`,
+  ).run(id, name, team, at.toISOString());
 }
 
-export type RunStart = { runId: string; playerId: string; at: Date };
+/** A stored player, or null for an id the server has never seen. */
+export function findPlayer(db: Database, id: string): { name: string; team: Team | null } | null {
+  const row = db.query("SELECT name, team FROM players WHERE id = ?").get(id) as { name: string; team: string | null } | null;
+  return row ? { name: row.name, team: isTeam(row.team) ? row.team : null } : null;
+}
+
+export type RunStart = { runId: string; playerId: string; at: Date; team: Team | null };
 
 export function findRunStart(db: Database, runId: string): RunStart | null {
   const row = db
-    .query("SELECT run_id, player_id, at FROM events WHERE type = ? AND run_id = ?")
-    .get(RUN_STARTED, runId) as { run_id: string; player_id: string; at: string } | null;
-  return row ? { runId: row.run_id, playerId: row.player_id, at: new Date(row.at) } : null;
+    .query("SELECT run_id, player_id, at, team FROM events WHERE type = ? AND run_id = ?")
+    .get(RUN_STARTED, runId) as { run_id: string; player_id: string; at: string; team: string | null } | null;
+  return row
+    ? { runId: row.run_id, playerId: row.player_id, at: new Date(row.at), team: isTeam(row.team) ? row.team : null }
+    : null;
 }
 
 export type RunEnd = {
@@ -92,6 +107,8 @@ export type RunEnd = {
   seconds: number;
   touch: boolean;
   upgrades: string[];
+  /** The team from the run's start. */
+  team: Team | null;
 };
 
 /** Thrown when a run already has its run_ended. */
@@ -100,8 +117,8 @@ export class DuplicateRunEnd extends Error {}
 export function recordRunEnded(db: Database, end: RunEnd, at: Date): void {
   try {
     db.query(
-      `INSERT INTO events (type, at, run_id, player_id, score, squashes, seconds, touch, upgrades)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (type, at, run_id, player_id, score, squashes, seconds, touch, upgrades, team)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       RUN_ENDED,
       at.toISOString(),
@@ -112,6 +129,7 @@ export function recordRunEnded(db: Database, end: RunEnd, at: Date): void {
       end.seconds,
       end.touch ? 1 : 0,
       JSON.stringify(end.upgrades),
+      end.team,
     );
   } catch (err) {
     if (err instanceof Error && /UNIQUE constraint failed/.test(err.message)) throw new DuplicateRunEnd(end.runId);
@@ -135,6 +153,24 @@ export function topTen(db: Database): TopRow[] {
     .all(RUN_ENDED) as TopRow[];
 }
 
+/**
+ * Each team's total: the sum of its finished runs' scores, leaving out hidden names. A run
+ * counts for the team stamped on it, so runs from before teams count for nobody.
+ */
+export function teamTotals(db: Database): Record<Team, number> {
+  const rows = db
+    .query(
+      `SELECT e.team AS team, SUM(e.score) AS total
+       FROM events e JOIN players p ON p.id = e.player_id
+       WHERE e.type = ? AND e.team IS NOT NULL AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
+       GROUP BY e.team`,
+    )
+    .all(RUN_ENDED) as { team: string; total: number | null }[];
+  const totals = Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>;
+  for (const r of rows) if (isTeam(r.team)) totals[r.team] = r.total ?? 0;
+  return totals;
+}
+
 /** A player's best finished score, or null with none. */
 export function playerBest(db: Database, playerId: string): number | null {
   const row = db
@@ -144,7 +180,7 @@ export function playerBest(db: Database, playerId: string): number | null {
 }
 
 /**
- * Hides a name (any case) from the top 10, including from players who take it later.
+ * Hides a name (any case) from the top 10 and the team totals, including from players who take it later.
  * Returns the key and how many players have that name now, so the caller can say when a
  * hide reached nobody (a typo, say).
  */
