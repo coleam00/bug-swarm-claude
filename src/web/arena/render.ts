@@ -5,7 +5,8 @@
 // the F readout. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
 // HELP over it, a ring fills between it and whoever is reviving it, an arrow at the screen's edge
 // points to each one out of view nearby, its minimap dot blinks, and your own HUD says DOWN with
-// the seconds left. It reuses release 1's sprites and pooled
+// the seconds left. A server fill bot (#66) has a small BOT pill left of its name, which is drawn
+// dimmer. It reuses release 1's sprites and pooled
 // effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
 // built on resize only; a frame allocates nothing but the strings of a value that changed.
 import { DOWN_S, HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
@@ -45,6 +46,7 @@ import { edgeArrow, minimapDotOn, type EdgeArrow } from "./help";
 import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import { shotTravel, type ClientShots } from "./shots";
+import { BOT_TAG, botTagBox, type TagBox } from "./tag";
 
 /** The floor tile's side, world units (a multiple of the grid spacing). */
 const TILE = 240;
@@ -57,6 +59,15 @@ const NAME_FONT = "bold 13px system-ui, sans-serif";
 const NAME_FILL = "#f8fafc";
 /** The name tag's baseline above the robot's centre, world units. */
 const NAME_ABOVE = PLAYER_RADIUS * 1.9;
+/** A fill bot's name is drawn at this opacity (#66). */
+const BOT_NAME_ALPHA = 0.55;
+/** Its BOT pill: text, fill, and the pill's height and corner from the name's baseline, world units. */
+const BOT_TAG_FONT = "bold 9px system-ui, sans-serif";
+const BOT_TAG_TEXT = "#0f172a";
+const BOT_TAG_FILL = "rgba(203, 213, 225, 0.8)";
+const BOT_TAG_TOP = 11;
+const BOT_TAG_H = 13;
+const BOT_TAG_BASE = 1.5;
 const WALL_GLOW = "rgba(34, 211, 238, 0.18)";
 const WALL_GLOW_WIDTH = 14;
 const WALL = "rgba(34, 211, 238, 0.85)";
@@ -165,6 +176,7 @@ const DOWN_HINT = "A player next to you revives you";
  * soft shimmer, not the blink). `dashing`: in a dash now. `dashAt`: when its last dash began,
  * scene seconds (-1: never), from `dashFromX, dashFromY`. `down`: waiting for a revive, with
  * `left` seconds before bleeding out, `rev` (0 to 1) of a revive by player `revBy` (0: none).
+ * `bot`: a server fill bot, drawn with a BOT pill at `tag` (its width 0 until first measured).
  */
 export type Robot = {
   id: number;
@@ -184,6 +196,8 @@ export type Robot = {
   left: number;
   rev: number;
   revBy: number;
+  bot: boolean;
+  tag: TagBox;
 };
 
 /** The bugs to draw this frame, world units, in typed arrays filled by main.ts. */
@@ -423,9 +437,35 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalCompositeOperation = "source-over";
   }
 
+  /** A robot's name (NAME_FONT set, centred); a bot's dimmer, with its BOT pill to the left. */
   function drawName(r: Robot): void {
-    ctx.strokeText(r.name, r.x, r.y - NAME_ABOVE);
-    ctx.fillText(r.name, r.x, r.y - NAME_ABOVE);
+    const y = r.y - NAME_ABOVE;
+    if (!r.bot) {
+      ctx.strokeText(r.name, r.x, y);
+      ctx.fillText(r.name, r.x, y);
+      return;
+    }
+    if (r.tag.w === 0) {
+      // Measured once per robot, not per frame.
+      const nameW = ctx.measureText(r.name).width;
+      ctx.font = BOT_TAG_FONT;
+      botTagBox(nameW, ctx.measureText(BOT_TAG).width, r.tag);
+      ctx.font = NAME_FONT;
+    }
+    const nameFill = ctx.fillStyle;
+    ctx.globalAlpha = BOT_NAME_ALPHA;
+    ctx.strokeText(r.name, r.x, y);
+    ctx.fillText(r.name, r.x, y);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = BOT_TAG_FILL;
+    ctx.beginPath();
+    ctx.roundRect(r.x + r.tag.x, y - BOT_TAG_TOP, r.tag.w, BOT_TAG_H, 3);
+    ctx.fill();
+    ctx.font = BOT_TAG_FONT;
+    ctx.fillStyle = BOT_TAG_TEXT;
+    ctx.fillText(BOT_TAG, r.x + r.tag.x + r.tag.w / 2, y - BOT_TAG_BASE);
+    ctx.font = NAME_FONT;
+    ctx.fillStyle = nameFill;
   }
 
   function drawStick(s: Stick): void {

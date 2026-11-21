@@ -12,8 +12,10 @@ import {
   DASHER,
   POLICIES,
   POLICY_NAMES,
+  createFillMemory,
   createMemory,
   createObservation,
+  fillBot,
   observe,
   type Observation,
   type PolicyInput,
@@ -37,13 +39,21 @@ export function gatePasses(aimerMedian: number, moverMedian: number): boolean {
  * `maxSeconds` pass (then it is reported capped). The policy gets its own generator, never the arena's.
  */
 export function playLife(policy: PolicyName, seed: number, maxSeconds: number): LifeResult {
+  return playLifeWith(POLICIES[policy], createMemory(), seed, maxSeconds);
+}
+
+/** playLife for any policy and its memory (the fill bot keeps more than PolicyMemory). */
+function playLifeWith<M extends PolicyMemory>(
+  act: (obs: Observation, mem: M, rng: Rng, out: PolicyInput) => void,
+  mem: M,
+  seed: number,
+  maxSeconds: number,
+): LifeResult {
   const state = createArena(seed);
   const p = joinPlayer(state, "skill", "tabs");
   const rng = createRng(seed ^ 0x5bd1e995);
-  const mem = createMemory();
   const obs = createObservation();
   const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
-  const act = POLICIES[policy];
   const maxTicks = Math.round(maxSeconds / DT);
   let seq = 0;
   let dashes = 0;
@@ -132,6 +142,34 @@ export function runSkill(seeds: number, maxSeconds: number): SkillReport {
     return summarize(name, lives);
   });
   return { seeds, maxSeconds, policies, ...judge(policies) };
+}
+
+// ---- Fill bots (#66): good but beatable. Reported, not a gate. ----
+
+/** The fill bot's median score, against the aimer's and the mover's from a skill report. */
+export type FillReport = { lives: number; medianScore: number; medianSeconds: number; aimer: number; mover: number };
+
+/** Plays one fill-bot life alone on each of seeds 0 to seeds-1 (as playLife does). */
+export function runFill(seeds: number, maxSeconds: number, skill: SkillReport): FillReport {
+  const lives: LifeResult[] = [];
+  for (let s = 0; s < seeds; s++) lives.push(playLifeWith(fillBot, createFillMemory(), s, maxSeconds));
+  const by = (n: PolicyName) => skill.policies.find((p) => p.policy === n)?.medianScore ?? 0;
+  return {
+    lives: lives.length,
+    medianScore: quantile(lives.map((l) => l.score).sort((a, b) => a - b), 0.5),
+    medianSeconds: quantile(lives.map((l) => l.seconds).sort((a, b) => a - b), 0.5),
+    aimer: by(AIMER),
+    mover: by("mover"),
+  };
+}
+
+/** Whether the fill bot sits where it should: above 2x the mover's median score, below the aimer's. */
+export function fillBeatable(r: FillReport): boolean {
+  return r.medianScore > GATE_RATIO * r.mover && r.medianScore < r.aimer;
+}
+
+export function formatFill(r: FillReport): string {
+  return `info: fill bot median score ${Math.round(r.medianScore)} (life ${r.medianSeconds.toFixed(1)} s) against aimer ${Math.round(r.aimer)} and ${GATE_RATIO}x mover ${Math.round(GATE_RATIO * r.mover)}: ${fillBeatable(r) ? "between them" : "OUTSIDE"} (reported, not gated)`;
 }
 
 const pad = (s: string | number, n: number) => String(s).padStart(n);

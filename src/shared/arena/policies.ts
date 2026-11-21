@@ -20,10 +20,19 @@
 //   (within DASH_CONTACT of touching, now or after one more tick of the bug's velocity), it
 //   presses dash along the evasion (its aim when there is none), on that tick only.
 //
+// - fillBot (#66): the server's fill bots. The aimer, with a human layer on top: when its target
+//   changes (its aim jumps by more than FILL_RETARGET) or a bug comes inside KEEP_DIST, it reacts
+//   only after FILL_REACT_MIN_TICKS to FILL_REACT_MAX_TICKS (drawn per reaction), keeping its last
+//   move and holding fire meanwhile; its aim turns at most FILL_TURN_RATE toward the aimer's plus a
+//   slow wobble of up to FILL_WOBBLE, and it fires only while that aim is within FILL_FIRE_CONE of
+//   the aimer's. With no bug inside KEEP_DIST it walks to the nearest downed player within
+//   FILL_REVIVE_SEEK and stands by it (still shooting), so it revives people it passes near. Not
+//   in POLICY_NAMES: `bun run skill` reports it on its own line, never in a gate.
+//
 // Every policy presses dash while out, so it respawns; only the dasher presses it in a life.
-import { BARREL, CRAWLER_RADIUS, DT, PLAYER_RADIUS, SHOT_SPEED } from "./constants";
+import { BARREL, CRAWLER_RADIUS, DT, PLAYER_RADIUS, REVIVE_RANGE, SHOT_SPEED } from "./constants";
 import { nextRandom, type Rng } from "./rng";
-import type { ArenaState } from "./sim";
+import { wrapAngle, type ArenaState } from "./sim";
 
 export const POLICY_NAMES = ["idle", "mover", "aimer", "dasher"] as const;
 export type PolicyName = (typeof POLICY_NAMES)[number];
@@ -36,6 +45,9 @@ export type Observation = {
   /** Every bug the policy knows about. Only the first `bugCount` entries are current. */
   bugs: ObservedBug[];
   bugCount: number;
+  /** Every other player who is down. Only the first `downCount` entries are current. */
+  downs: { x: number; y: number }[];
+  downCount: number;
   world: { w: number; h: number };
 };
 
@@ -87,6 +99,8 @@ export function createObservation(): Observation {
     self: { x: 0, y: 0, vx: 0, vy: 0, aim: 0, alive: false, heat: 0, locked: false, dashReady: false },
     bugs: [],
     bugCount: 0,
+    downs: [],
+    downCount: 0,
     world: { w: 0, h: 0 },
   };
 }
@@ -125,6 +139,17 @@ export function observe(state: ArenaState, playerId: number, w: number, h: numbe
     const b = state.bugs[i]!;
     setObservedBug(out, i, b.x, b.y, b.vx, b.vy);
   }
+  let downs = 0;
+  for (const q of state.players) {
+    if (q.id === playerId || !q.alive || !q.down) continue;
+    const d = out.downs[downs];
+    if (d) {
+      d.x = q.x;
+      d.y = q.y;
+    } else out.downs[downs] = { x: q.x, y: q.y };
+    downs++;
+  }
+  out.downCount = downs;
   out.world.w = w;
   out.world.h = h;
   return out;
@@ -319,3 +344,100 @@ export const dasher: Policy = (obs, mem, rng, out) => {
 };
 
 export const POLICIES: Record<PolicyName, Policy> = { idle, mover, aimer, dasher };
+
+/** The fill bot's reaction to a new target, ticks (drawn per reaction): 200 to 300 ms. */
+export const FILL_REACT_MIN_TICKS = 4;
+export const FILL_REACT_MAX_TICKS = 6;
+/** An aim jump past this is a new target, radians. */
+export const FILL_RETARGET = 0.6;
+/** How fast the fill bot's aim turns, radians a second. */
+export const FILL_TURN_RATE = 8;
+/** The most its aim wobbles off the aimer's, radians. */
+export const FILL_WOBBLE = 0.08;
+/** How far the wobble may drift in one tick, radians (a smoothed random walk). */
+export const FILL_WOBBLE_STEP = 0.03;
+/** It fires only while its aim is within this of the aimer's, radians. */
+export const FILL_FIRE_CONE = 0.2;
+/** It walks to a downed player within this, units. */
+export const FILL_REVIVE_SEEK = 400;
+/** It stops this close to a downed player, inside REVIVE_RANGE, units. */
+export const FILL_REVIVE_STAND = REVIVE_RANGE * 0.6;
+
+/** The aimer's memory plus the fill bot's human layer. */
+export type FillMemory = PolicyMemory & {
+  /** Ticks left of a reaction (last move kept, fire held off). */
+  react: number;
+  /** The aimer's aim last tick, to spot a new target. */
+  wanted: number;
+  /** Whether it was evading last tick. */
+  evading: boolean;
+  /** The aim it applies (turning toward the aimer's plus the wobble). */
+  applied: number;
+  wobble: number;
+  /** The move it applied last tick. */
+  mx: number;
+  my: number;
+};
+
+export function createFillMemory(): FillMemory {
+  return { ...createMemory(), react: 0, wanted: 0, evading: false, applied: 0, wobble: 0, mx: 0, my: 0 };
+}
+
+export function fillBot(obs: Observation, mem: FillMemory, rng: Rng, out: PolicyInput): void {
+  aimer(obs, mem, rng, out);
+  if (!obs.self.alive) {
+    mem.react = 0;
+    mem.evading = false;
+    return;
+  }
+  const { x, y } = obs.self;
+  const n = nearestBug(obs);
+  const near = n >= 0 ? obs.bugs[n]! : null;
+  const evading = near !== null && Math.hypot(near.x - x, near.y - y) < KEEP_DIST;
+
+  // Reaction: a new target, or a bug coming close, is acted on a moment late.
+  const wanted = out.aim;
+  const retarget = Math.abs(wrapAngle(wanted - mem.wanted)) > FILL_RETARGET || (evading && !mem.evading);
+  mem.wanted = wanted;
+  mem.evading = evading;
+  if (retarget && mem.react === 0) {
+    mem.react = FILL_REACT_MIN_TICKS + Math.floor(nextRandom(rng) * (FILL_REACT_MAX_TICKS - FILL_REACT_MIN_TICKS + 1));
+  }
+
+  // Aim: turn toward the aimer's aim plus the wobble, at most FILL_TURN_RATE.
+  mem.wobble = Math.max(-FILL_WOBBLE, Math.min(FILL_WOBBLE, mem.wobble * 0.9 + (nextRandom(rng) - 0.5) * FILL_WOBBLE_STEP));
+  const turn = wrapAngle(wanted + mem.wobble - mem.applied);
+  const most = FILL_TURN_RATE * DT;
+  mem.applied = wrapAngle(mem.applied + Math.max(-most, Math.min(most, turn)));
+  out.aim = mem.applied;
+
+  if (mem.react > 0) {
+    mem.react--;
+    out.mx = mem.mx;
+    out.my = mem.my;
+    out.fire = false;
+  } else if (out.fire && Math.abs(wrapAngle(mem.applied - wanted)) > FILL_FIRE_CONE) out.fire = false;
+
+  // Revive: with no bug close, walk to the nearest downed player in reach and stand by it.
+  if (!evading && obs.downCount > 0) {
+    let best = -1;
+    let bestD = FILL_REVIVE_SEEK * FILL_REVIVE_SEEK;
+    for (let i = 0; i < obs.downCount; i++) {
+      const d = obs.downs[i]!;
+      const d2 = (d.x - x) ** 2 + (d.y - y) ** 2;
+      if (d2 <= bestD) {
+        bestD = d2;
+        best = i;
+      }
+    }
+    if (best >= 0) {
+      const d = obs.downs[best]!;
+      if (bestD <= FILL_REVIVE_STAND * FILL_REVIVE_STAND) {
+        out.mx = 0;
+        out.my = 0;
+      } else moveAlong(out, d.x - x, d.y - y, 1);
+    }
+  }
+  mem.mx = out.mx;
+  mem.my = out.my;
+}

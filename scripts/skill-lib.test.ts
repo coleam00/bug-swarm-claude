@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  fillBeatable,
   formatDropIn,
+  formatFill,
   formatSkill,
   gatePasses,
   idleGate,
@@ -11,6 +13,7 @@ import {
   playNewcomer,
   quantile,
   runDropIn,
+  runFill,
   runSkill,
   USAGE,
   warmArenas,
@@ -66,6 +69,15 @@ describe("bun run skill", () => {
     expect(by("idle").medianScore).toBe(0);
     expect(formatSkill(r).find((l) => l.startsWith("gate:"))).toContain("PASS");
     expect(by("dasher").medianDashes).toBeGreaterThan(0);
+  });
+
+  test("on 8 seeds the fill bot is good but beatable: above 2x the mover's median score, below the aimer's", () => {
+    const f = runFill(8, 180, runSkill(8, 180));
+    expect(f.lives).toBe(8);
+    expect(f.medianScore).toBeGreaterThan(2 * f.mover);
+    expect(f.medianScore).toBeLessThan(f.aimer);
+    expect(fillBeatable(f)).toBe(true);
+    expect(formatFill(f)).toContain("between them");
   });
 
   test("the gate is 2x: an aimer at 19 against a mover at 10 fails, at 20 it passes", () => {

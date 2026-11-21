@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { playAll } from "../web/game/pacing";
+import { FILL_BOT_NAMES } from "./arena/fill";
 import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
 import {
   MAX_RUN_SECONDS,
@@ -309,6 +310,11 @@ describe("bot names", () => {
   test("names starting with 'bot ' are reserved for the server's bots, in any case and spacing", () => {
     for (const name of ["bot alice", "Bot  Bob", "  BOT x", "bot 7"]) expect(isBotName(name)).toBe(true);
     for (const name of ["bots-01", "robot x", "bot", "abbot y", "bot_x", "bot-x", "Robo"]) expect(isBotName(name)).toBe(false);
+  });
+
+  test("the server's fill-bot names are all bot names, and all different", () => {
+    for (const name of FILL_BOT_NAMES) expect(isBotName(name)).toBe(true);
+    expect(new Set(FILL_BOT_NAMES).size).toBe(FILL_BOT_NAMES.length);
   });
 
   test("the bots script's names pass the name rules and are not bot names", () => {

@@ -24,7 +24,7 @@ let clients: Client[];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "arena-ws-test-"));
   db = openDb(join(dir, "app.db"));
-  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS });
+  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS, arenaFill: 0 });
   clients = [];
 });
 
@@ -156,6 +156,24 @@ test(
     // Leaving closes the second arena.
     await joined[MAX_PLAYERS_PER_ARENA]!.c.close();
     await joined[0]!.c.waitFor("arena 2 closed", () => srv.rooms.stats().arenas.length === 1);
+  },
+  TIMEOUT,
+);
+
+test(
+  "with the default fill, one player alone is topped up with 3 server bots, and the stats count them apart",
+  async () => {
+    // This test's server keeps the default fill (the others pass arenaFill: 0).
+    await srv.stop();
+    srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS });
+    const a = await enter("Ada", "tabs");
+    expect(a.welcome.roster).toEqual([{ id: a.welcome.you, name: "Ada", team: "tabs" }]);
+    const four = await a.c.waitFor("a snapshot with 4 players", () => a.c.got.find((m): m is Snapshot => m.t === "snapshot" && m.p.length === 4));
+    const names = a.c.got.filter((m) => m.t === "event" && m.kind === "join").map((m) => (m as { name: string }).name);
+    expect(names).toEqual(["bot Ada", "bot Linus", "bot Grace"]);
+    expect(four.p.map((p) => p[0]).sort((x, y) => x - y)).toEqual([a.welcome.you, a.welcome.you + 1, a.welcome.you + 2, a.welcome.you + 3]);
+    const stats = (await (await fetch(`${srv.url}/api/arena/stats`)).json()) as ArenaStats;
+    expect(stats).toMatchObject({ arenas: [{ id: 1, players: 1, bots: 3 }], players: 1, bots: 3 });
   },
   TIMEOUT,
 );
