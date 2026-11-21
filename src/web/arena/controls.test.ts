@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { STICK_DEAD, STICK_RANGE } from "../game/stick";
 import { NO_INSETS } from "../game/hud";
+import { STEERING_KEYS } from "../game/keys";
 import {
   DASH_BUTTON_RADIUS,
+  DASH_KEYS,
   createControls,
   dashButtonAt,
   pointerDown,
@@ -77,7 +79,12 @@ describe("dash", () => {
     return c;
   };
 
-  test("Space or Shift (pressDash) dashes once per press", () => {
+  test("Space and both Shifts are the dash keys, and no move key is", () => {
+    for (const k of ["Space", "ShiftLeft", "ShiftRight"]) expect(DASH_KEYS.has(k)).toBe(true);
+    for (const k of STEERING_KEYS) expect(DASH_KEYS.has(k)).toBe(false);
+  });
+
+  test("a dash press (pressDash) dashes once", () => {
     const c = screen(1280, 720);
     const o = out();
     pressDash(c);

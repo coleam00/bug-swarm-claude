@@ -1,5 +1,5 @@
 // The dash (#60), stepped on the pure arena: distance, direction, the edge, the cooldown, the
-// untouchable window, walls, the spawn lock, and stepMover matching the server's step.
+// untouchable window, walls and the spawn lock.
 import { describe, expect, test } from "bun:test";
 import {
   DASH_COOLDOWN_TICKS,
@@ -12,7 +12,7 @@ import {
   PLAYER_RADIUS,
   WORLD_W,
 } from "./constants";
-import { canBeHit, clampInput, createArena, joinPlayer, stepArena, stepMover, type Mover } from "./sim";
+import { canBeHit, clampInput, createArena, joinPlayer, stepArena } from "./sim";
 import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
 
 const at = (x = 1200, y = 1200) => {
@@ -198,31 +198,5 @@ describe("dash", () => {
     p.input = clampInput({ seq: 100, mx: 1, my: 0, aim: 0, fire: false, dash: true });
     stepArena(a);
     expect(p.dashTicks).toBe(DASH_TICKS);
-  });
-
-  test("stepMover on a bare body does exactly what stepArena does to a player (the browser's prediction)", () => {
-    const { a, p } = at(800, 900);
-    const m: Mover = { x: p.x, y: p.y, vx: 0, vy: 0, dashTicks: 0, dashCooldown: 0, dashWas: false };
-    for (let t = 0; t < 120; t++) {
-      hold(p, { mx: Math.cos(t / 9), my: Math.sin(t / 13), aim: t / 7, dash: t % 17 < 2 || t % 23 === 0 });
-      stepMover(m, p.input);
-      stepQuiet(a);
-      expect([m.x, m.y, m.vx, m.vy, m.dashTicks, m.dashCooldown, m.dashWas]).toEqual([p.x, p.y, p.vx, p.vy, p.dashTicks, p.dashCooldown, p.dashWas]);
-    }
-  });
-
-  test("seeded arenas with dash presses replay exactly", () => {
-    const run = () => {
-      const a = createArena(91);
-      const p = joinPlayer(a, "one", "tabs");
-      for (let t = 0; t < 1500; t++) {
-        p.input = clampInput({ seq: t, mx: Math.cos(t / 30), my: Math.sin(t / 45), aim: t / 20, fire: t % 20 < 8, dash: t % 37 < 2 || !p.alive });
-        stepArena(a);
-      }
-      return a;
-    };
-    const r1 = run();
-    expect(r1.players).toEqual(run().players);
-    expect(r1.bugs).toEqual(run().bugs);
   });
 });

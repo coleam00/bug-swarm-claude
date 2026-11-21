@@ -2,7 +2,7 @@
 // simulation, and checks the skill gate (PRD.md, "Skill is measured"): the aimer's median score
 // at least 2x the mover's. The dasher (#60) is printed beside them and against the aimer, not
 // gated. Tested in skill-lib.test.ts on a few seeds.
-import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { DASH_TICKS, DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createRng } from "../src/shared/arena/rng";
 import { AIMER, DASHER, POLICIES, POLICY_NAMES, createMemory, createObservation, observe, type PolicyInput, type PolicyName } from "../src/shared/arena/policies";
 import { clampInput, createArena, joinPlayer, stepArena } from "../src/shared/arena/sim";
@@ -35,9 +35,10 @@ export function playLife(policy: PolicyName, seed: number, maxSeconds: number): 
   for (let t = 0; t < maxTicks; t++) {
     observe(state, p.id, WORLD_W, WORLD_H, obs);
     act(obs, mem, rng, out);
-    if (out.dash && obs.self.dashReady) dashes++;
     p.input = clampInput({ seq: ++seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash });
     stepArena(state);
+    // A dash the simulation started this tick (not one the policy merely asked for).
+    if (p.dashTicks === DASH_TICKS) dashes++;
     const ended = state.events.livesEnded[0];
     if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes };
   }
