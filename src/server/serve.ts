@@ -2,11 +2,13 @@
 // WebSocket, on one Bun server. main.ts calls it with the environment; the arena's integration
 // test calls it on port 0 and stops it before it ends.
 import type { Database } from "bun:sqlite";
-import { createApp, type AppOptions } from "./app";
+import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
+import { hiddenKeys } from "./db";
 import { mountArenaRoutes } from "./arena/http";
 import { createLifeSaver } from "./arena/lives";
 import { Rooms } from "./arena/rooms";
 import { createArenaSockets, newSocketData, type Liveness, type SocketData } from "./arena/sockets";
+import { isShownName, nameKey } from "./rules";
 import { servePages } from "./ui";
 
 export type ServerOptions = {
@@ -22,6 +24,8 @@ export type ServerOptions = {
   liveness?: Liveness;
   /** People plus fill bots per arena; defaults to FILL_TARGET (tests that count players pass 0). */
   arenaFill?: number;
+  /** How often live arenas are checked for hidden names, ms; defaults to the real one (tests shorten it). */
+  hideSweepMs?: number;
 };
 
 export type RunningServer = {
@@ -37,6 +41,29 @@ export function buildIdFrom(env: Record<string, string | undefined>, startedAt: 
   return env.RAILWAY_GIT_COMMIT_SHA || env.BUILD_ID || String(startedAt);
 }
 
+/**
+ * Is `name` hidden from the boards, as the ranking decides it: its key in the hidden names
+ * (`bun run hide`), or refused by the word lists now. The hidden names are read at most once per
+ * TOP_CACHE_MS, so a hide reaches a live arena within that plus one sweep (3 s at most). A failed
+ * read is logged and keeps the last list read (none at first): play goes on.
+ */
+export function hiddenNames(db: Database, now: () => number = Date.now): (name: string) => boolean {
+  let cache: { at: number; keys: Set<string> } | null = null;
+  return (name) => {
+    if (!isShownName(name)) return true;
+    const t = now();
+    if (!cache || t - cache.at >= TOP_CACHE_MS) {
+      try {
+        cache = { at: t, keys: hiddenKeys(db) };
+      } catch (err) {
+        console.error("arena: reading hidden names failed", err);
+        cache = { at: t, keys: cache?.keys ?? new Set() };
+      }
+    }
+    return cache.keys.has(nameKey(name));
+  };
+}
+
 export function startServer(opts: ServerOptions): RunningServer {
   const app = createApp(opts.db, opts.appOptions);
   // Finished lives are saved as runs, off the tick (lives.ts).
@@ -47,6 +74,7 @@ export function startServer(opts: ServerOptions): RunningServer {
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).
   servePages(app, opts.distDir);
 
+  const sockets = createArenaSockets(rooms, { liveness: opts.liveness, isHidden: hiddenNames(opts.db), sweepMs: opts.hideSweepMs });
   const server = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.hostname,
@@ -54,10 +82,9 @@ export function startServer(opts: ServerOptions): RunningServer {
       if (new URL(req.url).pathname === "/ws") {
         return srv.upgrade(req, { data: newSocketData() }) ? undefined : new Response("websocket expected", { status: 426 });
       }
-      // The server is passed on: getConnInfo (the client address for the run start limit) reads it.
       return app.fetch(req, srv);
     },
-    websocket: createArenaSockets(rooms, { liveness: opts.liveness }),
+    websocket: sockets,
   });
 
   return {
@@ -65,6 +92,7 @@ export function startServer(opts: ServerOptions): RunningServer {
     server,
     rooms,
     async stop() {
+      sockets.stop();
       rooms.close();
       await server.stop(true);
       // Lives queued before the stop are written before the caller closes the database.

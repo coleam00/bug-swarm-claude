@@ -3,9 +3,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 // In development the UI runs on Vite (5173) and calls the API server on PORT (3000).
-// Three pages: the game (index.html), the stream board (board.html, served at /board) and the
-// arena (arena.html, served at /arena, with its WebSocket at /ws). They sit at the root because
-// that is where Vite's dev server looks for /board and /arena.
+// Two pages: the game (index.html: the start screen and the arena, whose WebSocket is /ws) and the
+// stream board (board.html, served at /board). They sit at the root because that is where Vite's
+// dev server looks for /board.
 export default defineConfig({
   plugins: [react()],
   build: {
@@ -13,7 +13,6 @@ export default defineConfig({
       input: {
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         board: fileURLToPath(new URL("./board.html", import.meta.url)),
-        arena: fileURLToPath(new URL("./arena.html", import.meta.url)),
       },
     },
   },

@@ -1,8 +1,9 @@
 // Draws an arena frame: the floor grid, the walls, the bugs, every shot as a glowing streak, the
 // sparks, kill bursts and floating scores, every robot with its trail, dash afterimage, barrel and
-// name tag, your own ring, heat arc and dash cooldown ring, the dash button, the HUD (score,
-// multiplier, "streak lost", wave, hits left), the life-over overlay, the sticks, the minimap and
-// the F readout. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
+// name tag, your own ring, heat arc and dash cooldown ring, the dash button (touch screens), the
+// HUD line (score and multiplier, hit pips, wave, players: hudline.ts) with a short "streak lost"
+// under it, the sticks, the minimap and the F readout. While your life is over the arena keeps
+// drawing with no HUD and no dash button: App.tsx's life-over screen dims it. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
 // HELP over it, a ring fills between it and whoever is reviving it, an arrow at the screen's edge
 // points to each one out of view nearby, its minimap dot blinks, and your own HUD says DOWN with
 // the seconds left. A server fill bot (#66) has a small BOT pill left of its name, which is drawn
@@ -44,6 +45,7 @@ import type { Camera } from "./camera";
 import type { DashButton } from "./controls";
 import { edgeArrow, minimapDotOn, type EdgeArrow } from "./help";
 import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
+import { HUD_GLYPH_GAP, HUD_GLYPH_WIDTH, HUD_PIP_RADIUS, HUD_PIP_STEP, createHudLine, layoutHudLine, type HudWidths } from "./hudline";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import { shotTravel, type ClientShots } from "./shots";
 import { BOT_TAG, botTagBox, type TagBox } from "./tag";
@@ -125,23 +127,22 @@ const SHIMMER_MIN = 2.2;
 const SHIMMER_MAX = 4;
 const SHIMMER_ALPHA_MIN = 0.35;
 const SHIMMER_ALPHA_MAX = 0.9;
-// The HUD.
-const SCORE_FONT = "bold 30px system-ui, sans-serif";
-const MULT_FONT = "bold 22px system-ui, sans-serif";
-const LOST_FONT = "bold 16px system-ui, sans-serif";
-const WAVE_FONT = "bold 20px system-ui, sans-serif";
+// The HUD line (#64): one line at the top, its middle at LINE_MIDDLE below the safe top margin.
+const SCORE_FONT = "bold 26px system-ui, sans-serif";
+const LINE_FONT = "bold 18px system-ui, sans-serif";
+const LOST_FONT = "bold 15px system-ui, sans-serif";
+const LINE_MIDDLE = 14;
+/** "streak lost" flicks up under the score, CSS px below the line's middle. */
+const LOST_BELOW = 26;
+/** The F readout's top, CSS px below the line's middle. */
+const STATS_BELOW = 44;
 const MULT_ON = "#fde047";
 const MULT_OFF = "#94a3b8";
 const LOST_FILL = "#f87171";
-const PIP_RADIUS = 6;
-const PIP_GAP = 18;
+const LINE_DIM = "#cbd5e1";
 const PIP_FULL = "#f8fafc";
 const PIP_EMPTY = "rgba(248, 250, 252, 0.25)";
 const HIT_EDGE = "rgba(248, 113, 113, 1)";
-const OVER_SHADE = "rgba(5, 7, 13, 0.6)";
-const OVER_TITLE_FONT = "bold 44px system-ui, sans-serif";
-const OVER_SCORE_FONT = "bold 30px system-ui, sans-serif";
-const OVER_LINE_FONT = "bold 20px system-ui, sans-serif";
 // Down and revive (#59).
 /** A downed robot's body: shrunk and squashed, flickering between these alphas. */
 const DOWN_SCALE = 0.85;
@@ -203,9 +204,6 @@ export type Robot = {
 /** The bugs to draw this frame, world units, in typed arrays filled by main.ts. */
 export type BugsView = { x: Float32Array; y: Float32Array; heading: Float32Array; phase: Float32Array; kind: Uint8Array; count: number };
 
-/** The life-over overlay's text, built once when the life ends. */
-export type OverView = { title: string; score: string; line: string; prompt: string; ready: boolean };
-
 /** Everything a frame draws besides the camera. */
 export type Scene = {
   robots: readonly Robot[];
@@ -227,7 +225,10 @@ export type Scene = {
   me: SnapshotMe | null;
   wave: number;
   hud: HudFx;
-  over: OverView | null;
+  /** Players in your arena, you and bots included. */
+  players: number;
+  /** Your life is over (the life-over screen is up): no HUD, no dash button. */
+  out: boolean;
   sticks: readonly Stick[];
   stats: string | null;
   /** The dash button, CSS px, while you are in a life; else null. */
@@ -259,11 +260,20 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const arrow: EdgeArrow = { x: 0, y: 0, angle: 0 };
   const knob = { x: 0, y: 0 };
   const dot = { x: 0, y: 0 };
-  // HUD strings, rebuilt only when their value changes.
+  // HUD strings and their widths, measured only when a value changes; the line is laid out again then.
   let scoreShown = -1;
   let scoreText = "";
-  const multTexts = new Map<number, string>();
-  const waveTexts = new Map<number, string>();
+  let multShown = -1;
+  let waveShown = -1;
+  let playersShown = -1;
+  let multStr = "";
+  let waveLong = "";
+  let waveShort = "";
+  let playersLong = "";
+  let playersShort = "";
+  const widths: HudWidths = { score: 0, mult: 0, wave: 0, waveShort: 0, players: 0, playersShort: 0 };
+  const line = createHudLine();
+  let lineDirty = true;
   const downTexts = new Map<number, string>();
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
@@ -272,20 +282,47 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let vb = 0;
   const inView = (x: number, y: number) => x > vl && x < vr && y > vt && y < vb;
 
-  const multText = (m: number) => {
-    let s = multTexts.get(m);
-    if (s === undefined) multTexts.set(m, (s = `x${m}`));
-    return s;
-  };
   const downText = (sec: number) => {
     let s = downTexts.get(sec);
     if (s === undefined) downTexts.set(sec, (s = "DOWN " + sec));
     return s;
   };
-  const waveText = (w: number) => {
-    let s = waveTexts.get(w);
-    if (s === undefined) waveTexts.set(w, (s = `Wave ${w}`));
-    return s;
+  /** Measures what changed and lays the line out again; nothing when nothing changed. */
+  const measureLine = (score: number, mult: number, wave: number, players: number) => {
+    if (score !== scoreShown) {
+      scoreShown = score;
+      scoreText = scoreFormat.format(score);
+      ctx.font = SCORE_FONT;
+      widths.score = ctx.measureText(scoreText).width;
+      lineDirty = true;
+    }
+    ctx.font = LINE_FONT;
+    if (mult !== multShown) {
+      multShown = mult;
+      multStr = `x${mult}`;
+      widths.mult = ctx.measureText(multStr).width;
+      lineDirty = true;
+    }
+    if (wave !== waveShown) {
+      waveShown = wave;
+      waveLong = `Wave ${wave}`;
+      waveShort = `W${wave}`;
+      widths.wave = ctx.measureText(waveLong).width;
+      widths.waveShort = ctx.measureText(waveShort).width;
+      lineDirty = true;
+    }
+    if (players !== playersShown) {
+      playersShown = players;
+      playersLong = `${players} playing`;
+      playersShort = String(players);
+      widths.players = ctx.measureText(playersLong).width;
+      widths.playersShort = ctx.measureText(playersShort).width;
+      lineDirty = true;
+    }
+    if (lineDirty) {
+      layoutHudLine(hud.left, minimap.x, widths, line);
+      lineDirty = false;
+    }
   };
 
   /** The canvas is `w` x `h` CSS px at `newDpr`; the camera's scale is CSS px per unit. */
@@ -295,6 +332,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     dpr = newDpr;
     minimap = minimapLayout(w, h, insets);
     hud = hudLayout(w, insets);
+    lineDirty = true;
     Object.assign(safe, insets);
     const k = dpr * cam.scale;
     if (teams && Math.abs(k - ppu) < 0.01) return;
@@ -604,113 +642,103 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalAlpha = 1;
   }
 
-  function drawHud(sc: Scene): void {
-    const me = sc.me;
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.lineJoin = "round";
-    ctx.strokeStyle = TEXT_STROKE;
-    ctx.lineWidth = 4;
-    if (me) {
-      if (me.sc !== scoreShown) {
-        scoreShown = me.sc;
-        scoreText = scoreFormat.format(me.sc);
-      }
-      ctx.font = SCORE_FONT;
-      ctx.fillStyle = TEXT_FILL;
-      ctx.strokeText(scoreText, hud.left, hud.top);
-      ctx.fillText(scoreText, hud.left, hud.top);
-      // The multiplier, pulsing when it goes up.
-      const my = hud.top + 38;
-      const scale = pulseScale(sc.hud);
-      ctx.save();
-      ctx.translate(hud.left, my + 11);
-      ctx.scale(scale, scale);
-      ctx.font = MULT_FONT;
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = me.mu > 1 ? MULT_ON : MULT_OFF;
-      const mt = multText(me.mu);
-      ctx.strokeText(mt, 0, 0);
-      ctx.fillText(mt, 0, 0);
-      ctx.restore();
-      // "streak lost", flicking up and out.
-      if (sc.hud.lost > 0) {
-        const f = sc.hud.lost / STREAK_LOST_S;
-        ctx.globalAlpha = f;
-        ctx.font = LOST_FONT;
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = LOST_FILL;
-        const y = my + 11 - (1 - f) * 10;
-        ctx.strokeText("streak lost", hud.left + 58, y);
-        ctx.fillText("streak lost", hud.left + 58, y);
-        ctx.globalAlpha = 1;
-      }
-      // Hits left, flashing as one goes; while down, DOWN and the seconds left instead.
-      const you = sc.self >= 0 ? sc.robots[sc.self] : undefined;
-      if (me.dn === 1 && you?.down) {
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.lineWidth = 5;
-        ctx.font = DOWN_FONT;
-        ctx.fillStyle = HELP_FILL;
-        const label = downText(Math.ceil(you.left));
-        const dy = cssH / 2 + DOWN_BELOW;
-        ctx.strokeText(label, hud.center, dy);
-        ctx.fillText(label, hud.center, dy);
-        ctx.lineWidth = 4;
-        ctx.font = DOWN_HINT_FONT;
-        ctx.fillStyle = TEXT_FILL;
-        ctx.strokeText(DOWN_HINT, hud.center, dy + 34);
-        ctx.fillText(DOWN_HINT, hud.center, dy + 34);
-      } else {
-        const py = my + 40;
-        const flash = sc.hud.hit > 0 && flashOn(sc.t, 10);
-        for (let i = 0; i < HITS_PER_LIFE; i++) {
-          ctx.beginPath();
-          ctx.arc(hud.left + PIP_RADIUS + i * PIP_GAP, py, PIP_RADIUS, 0, TAU);
-          ctx.fillStyle = i < me.hl ? PIP_FULL : flash ? LOST_FILL : PIP_EMPTY;
-          ctx.fill();
-        }
-      }
-    }
-    if (sc.wave > 0) {
-      ctx.font = WAVE_FONT;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = TEXT_FILL;
-      const wt = waveText(sc.wave);
-      ctx.strokeText(wt, hud.center, hud.top + 4);
-      ctx.fillText(wt, hud.center, hud.top + 4);
-    }
+  /** The person glyph of the line's short form: a head and shoulders, centred on `x`, `y`. */
+  function drawGlyph(x: number, y: number): void {
+    ctx.beginPath();
+    ctx.arc(x, y - 4, 3.2, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y + 7, 5.5, Math.PI, TAU);
+    ctx.fill();
   }
 
-  function drawOver(o: OverView, t: number): void {
-    ctx.fillStyle = OVER_SHADE;
-    ctx.fillRect(0, 0, cssW, cssH);
-    const cx = cssW / 2;
-    const cy = cssH / 2;
-    ctx.textAlign = "center";
+  /**
+   * The HUD line: score and multiplier (pulsing when it rises), three hit pips (flashing as one
+   * goes), the wave and the players in your arena; "streak lost" flicks up under the score. While
+   * down, DOWN and the seconds left with one line on how to get up, under your robot (#59).
+   */
+  function drawHud(sc: Scene): void {
+    const me = sc.me;
+    if (!me) return;
+    measureLine(me.sc, me.mu, sc.wave, sc.players);
+    const y = hud.top + LINE_MIDDLE;
+    ctx.save();
+    ctx.translate(hud.left, y);
+    ctx.scale(line.scale, line.scale);
+    ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
     ctx.strokeStyle = TEXT_STROKE;
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 4;
+    ctx.font = SCORE_FONT;
     ctx.fillStyle = TEXT_FILL;
-    ctx.font = OVER_TITLE_FONT;
-    ctx.strokeText(o.title, cx, cy - 70);
-    ctx.fillText(o.title, cx, cy - 70);
-    ctx.font = OVER_SCORE_FONT;
-    ctx.fillStyle = MULT_ON;
-    ctx.strokeText(o.score, cx, cy - 18);
-    ctx.fillText(o.score, cx, cy - 18);
-    ctx.font = OVER_LINE_FONT;
-    ctx.fillStyle = TEXT_FILL;
-    ctx.strokeText(o.line, cx, cy + 22);
-    ctx.fillText(o.line, cx, cy + 22);
-    if (o.ready) {
-      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
-      ctx.strokeText(o.prompt, cx, cy + 78);
-      ctx.fillText(o.prompt, cx, cy + 78);
+    ctx.strokeText(scoreText, 0, 0);
+    ctx.fillText(scoreText, 0, 0);
+    // The multiplier, pulsing from its left edge when it goes up.
+    const pulse = pulseScale(sc.hud);
+    ctx.save();
+    ctx.translate(line.mult, 0);
+    ctx.scale(pulse, pulse);
+    ctx.font = LINE_FONT;
+    ctx.fillStyle = me.mu > 1 ? MULT_ON : MULT_OFF;
+    ctx.strokeText(multStr, 0, 0);
+    ctx.fillText(multStr, 0, 0);
+    ctx.restore();
+    // Hits left.
+    const flash = sc.hud.hit > 0 && flashOn(sc.t, 10);
+    for (let i = 0; i < HITS_PER_LIFE; i++) {
+      ctx.beginPath();
+      ctx.arc(line.pips + HUD_PIP_RADIUS + i * HUD_PIP_STEP, 0, HUD_PIP_RADIUS, 0, TAU);
+      ctx.fillStyle = i < me.hl ? PIP_FULL : flash ? LOST_FILL : PIP_EMPTY;
+      ctx.fill();
+    }
+    // The wave and the players.
+    ctx.font = LINE_FONT;
+    ctx.fillStyle = LINE_DIM;
+    const wt = line.short ? waveShort : waveLong;
+    ctx.strokeText(wt, line.wave, 0);
+    ctx.fillText(wt, line.wave, 0);
+    if (line.short) {
+      drawGlyph(line.players + HUD_GLYPH_WIDTH / 2, 0);
+      const px = line.players + HUD_GLYPH_WIDTH + HUD_GLYPH_GAP;
+      ctx.strokeText(playersShort, px, 0);
+      ctx.fillText(playersShort, px, 0);
+    } else {
+      ctx.strokeText(playersLong, line.players, 0);
+      ctx.fillText(playersLong, line.players, 0);
+    }
+    ctx.restore();
+    // "streak lost", flicking up and out under the score.
+    if (sc.hud.lost > 0) {
+      const f = sc.hud.lost / STREAK_LOST_S;
+      ctx.globalAlpha = f;
+      ctx.font = LOST_FONT;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 4;
+      ctx.fillStyle = LOST_FILL;
+      const ly = y + LOST_BELOW - (1 - f) * 8;
+      ctx.strokeText("streak lost", hud.left, ly);
+      ctx.fillText("streak lost", hud.left, ly);
       ctx.globalAlpha = 1;
+    }
+    // Down: DOWN and the seconds left under your robot, and how to get up.
+    const you = sc.self >= 0 ? sc.robots[sc.self] : undefined;
+    if (me.dn === 1 && you?.down) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 5;
+      ctx.font = DOWN_FONT;
+      ctx.fillStyle = HELP_FILL;
+      const label = downText(Math.ceil(you.left));
+      const dy = cssH / 2 + DOWN_BELOW;
+      ctx.strokeText(label, hud.center, dy);
+      ctx.fillText(label, hud.center, dy);
+      ctx.lineWidth = 4;
+      ctx.font = DOWN_HINT_FONT;
+      ctx.fillStyle = TEXT_FILL;
+      ctx.strokeText(DOWN_HINT, hud.center, dy + 34);
+      ctx.fillText(DOWN_HINT, hud.center, dy + 34);
     }
   }
 
@@ -838,7 +866,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
       ctx.globalAlpha = 1;
     }
-    if (sc.dashButton && !sc.over) drawDashButton(sc.dashButton, sc.dashReady);
+    if (sc.dashButton && !sc.out) drawDashButton(sc.dashButton, sc.dashReady);
     for (const s of sc.sticks) drawStick(s);
 
     // An arrow at the edge to each downed player out of view within reach of you.
@@ -898,15 +926,14 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
     }
 
-    if (sc.over) drawOver(sc.over, t);
-    else drawHud(sc);
-    // The F readout shows over everything, the life-over screen too.
+    if (!sc.out) drawHud(sc);
+    // The F readout, under the line (off by default; F toggles it).
     if (sc.stats) {
       ctx.font = STATS_FONT;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText(sc.stats, hud.left, hud.top + 100);
+      ctx.fillText(sc.stats, hud.left, hud.top + LINE_MIDDLE + STATS_BELOW);
     }
   }
 

@@ -1,23 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  BOMB_CHARGE_RADIUS,
-  BOMB_CHARGE_WIDTH,
-  BUG_LOOK_IDS,
-  BUG_LOOKS,
-  DRONE_SHOT_CORE,
-  PALETTE,
-  ROBOT_HALO_RADIUS,
-  ROBOT_MARK,
-  ROBOT_MARK_OUTLINE_WIDTH,
-  ROBOT_MARK_RADIUS,
-  ROBOT_RIM,
-  SHIELD_COLOUR,
-  SHIELD_RADIUS,
-  SHOT_CORE,
-  bugLookId,
-} from "./look";
+import { BUG_LOOK_IDS, BUG_LOOKS, PALETTE, ROBOT_HALO_RADIUS, ROBOT_MARK, ROBOT_MARK_OUTLINE_WIDTH, ROBOT_MARK_RADIUS, ROBOT_RIM } from "./look";
 import { BUG_KINDS, ROBOT_RADIUS } from "./config";
-import { choose, createState, step } from "./sim";
 
 describe("bug looks", () => {
   test("every look has a size, a palette glow and moving legs", () => {
@@ -37,37 +20,21 @@ describe("bug looks", () => {
     expect(BUG_LOOKS.fast.glow).not.toBe(BUG_LOOKS.base.glow);
   });
 
-  test("every bug the sim spawns, of every kind, has a look drawn at its size", () => {
-    const s = createState(1, { w: 450, h: 800 });
-    const seen = new Set<string>();
-    for (let i = 0; i < 45 * 60; i++) {
-      step(s, { kind: "none" }, 1 / 60);
-      if (s.choice) choose(s, 0);
-      s.hits = 0; // kept alive past the fast bug's start
-      for (const b of s.bugs) {
-        seen.add(b.kind.id);
-        expect(BUG_LOOKS[bugLookId(b)].radius).toBe(b.kind.radius);
-      }
-    }
-    expect([...seen].sort()).toEqual(BUG_KINDS.map((k) => k.id).sort());
+  test("every bug kind has a look drawn at its size", () => {
+    expect([...BUG_LOOK_IDS].sort()).toEqual(BUG_KINDS.map((k) => k.id).sort());
+    for (const k of BUG_KINDS) expect(BUG_LOOKS[k.id].radius).toBe(k.radius);
   });
 });
 
-describe("the robot and its upgrade effects stay apart", () => {
+describe("your robot's marker", () => {
   const markOuter = ROBOT_MARK_RADIUS + ROBOT_MARK_OUTLINE_WIDTH / 2;
 
-  test("the marker ring sits outside the body and inside the bomb's charge arc", () => {
+  test("the marker ring sits outside the body and inside the halo", () => {
     expect(ROBOT_MARK_RADIUS - ROBOT_MARK_OUTLINE_WIDTH / 2).toBeGreaterThan(ROBOT_RADIUS);
-    expect(markOuter).toBeLessThan(BOMB_CHARGE_RADIUS - BOMB_CHARGE_WIDTH / 2);
-    expect(SHIELD_RADIUS).toBeGreaterThan(markOuter);
     expect(ROBOT_HALO_RADIUS).toBeGreaterThan(markOuter);
   });
 
-  test("the marker, the shield and the robot's rim are different colours", () => {
-    expect(new Set([ROBOT_MARK, SHIELD_COLOUR, ROBOT_RIM]).size).toBe(3);
-  });
-
-  test("a drone's shot is a different colour from the gun's", () => {
-    expect(DRONE_SHOT_CORE).not.toBe(SHOT_CORE);
+  test("the marker and the robot's rim are different colours", () => {
+    expect(ROBOT_MARK).not.toBe(ROBOT_RIM);
   });
 });

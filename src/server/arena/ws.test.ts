@@ -8,13 +8,17 @@ import type { Database } from "bun:sqlite";
 import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
 import { placeBug } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
-import { computeStats, findPlayer, openDb, playerBest, teamTotals } from "../db";
+import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
+import { TOP_CACHE_MS } from "../app";
 import { startServer, type RunningServer } from "../serve";
+import { HIDE_SWEEP_MS as REAL_HIDE_SWEEP_MS } from "./sockets";
 import type { ArenaStats } from "./rooms";
 
 const TIMEOUT = 15_000;
 /** Liveness shortened for the tests: ping every 100 ms, drop after 600 ms of silence. */
 const LIVENESS = { pingMs: 100, silentMs: 600 };
+/** The hidden-name sweep, shortened for the tests. */
+const HIDE_SWEEP_MS = 50;
 
 let dir: string;
 let db: Database;
@@ -24,7 +28,7 @@ let clients: Client[];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "arena-ws-test-"));
   db = openDb(join(dir, "app.db"));
-  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS, arenaFill: 0 });
+  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS, hideSweepMs: HIDE_SWEEP_MS, arenaFill: 0 });
   clients = [];
 });
 
@@ -194,6 +198,43 @@ test(
       expect(c.got).toEqual([{ t: "error", code }]);
     }
     expect(srv.rooms.stats().players).toBe(0);
+  },
+  TIMEOUT,
+);
+
+test(
+  "a hidden name is refused at hello",
+  async () => {
+    hideName(db, "Hidden One", new Date());
+    const c = await connect();
+    c.send(hello("hidden one"));
+    expect(await c.closed).toBe(1008);
+    expect(c.got).toEqual([{ t: "error", code: "name" }]);
+    expect(srv.rooms.stats().players).toBe(0);
+  },
+  TIMEOUT,
+);
+
+test("the real hide sweep and hidden-name cache together kick a hidden name within 5 s (#64)", () => {
+  expect(REAL_HIDE_SWEEP_MS + TOP_CACHE_MS).toBeLessThanOrEqual(5000);
+});
+
+test(
+  "a name hidden mid-life is kicked from its arena within the sweep and the cache, and its peers see it leave",
+  async () => {
+    const kicked = await enter("Kick Me");
+    const peer = await enter("Stays");
+    const id = kicked.welcome.you;
+    await kicked.c.waitFor("a snapshot", () => kicked.c.got.some((m) => m.t === "snapshot"));
+    const at = Date.now();
+    hideName(db, "kick me", new Date());
+    expect(await kicked.c.closed).toBe(1008);
+    // The hidden-name cache (1 s) plus one sweep (50 ms here), with slack.
+    expect(Date.now() - at).toBeLessThan(1600);
+    expect(kicked.c.got.at(-1)).toEqual({ t: "error", code: "name" });
+    await peer.c.waitFor("the leave", () => peer.c.got.some((m) => m.t === "event" && m.kind === "leave" && m.id === id));
+    expect(peer.c.isClosed()).toBe(false);
+    expect(srv.rooms.stats().players).toBe(1);
   },
   TIMEOUT,
 );

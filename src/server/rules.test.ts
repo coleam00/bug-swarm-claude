@@ -1,22 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { playAll } from "../web/game/pacing";
 import { FILL_BOT_NAMES } from "./arena/fill";
 import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
 import {
-  MAX_RUN_SECONDS,
-  MAX_UPGRADES,
   TEAMS,
-  UPGRADE_IDS,
-  UPGRADE_MAX_LEVEL,
   checkName,
-  checkScore,
   entryPattern,
   isBotName,
   isShownName,
   isTeam,
-  isUpgradeId,
   nameKey,
   normalizeName,
 } from "./rules";
@@ -220,82 +213,6 @@ describe("name rules", () => {
     expect(to).toBeGreaterThan(from);
     const listed = header.slice(from, to);
     expect(leaky.filter((e) => !new RegExp(`\\b${e}\\b`).test(listed))).toEqual([]);
-  });
-});
-
-describe("score plausibility", () => {
-  // At 30 s elapsed and 30 s claimed: score cap is 10 * squashes + 32, squash cap 150, seconds cap 32.
-  test("accepted exactly at each bound", () => {
-    expect(checkScore({ score: 232, squashes: 20, seconds: 30 }, 30)).toEqual({ ok: true });
-    expect(checkScore({ score: 0, squashes: 150, seconds: 30 }, 30)).toEqual({ ok: true });
-    expect(checkScore({ score: 0, squashes: 0, seconds: 32 }, 30)).toEqual({ ok: true });
-    expect(checkScore({ score: 0, squashes: 0, seconds: 0 }, 0)).toEqual({ ok: true });
-    expect(checkScore({ score: 0, squashes: 0, seconds: MAX_RUN_SECONDS }, MAX_RUN_SECONDS)).toEqual({ ok: true });
-  });
-
-  test("one point over the score bound is refused", () => {
-    expect(checkScore({ score: 233, squashes: 20, seconds: 30 }, 30).ok).toBe(false);
-  });
-
-  test("more than 5 squashes per claimed second is refused", () => {
-    expect(checkScore({ score: 0, squashes: 151, seconds: 30 }, 30).ok).toBe(false);
-  });
-
-  test("a choice pause earns no squashes: the cap counts the run's seconds, not the elapsed time", () => {
-    expect(checkScore({ score: 0, squashes: 150, seconds: 30 }, 60)).toEqual({ ok: true });
-    expect(checkScore({ score: 0, squashes: 151, seconds: 30 }, 60).ok).toBe(false);
-  });
-
-  test("the audit's forgery, 120 squashes and 1,220 points 20 s after the start, is refused", () => {
-    expect(checkScore({ score: 1220, squashes: 120, seconds: 20 }, 20).ok).toBe(false);
-    expect(checkScore({ score: 1220, squashes: 120, seconds: 22 }, 20).ok).toBe(false); // with all the slack
-  });
-
-  test("a run longer than 300 s is refused, however long the server waited", () => {
-    expect(checkScore({ score: 0, squashes: 0, seconds: 300.5 }, 400).ok).toBe(false);
-  });
-
-  // `bun run pacing`'s seeds 0-49, 900 runs, in chunks of 5 seeds: one test playing all 900 takes
-  // about 3 s, and under CPU load it ran past the test timeout (#41). Each chunk is its own test.
-  const SEED_CHUNKS = Array.from({ length: 10 }, (_, c) => Array.from({ length: 5 }, (_, i) => c * 5 + i));
-
-  test("the chunks below cover the default pacing matrix's seeds 0-49, each once", () => {
-    expect(SEED_CHUNKS.flat()).toEqual(Array.from({ length: 50 }, (_, i) => i));
-  });
-
-  for (const seeds of SEED_CHUNKS) {
-    test(`every run of the default pacing matrix is accepted, claimed the moment it ends (no pause): seeds ${seeds[0]}-${seeds.at(-1)}`, () => {
-      const runs = playAll(seeds);
-      expect(runs).toHaveLength(90); // 900 over the 10 chunks
-      for (const { group, seed, shape, result } of runs) {
-        const { score, squashes, seconds } = result;
-        expect({ group, seed, shape, check: checkScore({ score, squashes, seconds }, seconds) }).toEqual({ group, seed, shape, check: { ok: true } });
-      }
-    });
-  }
-
-  test("claiming more seconds than really passed (plus 2 s slack) is refused", () => {
-    expect(checkScore({ score: 0, squashes: 0, seconds: 32.5 }, 30).ok).toBe(false);
-  });
-
-  test("negative or non-integer values are refused", () => {
-    expect(checkScore({ score: -1, squashes: 0, seconds: 1 }, 30).ok).toBe(false);
-    expect(checkScore({ score: 1.5, squashes: 0, seconds: 1 }, 30).ok).toBe(false);
-    expect(checkScore({ score: 10, squashes: 0.5, seconds: 1 }, 30).ok).toBe(false);
-    expect(checkScore({ score: 10, squashes: -1, seconds: 1 }, 30).ok).toBe(false);
-    expect(checkScore({ score: 10, squashes: 1, seconds: -1 }, 30).ok).toBe(false);
-    expect(checkScore({ score: 10, squashes: 1, seconds: Number.NaN }, 30).ok).toBe(false);
-  });
-});
-
-describe("upgrades", () => {
-  test("every upgrade at its top level fits in what a finished run may report", () => {
-    expect(UPGRADE_IDS.length * UPGRADE_MAX_LEVEL).toBeLessThanOrEqual(MAX_UPGRADES);
-  });
-
-  test("only the listed ids are upgrades", () => {
-    for (const id of UPGRADE_IDS) expect(isUpgradeId(id)).toBe(true);
-    for (const v of ["", "Review-Laser", "laser", "CI-Drone", "drone", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
   });
 });
 

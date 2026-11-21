@@ -16,7 +16,7 @@ const STILL_SECONDS = 3;
 
 /**
  * Each frame's cost (step, effects and draw) in ms, for measuring: `work` is a ring of the last
- * COST_FRAMES frames, `count` the frames so far. Dev server and bench build only.
+ * COST_FRAMES frames, `count` the frames so far. Dev server only.
  */
 export type BackdropRecord = { work: Float64Array; count: number; running: boolean };
 
@@ -26,7 +26,7 @@ declare global {
   }
 }
 
-const MEASURE = import.meta.env.DEV || import.meta.env.MODE === "bench";
+const MEASURE = import.meta.env.DEV;
 
 export function startBackdrop(canvas: HTMLCanvasElement): { stop(): void } {
   const ctx = canvas.getContext("2d");
