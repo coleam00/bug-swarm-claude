@@ -64,16 +64,23 @@ export function nameKey(name: string): string {
   return normalizeName(name).toLowerCase();
 }
 
-/**
- * The form the word lists are matched against: lowercased, spaces, - and _ removed, digit swaps
- * undone. A number of two or more digits ending a name, after three or more other characters,
- * is an age or a year, not letters, so it is dropped: "Josh17" is "josh", not "joshit". "5h17"
- * is too short for that and still reads "shit".
- */
+/** The form the word lists are matched against: lowercased, spaces, - and _ removed, digit swaps undone. */
 export function compactName(s: string): string {
-  const joined = s.toLowerCase().replace(/[ _-]/g, "");
-  const numbered = /^(.{2,}\D)\d{2,}$/.exec(joined);
-  return (numbered ? numbered[1]! : joined).replace(/[0134578]/g, (d) => DIGIT_SWAPS[d] ?? d);
+  return s
+    .toLowerCase()
+    .replace(/[ _-]/g, "")
+    .replace(/[0134578]/g, (d) => DIGIT_SWAPS[d] ?? d);
+}
+
+/**
+ * The ways to read a name: its compact form, and, when it ends in a number of two or more digits
+ * after three or more other characters, also the compact form without that number (an age or a
+ * year). A name is refused if either reading is, so "ass99" and "admin99" are caught while
+ * "pen15" still reads "penis".
+ */
+function readings(s: string): string[] {
+  const numbered = /^(.{2,}\D)\d{2,}$/.exec(s.replace(/[ _-]/g, ""));
+  return numbered ? [compactName(s), compactName(numbered[1]!)] : [compactName(s)];
 }
 
 /**
@@ -97,15 +104,17 @@ const EXCEPTIONS_LONGEST_FIRST = [...EXCEPTIONS].sort((a, b) => b.length - a.len
  * length or characters: the boards use it to hide stored names that the lists now refuse.
  */
 export function listedReason(name: string): "blocked" | "reserved" | null {
-  const compact = compactName(name);
-  // An exception becomes "|", not "", so cutting it out can't join two halves into a word.
-  let cut = compact;
-  for (const e of EXCEPTIONS_LONGEST_FIRST) cut = cut.split(e).join("|");
-  if (ANYWHERE.test(cut)) return "blocked";
+  const whole = readings(name);
   // A word that is only digits is a number ("load-4455"), not "aass".
-  const words = name.split(/[ _-]+/).filter((w) => !/^\d*$/.test(w));
-  if (WHOLE.test(compact) || words.some((w) => WHOLE.test(compactName(w)))) return "blocked";
-  if (RESERVED.test(compact)) return "reserved";
+  const words = name.split(/[ _-]+/).filter((w) => !/^\d*$/.test(w)).flatMap(readings);
+  for (const compact of whole) {
+    // An exception becomes "|", not "", so cutting it out can't join two halves into a word.
+    let cut = compact;
+    for (const e of EXCEPTIONS_LONGEST_FIRST) cut = cut.split(e).join("|");
+    if (ANYWHERE.test(cut)) return "blocked";
+  }
+  if ([...whole, ...words].some((c) => WHOLE.test(c))) return "blocked";
+  if (whole.some((c) => RESERVED.test(c))) return "reserved";
   return null;
 }
 

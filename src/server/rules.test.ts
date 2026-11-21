@@ -86,8 +86,10 @@ describe("name rules", () => {
   });
 
   test("a number at the end of a longer name is a number, not letters", () => {
-    for (const n of ["Josh17", "Ash17", "Cash17", "Fish17", "Tim17", "Alex88", "Bot 4455", "Team-7117"]) expect(checkName(n).ok).toBe(true);
-    refuses(["5h17", "sh17", "fuck17", "ass99", "Big Ass 99"]);
+    for (const n of ["Josh17", "Ash17", "Cash17", "Tim17", "Alex88", "Bot 4455", "Team-7117"]) expect(checkName(n).ok).toBe(true);
+    refuses(["5h17", "sh17", "fuck17", "ass99", "Big Ass99", "Big Ass 99"]);
+    // Digits spelling the end of a word still read as letters.
+    refuses(["pen15", "p3n15", "wh0r35", "a55h0l35", "cun75", "bullsh17", "dipsh17"]);
   });
 
   // Decides the approach: every entry is checked against these real names and words, each of
@@ -97,7 +99,7 @@ describe("name rules", () => {
     ...["Scunthorpe", "Cassie", "Dickens", "Dickson", "Benedick", "Hancock", "Cockburn", "Peacock", "Essex"],
     ...["Grape", "Spicy", "Classic", "Analyst", "Assistant", "Therapist", "Bass", "Glass", "Sussex"],
     ...["Cumberland", "Document", "Cucumber", "Scrape", "Drapery", "Shuttlecock", "Assassin"],
-    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit"],
+    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit", "Ashit"],
     ...["Bob", "Connor", "Helen", "Booboo", "Shelly", "Hello"],
     ...["Titan", "Raccoon", "Cocoon", "Tycoon", "Pedro", "Homer", "Arsenal", "Butterfly", "Penelope"],
     ...["Ashley", "Sasha", "Nikita", "Cockatoo", "Hitchcock", "Phoebe", "Saltwater", "Atwater"],

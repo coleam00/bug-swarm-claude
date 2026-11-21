@@ -22,11 +22,13 @@
 // - EXCEPTIONS: real words cut out of the normalised name before BLOCKED_ANYWHERE is checked
 //   ("therapist" would otherwise be refused for "rapist", "Sushi Time" for "shit"). An exception
 //   is replaced by a separator, not deleted, so it can't be used to join two halves of a word.
-// Numbers: a number of two or more digits that ends a name after three or more other characters
-// is read as an age or a year and dropped, not swapped: "Josh17" is "josh", not "joshit". A word
-// made only of digits ("load-4455") is a number too, so it is never a BLOCKED_WHOLE word.
-// Known false positives, accepted: "Wankel", "Snigger", "Dykes", "Retardant", "Lesbos" and
-// "Ashit" are refused, as are Thai names built on "porn" (Pornthep) and a whole word such as
+// Numbers: a name that ends in a number of two or more digits, after three or more other
+// characters, is also read without it (an age or a year), and refused if either reading is:
+// "ass99" is refused, and "pen15" still reads "penis". A word made only of digits inside a longer
+// name ("load-4455") is a number, never a BLOCKED_WHOLE word. "Ash17" and "Josh17" read "ashit"
+// and "joshit", which EXCEPTIONS lets through.
+// Known false positives, accepted: "Wankel", "Snigger", "Dykes", "Retardant" and "Lesbos" are
+// refused, and so are other names ending "sh" + 17 ("Fish17", "Rush17"), as are Thai names built on "porn" (Pornthep) and a whole word such as
 // "Moby Dick".
 //
 // RESERVED_NAMES: refused for players with "That name is reserved". Matched against the whole
@@ -71,7 +73,7 @@ export const BLOCKED_ANYWHERE: readonly string[] = [
   "biotch",
   "bytch",
   "beyotch",
-  "asshole",
+  "ashole",
   "azzhole",
   "arsehole",
   "asshat",
@@ -123,7 +125,7 @@ export const BLOCKED_ANYWHERE: readonly string[] = [
   "slut",
   "whore",
   "hoebag",
-  "pussy",
+  "pusy",
   "pussie",
   "scumbag",
   "turdface",
@@ -423,6 +425,8 @@ export const EXCEPTIONS: readonly string[] = [
   "rakshit",
   "shitij",
   "shittu",
+  "ashit",
+  "joshit",
   "wankhede",
   "pussyfoot",
   "carbon",

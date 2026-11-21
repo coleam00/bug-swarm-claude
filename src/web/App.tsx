@@ -93,7 +93,7 @@ function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string
         checked.reason === "blocked"
           ? "That name isn't allowed. Try another."
           : checked.reason === "reserved"
-            ? "That name is reserved. Try another."
+            ? "That name is reserved"
             : checked.reason === "length"
               ? `Use 2 to ${NAME_MAX} characters.`
               : "Use letters, numbers, spaces, - and _ only.",
