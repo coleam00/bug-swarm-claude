@@ -100,6 +100,8 @@ describe("name rules", () => {
     // A short piece is read glued to the word beside it, so an uneven split is one word too.
     refuses(["f uck", "c unt", "ni gger", "f aggot", "s hit", "n azi", "p orn", "a sshole", "who re", "shi t"]);
     refuses(["kik e", "dyk e", "spi c", "coo n", "Big f uck", "f uck you", "my ni gger", "F-uck", "c_unt"]);
+    // Glued to the word before and after at once: neither one-sided join is a blocked word.
+    refuses(["bit c hes"]);
   });
 
   test("an exception doesn't hide a blocked word beside it, and cutting it out joins nothing", () => {
@@ -140,6 +142,12 @@ describe("name rules", () => {
     ...["Nazim", "Benazir", "Antinazi", "Pakize", "Coonan", "Coonawarra", "Coontz", "Cooney", "Coonts"],
     ...["Coonrod", "Coonley", "Kunta", "Kuntz", "Kuntal", "Racoon", "Faggio", "Pussywillow", "Shittu"],
     ...["Pussyfoot", "Carbon"],
+    // Surnames an entry runs into through a doubled letter, or sits inside.
+    ...["Cook", "Cooks", "Tim Cook", "Pollack", "Bonner", "Bonerjee", "Midgett", "Spickett", "Spickard"],
+    ...["Spickler", "Chardonnay", "Kyker", "Spaziani", "Faggiano", "Fagel", "Gookin", "Slutsky"],
+    // Japanese and Indian names with "shit" inside.
+    ...["Kinoshita", "Morishita", "Takeshita", "Oshita", "Kishita", "Ishita", "Yoshitaka", "Yoshitomi"],
+    ...["Toshitsugu", "Hoshitani", "Shitara", "Nishita"],
     ...["Coonhound", "Spazio", "Tycoons", "Kakkar", "McDonald", "LaToya", "DiCaprio", "DeAndre", "LeBron"],
     ...["Ali Butt", "Sambo", "Day Spas", "Mong Kok"],
   ];

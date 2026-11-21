@@ -8,15 +8,18 @@
 //   word spelled out, so it is joined back first: "F-U_C K", "n a z i" and "fu ck" are one word.
 //   Such a short word is also read glued to the word before it, the word after it and both, so
 //   an uneven split ("f uck", "ni gger", "who re", "shi t") is one word too. A split into two
-//   pieces of three letters or more ("ret ard", "nig ger") passes; the owner hides those with
-//   `bun run hide`.
+//   pieces of three letters or more passes ("ret ard"), unless one piece is blocked on its own
+//   ("nig ger" is refused for "nig"); the owner hides those with `bun run hide`.
 // - Each word normalised: lowercased, the digit swaps 0->o, 1->i, 3->e, 4->a, 5->s, 7->t, 8->b
 //   undone. "5h17" is "shit".
 // - Repeated letters: each run of a letter in an entry matches that many OR MORE of it in the
 //   name, so "fuck" catches "fuuuck" and "pussy" catches "pussssy". The name itself is never
 //   collapsed, which is what keeps "boob" from blocking "Bob" and "coon" from blocking "Connor".
 //   So a doubled letter in an entry means "at least two": write the shortest spelling you want
-//   caught ("fagot" catches "faggot" too; "faggot" would let "fagot" through).
+//   caught ("fagot" catches "faggot" too; "faggot" would let "fagot" through). The same rule
+//   runs into real names with a doubled letter: "polack" matches "Pollack", "boner" "Bonner",
+//   "midget" "Midgett". That is what most EXCEPTIONS below are for; a short whole-word entry
+//   that stretches into a common name ("cok" into "Cook") is left out instead.
 //
 // Why there are three lists (the Scunthorpe problem): plain "does the name contain it" blocks
 // real names. "cunt" sits inside "Scunthorpe", "ass" inside "Cassie" and "Classic", "rape" inside
@@ -42,7 +45,10 @@
 // "Josh17" read "ashit" and "joshit", which EXCEPTIONS lets through.
 // Known false positives, accepted: "Wankel", "Snigger", "Dykes", "Retardant" and "Lesbos" are
 // refused, and so are other names ending "sh" + 17 ("Fish17", "Rush17"), Thai names built on
-// "porn" (Pornthep), "Nazia", "Gnazio", "McCoon", "Coonie" and "Kunti", a whole word such as
+// "porn" (Pornthep), "Nazia", "Gnazio", "McCoon", "Coonie" and "Kunti", the surnames "Coons",
+// "Fagg", "Fago" and "Faggi" (an exception for them would let "coons", "faggot", "fagot" and
+// "faggit" through), "Japp" (exceptions are not applied to BLOCKED_WHOLE), "Twatt", "Wanke",
+// "Cunto", "Cuntz" and "Pecker", a whole word such as
 // "Moby Dick" or "DeHoe", and two names glued into one word ("AnnaZiegler"): only spaces,
 // "-" and "_" separate words for BLOCKED_ANYWHERE, because splitting at capitals would let
 // "CunTface" through. Gluing short words to their neighbours also refuses some initials and
@@ -381,7 +387,6 @@ export const BLOCKED_WHOLE: readonly string[] = [
   "dick",
   "dik",
   "cock",
-  "cok",
   "prick",
   "twot",
   "piss",
@@ -500,6 +505,46 @@ export const EXCEPTIONS: readonly string[] = [
   "pussyfoot",
   "carbon",
   "milford",
+  "bonner",
+  "bonerjee",
+  "pollack",
+  "midgett",
+  "spickett",
+  "spickard",
+  "spickler",
+  "spickermann",
+  "chardon",
+  "kyker",
+  "spaziani",
+  "spazzoli",
+  "faggiano",
+  "fagel",
+  "fagnani",
+  "fagner",
+  "coonrad",
+  "cooner",
+  "gookin",
+  "chinkin",
+  "kikel",
+  "slutsky",
+  "slutzky",
+  "wankowski",
+  "pennison",
+  "kinoshita",
+  "morishita",
+  "takeshita",
+  "oshita",
+  "kishita",
+  "hishita",
+  "nishita",
+  "ishita",
+  "yoshitaka",
+  "yoshitomi",
+  "yoshito",
+  "toshitaka",
+  "toshitsugu",
+  "hoshitani",
+  "shitara",
 ];
 
 export const RESERVED_NAMES: readonly string[] = ["colemedin", "dynamous", "archon", "admin", "moderator"];
