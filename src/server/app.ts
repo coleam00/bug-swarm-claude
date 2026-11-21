@@ -13,6 +13,7 @@ import {
   upsertPlayer,
   type TopRow,
 } from "./db";
+import { ASSET_PATHS, asset } from "./art";
 import { MAX_UPGRADES, checkName, checkScore, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
 
 /** At most this many run starts per IP per window (architecture.md, "Boundaries"). */
@@ -23,6 +24,8 @@ export const TOP_CACHE_MS = 1000;
 /** Team totals are cached the same way. */
 export const TEAMS_CACHE_MS = TOP_CACHE_MS;
 export const MAX_BODY_BYTES = 2048;
+/** Browsers and link-preview crawlers keep the icons and the preview for a day. */
+export const ASSET_MAX_AGE_S = 86400;
 const PLAYER_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 export type AppOptions = {
@@ -48,6 +51,7 @@ export function forwardedClientIp(c: Context): string {
 }
 
 // The API. Every route the UI calls lives under /api. /health answers once the app can serve.
+// The icons and the link preview sit at the root, where browsers and crawlers look for them.
 export function createApp(db: Database, opts: AppOptions = {}): Hono {
   const now = opts.now ?? Date.now;
   const clientIp = opts.clientIp ?? forwardedClientIp;
@@ -58,6 +62,14 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
 
   const app = new Hono();
   app.get("/health", (c) => c.text("ok"));
+  // The icons and the link preview, drawn in code (art.ts) on first request. Registered before
+  // main.ts's static files and page fallback, so these paths never fall through to the page.
+  for (const path of ASSET_PATHS) {
+    app.get(path, () => {
+      const { type, body } = asset(path);
+      return new Response(body, { headers: { "content-type": type, "cache-control": `public, max-age=${ASSET_MAX_AGE_S}` } });
+    });
+  }
   app.use("/api/*", bodyLimit({ maxSize: MAX_BODY_BYTES }));
 
   app.post("/api/runs", async (c) => {

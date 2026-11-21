@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { createApp } from "./app";
 import { RUN_ENDED, computeStats, hideName, openDb, upsertPlayer } from "./db";
+import { ROBOT_RIM } from "../web/game/look";
 import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, TEAMS, TEST_SHIELD, UPGRADE_IDS, type Team } from "./rules";
 
 const [TABS, SPACES] = TEAMS;
@@ -314,4 +315,47 @@ test("reopening the same database file keeps its data", async () => {
   db = openDb(join(dir, "app.db"));
   clock += 5000;
   expect((await post(app(), `/api/runs/${runId}/end`, endBody(5, 0, 5))).status).toBe(200);
+});
+
+describe("icons and link preview", () => {
+  /** Width and height from a PNG's IHDR. */
+  const pngSize = (b: Uint8Array) => {
+    const v = new DataView(b.buffer, b.byteOffset);
+    return [v.getUint32(16), v.getUint32(20)];
+  };
+  const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+  test.each([
+    ["/favicon.svg", "image/svg+xml"],
+    ["/favicon.ico", "image/x-icon"],
+    ["/apple-touch-icon.png", "image/png"],
+    ["/og.png", "image/png"],
+  ])("%s answers 200 %s, cached for a day", async (path, type) => {
+    const res = await app().request(path);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe(type);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=86400");
+  });
+
+  test("the favicon is an SVG of the robot, in its rim colour", async () => {
+    const svg = await (await app().request("/favicon.svg")).text();
+    expect(svg.startsWith("<svg")).toBe(true);
+    expect(svg).toContain(ROBOT_RIM);
+  });
+
+  test("favicon.ico wraps a 48 px PNG", async () => {
+    const ico = new Uint8Array(await (await app().request("/favicon.ico")).arrayBuffer());
+    expect([...ico.subarray(0, 4)]).toEqual([0, 0, 1, 0]);
+    expect([...ico.subarray(22, 30)]).toEqual(PNG_SIGNATURE);
+    expect(pngSize(ico.subarray(22))).toEqual([48, 48]);
+  });
+
+  test("the apple-touch icon is a 180 px PNG and the preview a 1200x630 PNG", async () => {
+    const icon = new Uint8Array(await (await app().request("/apple-touch-icon.png")).arrayBuffer());
+    expect([...icon.subarray(0, 8)]).toEqual(PNG_SIGNATURE);
+    expect(pngSize(icon)).toEqual([180, 180]);
+    const og = new Uint8Array(await (await app().request("/og.png")).arrayBuffer());
+    expect([...og.subarray(0, 8)]).toEqual(PNG_SIGNATURE);
+    expect(pngSize(og)).toEqual([1200, 630]);
+  });
 });
