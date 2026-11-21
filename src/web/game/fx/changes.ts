@@ -2,8 +2,8 @@
 // it. The simulation only counts squashes, hits and blocks (hits the test shield took), but a
 // bug object keeps its identity until it is removed, so a bug that vanished was squashed by a
 // shot, hit the robot or popped the shield (for each hit or block the counters gained, the
-// vanished bug closest to the robot is taken as it). It also
-// keeps a steady animation phase per bug, so the swarm's legs don't all step in time.
+// vanished bug closest to the robot is taken as it). It also keeps a steady animation phase
+// per bug, so the swarm's legs don't all step in time.
 // Pure (no DOM, no canvas); it reads the state and never changes it.
 import { nextRandom, type Rng } from "../rng";
 import { MAX_BUGS } from "../config";
