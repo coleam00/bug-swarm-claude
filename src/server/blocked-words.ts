@@ -2,8 +2,12 @@
 // extends these lists by hand. Written by hand for this game, not copied from a published list.
 //
 // How a name is matched (src/server/rules.ts, listedReason):
-// - Normalised first: lowercased, the digit swaps 0->o, 1->i, 3->e, 4->a, 5->s, 7->t, 8->b
-//   undone, and spaces, "-" and "_" removed. "F-U_C K" and "5h17" are "fuck" and "shit".
+// - Split into words on space, "-" and "_". Every list but RESERVED_NAMES is matched inside one
+//   word at a time, never across the space between two: "Anna Ziegler" holds "nazi" and "Matt
+//   Watson" holds "twat" only once the space is gone. A run of one- and two-letter words is a
+//   word spelled out, so it is joined back first: "F-U_C K", "n a z i" and "fu ck" are one word.
+// - Each word normalised: lowercased, the digit swaps 0->o, 1->i, 3->e, 4->a, 5->s, 7->t, 8->b
+//   undone. "5h17" is "shit".
 // - Repeated letters: each run of a letter in an entry matches that many OR MORE of it in the
 //   name, so "fuck" catches "fuuuck" and "pussy" catches "pussssy". The name itself is never
 //   collapsed, which is what keeps "boob" from blocking "Bob" and "coon" from blocking "Connor".
@@ -13,7 +17,7 @@
 // Why there are three lists (the Scunthorpe problem): plain "does the name contain it" blocks
 // real names. "cunt" sits inside "Scunthorpe", "ass" inside "Cassie" and "Classic", "rape" inside
 // "Grape", "sex" inside "Essex". So:
-// - BLOCKED_ANYWHERE: refused wherever it appears in the normalised name. Words that are rarely
+// - BLOCKED_ANYWHERE: refused wherever it appears inside a word of the name. Words that are rarely
 //   part of an ordinary word, whatever their length ("fuck", and slurs such as "fag", "coon" and
 //   "nazi", with the real words they sit in listed in EXCEPTIONS), and compounds of the
 //   whole-word entries that turn up glued ("dumbnig", "killjew").
@@ -22,7 +26,7 @@
 //   ("BigDick", "ImASpic"). For words that sit inside ordinary ones: "ass" refuses
 //   "ass", "Big Ass", "BigAss" and "a s s", but not "Cassie" or "Bass". The cost is that a
 //   lowercase compound ("bigdick") passes; add it to BLOCKED_ANYWHERE if it shows up.
-// - EXCEPTIONS: real words cut out of the normalised name before BLOCKED_ANYWHERE is checked
+// - EXCEPTIONS: real words cut out of each word before BLOCKED_ANYWHERE is checked
 //   ("therapist" would otherwise be refused for "rapist", "Sushi Time" for "shit"). An exception
 //   is replaced by a separator, not deleted, so it can't be used to join two halves of a word.
 //   Keep exceptions specific: one that starts with a blocked word ("nazia") hides it in
@@ -30,12 +34,14 @@
 // Numbers: a name that starts or ends with a number (one digit or more) is also read without it
 // (an age, a year, a "2"), and refused if either reading is: "ass2", "2fag", "1 Admin" and
 // "Cole Medin 2" are refused, and "pen15" and "5hit" still read "penis" and "shit". A word made
-// only of digits inside a longer name ("load-4455") is a number, never a BLOCKED_WHOLE word. "Ash17" and "Josh17" read "ashit"
-// and "joshit", which EXCEPTIONS lets through.
+// only of digits inside a longer name ("load-4455") is a number, never letters. "Ash17" and
+// "Josh17" read "ashit" and "joshit", which EXCEPTIONS lets through.
 // Known false positives, accepted: "Wankel", "Snigger", "Dykes", "Retardant" and "Lesbos" are
 // refused, and so are other names ending "sh" + 17 ("Fish17", "Rush17"), Thai names built on
-// "porn" (Pornthep), "Nazia", "Gnazio", "McCoon" and "Coonie", and a whole word such as
-// "Moby Dick" or "DeHoe".
+// "porn" (Pornthep), "Nazia", "Gnazio", "McCoon", "Coonie" and "Kunti", a whole word such as
+// "Moby Dick" or "DeHoe", and two names glued into one word ("AnnaZiegler"): only spaces,
+// "-" and "_" separate words for BLOCKED_ANYWHERE, because splitting at capitals would let
+// "CunTface" through.
 //
 // RESERVED_NAMES: refused for players with "That name is reserved". Matched against the whole
 // normalised name with the same repeated-letter rule ("Cole Medin", "c0le_medin" and "Addmin"
@@ -102,7 +108,7 @@ export const BLOCKED_ANYWHERE: readonly string[] = [
   "bastard",
   "cunt",
   "cvnt",
-  "kunty",
+  "kunt",
   "dickhead",
   "dickface",
   "dickwad",
@@ -259,7 +265,7 @@ export const BLOCKED_ANYWHERE: readonly string[] = [
   "negroid",
   "jigaboo",
   "porchmonkey",
-  "junglebunny",
+  "junglebunn",
   "darkie",
   "golliwog",
   "spick",
@@ -281,8 +287,8 @@ export const BLOCKED_ANYWHERE: readonly string[] = [
   "chinaman",
   "halfbreed",
   "spearchucker",
-  "tarbaby",
-  "pickaninny",
+  "tarbab",
+  "pickanin",
   "mudshark",
   "gasthejew",
   "killthejew",
@@ -317,7 +323,7 @@ export const BLOCKED_ANYWHERE: readonly string[] = [
   "lesbo",
   "lezbo",
   "lezzie",
-  "tranny",
+  "trann",
   "shemale",
   "poofter",
   "sodomite",
@@ -372,7 +378,6 @@ export const BLOCKED_WHOLE: readonly string[] = [
   "cok",
   "prick",
   "twot",
-  "kunt",
   "piss",
   "turd",
   "crap",
@@ -395,6 +400,7 @@ export const BLOCKED_WHOLE: readonly string[] = [
   "nude",
   "horny",
   "orgy",
+  "orgie",
   "rape",
   "raped",
   "raping",
@@ -471,6 +477,13 @@ export const EXCEPTIONS: readonly string[] = [
   "antinazi",
   "coonawarra",
   "coontz",
+  "cooney",
+  "coonts",
+  "coonrod",
+  "coonley",
+  "kunta",
+  "kuntz",
+  "kuntal",
   "coonhound",
   "spazio",
   "shitij",

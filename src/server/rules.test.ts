@@ -76,7 +76,7 @@ describe("name rules", () => {
 
   test("slurs glued to other words, and their common respellings, are refused", () => {
     refuses(["fatfag", "FatFag", "dumbfag", "ImAFag", "uRaFag", "dumbnig", "ihatenigs", "dumbcoon", "dumbspic"]);
-    refuses(["KillPakis", "pakiboy", "nazi4life", "HeilBoy", "KKKlover", "dumbtard", "spazboy"]);
+    refuses(["KillPakis", "pakiboy", "nazi4life", "XxFagxX", "KKKlover", "dumbtard", "spazboy"]);
     refuses(["killjews", "ihatejews", "killgays", "ihategays"]);
     refuses(["niqqa", "niqqer", "ngga", "niggr", "nigr", "nibba"]);
   });
@@ -84,8 +84,19 @@ describe("name rules", () => {
   test("one sample from each kind: racial, homophobic, ableist, sexual", () => {
     refuses(["chink", "wetback", "kike"]); // racial
     refuses(["dyke", "tranny", "fagot"]); // homophobic and transphobic
+    // Plurals of entries that end in y.
+    refuses(["trannies", "trannie", "kunties", "junglebunnies", "tarbabies", "pickaninnies", "orgies"]);
     refuses(["retard", "spastic", "mongoloid"]); // ableist
     refuses(["blowjob", "dildo", "cumshot"]); // sexual
+  });
+
+  test("a blocked word is looked for inside each word, never across the space between two", () => {
+    const names = ["Anna Ziegler", "Tina Ziegler", "Dana Zito", "Rafa Garcia", "Rafa Gonzalez", "Mustafa Gul"];
+    names.push("Pippa King", "Philippa King", "Marco Onofrio", "Rocco Ong", "Mona Zinn", "Gerry Cooney", "Kevin Cooney");
+    names.push("Matt Watson", "Trish Ito", "Nick Ike", "Shi Taylor", "Cass Kiss");
+    expect(names.filter((n) => !checkName(n).ok)).toEqual([]);
+    // A word spelled out in one- and two-letter pieces is still one word.
+    refuses(["F a g", "n a z i", "k k k", "fu ck", "Big F a g", "sh it head", "N-I-G-G-A"]);
   });
 
   test("an exception doesn't hide a blocked word beside it, and cutting it out joins nothing", () => {
@@ -97,9 +108,9 @@ describe("name rules", () => {
     for (const n of ["Josh17", "Ash17", "Cash17", "Tim17", "Alex88", "Bot 4455", "Team-7117"]) expect(checkName(n).ok).toBe(true);
     refuses(["5h17", "sh17", "fuck17", "ass99", "Big Ass99", "Big Ass 99"]);
     // One digit is a number too.
-    refuses(["ass2", "dick9", "fag1", "kkk2", "cock2", "bj7", "Big Ass 2"]);
+    refuses(["ass2", "dick9", "cum1", "anal2", "cock2", "bj7", "Big Ass 2"]);
     // So is one at the front.
-    refuses(["2fag", "3fag", "1ass", "2kkk", "69dick", "9sex", "5hit", "8oner"]);
+    refuses(["2cum", "3tit", "1ass", "2anus", "69dick", "9sex", "5hit", "8oner"]);
     for (const n of ["4ever", "1Direction", "2Cash", "7Eleven", "9Lives", "3Musketeers"]) expect(checkName(n).ok).toBe(true);
     // Digits spelling the end of a word still read as letters.
     refuses(["pen15", "p3n15", "wh0r35", "a55h0l35", "cun75", "bullsh17", "dipsh17"]);
@@ -123,7 +134,9 @@ describe("name rules", () => {
     ...["Mongoose", "Tardis", "Stardust", "Leotard", "Pedometer", "Speedo", "Homophone", "Spice"],
     ...["Hispanic", "Specific", "Cockpit", "Scumm", "Analog", "Titanic", "Hoedown", "Sambuca"],
     ...["Fagan", "Fagen", "Fagin", "Faggin", "Fagioli", "Fagundes", "Fagerstrom", "Ignazio", "Nazionale"],
-    ...["Nazir", "Nazim", "Benazir", "Antinazi", "Pakistan", "Pakize", "Coonan", "Coonawarra", "Coontz"],
+    ...["Nazim", "Benazir", "Antinazi", "Pakize", "Coonan", "Coonawarra", "Coontz", "Cooney", "Coonts"],
+    ...["Coonrod", "Coonley", "Kunta", "Kuntz", "Kuntal", "Racoon", "Faggio", "Pussywillow", "Shittu"],
+    ...["Pussyfoot", "Carbon"],
     ...["Coonhound", "Spazio", "Tycoons", "Kakkar", "McDonald", "LaToya", "DiCaprio", "DeAndre", "LeBron"],
     ...["Ali Butt", "Sambo", "Day Spas", "Mong Kok"],
   ];

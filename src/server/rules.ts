@@ -100,26 +100,51 @@ const RESERVED = new RegExp(`^(?:${alternation(RESERVED_NAMES)})$`);
 const EXCEPTIONS_LONGEST_FIRST = [...EXCEPTIONS].sort((a, b) => b.length - a.length);
 
 /**
+ * The words of a name, split on space, - and _. A run of words of one or two characters is
+ * joined back into one word, since that is a word spelled out ("f u c k", "n a z i", "fu ck"),
+ * not several names. A word made only of digits inside a longer name is a number
+ * ("load-4455"), not letters, so it is left out.
+ */
+function nameWords(name: string): string[] {
+  const words: string[] = [];
+  let run = "";
+  for (const w of name.split(/[ _-]+/).filter(Boolean)) {
+    if (w.length <= 2) {
+      run += w;
+      continue;
+    }
+    if (run) words.push(run);
+    run = "";
+    words.push(w);
+  }
+  if (run) words.push(run);
+  const lettered = words.filter((w) => !/^\d+$/.test(w));
+  return lettered.length > 0 ? lettered : words;
+}
+
+/** An exception becomes "|", not "", so cutting it out can't join two halves into a word. */
+function cutExceptions(compact: string): string {
+  let cut = compact;
+  for (const e of EXCEPTIONS_LONGEST_FIRST) cut = cut.split(e).join("|");
+  return cut;
+}
+
+/**
  * Why the word lists refuse this name, or null when they don't. Checks the lists only, not
  * length or characters: the boards use it to hide stored names that the lists now refuse.
+ *
+ * Blocked words are looked for inside each word of the name, never across the space between
+ * two words: "Anna Ziegler" holds "nazi" and "Matt Watson" holds "twat" only once the space is
+ * gone. BLOCKED_WHOLE words are also looked for in the parts of a word that a capital starts
+ * ("BigDick", "ImASpic"). Reserved names are matched against the whole name.
  */
 export function listedReason(name: string): "blocked" | "reserved" | null {
-  const whole = readings(name);
-  // Words split on space, - and _, and where a capital starts a word ("FatFag", "ImASpic"). A word that is only digits is a number ("load-4455"), not "aass".
-  const words = name
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
-    .split(/[ _-]+/)
-    .filter((w) => !/^\d*$/.test(w))
-    .flatMap(readings);
-  for (const compact of whole) {
-    // An exception becomes "|", not "", so cutting it out can't join two halves into a word.
-    let cut = compact;
-    for (const e of EXCEPTIONS_LONGEST_FIRST) cut = cut.split(e).join("|");
-    if (ANYWHERE.test(cut)) return "blocked";
-  }
-  if ([...whole, ...words].some((c) => WHOLE.test(c))) return "blocked";
-  if (whole.some((c) => RESERVED.test(c))) return "reserved";
+  const words = nameWords(name);
+  const parts = words.flatMap((w) => w.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2").split(" "));
+  const wordReadings = words.flatMap(readings);
+  if (wordReadings.some((c) => ANYWHERE.test(cutExceptions(c)))) return "blocked";
+  if ([...wordReadings, ...parts.flatMap(readings)].some((c) => WHOLE.test(c))) return "blocked";
+  if (readings(name).some((c) => RESERVED.test(c))) return "reserved";
   return null;
 }
 
