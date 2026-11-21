@@ -69,6 +69,10 @@ describe("bun run skill", () => {
     expect(by("idle").medianScore).toBe(0);
     expect(formatSkill(r).find((l) => l.startsWith("gate:"))).toContain("PASS");
     expect(by("dasher").medianDashes).toBeGreaterThan(0);
+    // Every kind is in the mix of a life that lasts: dasher bugs spawn from 30 s and land hits.
+    for (const n of ["mover", "aimer", "dasher"]) expect(by(n).medianSpawned.dasher).toBeGreaterThan(0);
+    expect(by("aimer").medianTouches.dasher).toBeGreaterThan(0);
+    expect(by("idle").medianSpawned.dasher).toBe(0);
   });
 
   test("on 8 seeds the fill bot is good but beatable: above 2x the mover's median score, below the aimer's", () => {

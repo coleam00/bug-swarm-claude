@@ -1,13 +1,11 @@
 // Shots, heat and the hit streak (#55), stepped by sim.ts stepArena. Pure and deterministic.
 import {
   BARREL,
-  CRAWLER_RADIUS,
   DT,
   FIRE_RATE,
   HEAT_COOL_PER_S,
   HEAT_LOCK_S,
   HEAT_PER_SHOT,
-  KILL_POINTS,
   SHOT_RADIUS,
   SHOT_RANGE,
   SHOT_SPEED,
@@ -16,6 +14,7 @@ import {
   WORLD_H,
   WORLD_W,
 } from "./constants";
+import { bugDef } from "./bugs/registry";
 import { nextRandom } from "./rng";
 import type { ArenaState, Bug, Player, Shot } from "./sim";
 
@@ -81,12 +80,10 @@ function fireShot(state: ArenaState, p: Player): void {
   state.events.shotsFired.push({ id, owner: p.id, x, y, angle });
 }
 
-const HIT_R = CRAWLER_RADIUS + SHOT_RADIUS;
-
 /**
  * Where along the segment from (x, y) in unit direction (dx, dy), of length `len`, it first
  * touches the circle at (cx, cy) of radius `r`: 0 if it starts inside, else the entry distance,
- * or -1 if it misses. A swept test: a shot moves 45 units a tick against a 30-unit bug.
+ * or -1 if it misses. A swept test: a shot moves 45 units a tick against a bug about 30 units across.
  */
 export function segmentHit(x: number, y: number, dx: number, dy: number, len: number, cx: number, cy: number, r: number): number {
   const fx = x - cx;
@@ -110,7 +107,7 @@ function creditFor(state: ArenaState, s: Shot): Player | null {
 /**
  * Every shot flies one step. It hits the first live bug its path touches (the smallest entry
  * distance; ties: the lower index) and ends: the bug loses a hit point, the owner's streak grows,
- * and a kill scores KILL_POINTS times the multiplier of the streak including this hit. A shot that
+ * and a kill scores its kind's points times the multiplier of the streak including this hit. A shot that
  * reaches SHOT_RANGE or a wall ends as a miss and resets its owner's streak. Shots never touch
  * players. A shot whose owner left, or whose life ended, flies on and scores nothing.
  */
@@ -125,7 +122,7 @@ export function stepShots(state: ArenaState): void {
     let best = Infinity;
     for (const b of bugs) {
       if (b.hp <= 0) continue;
-      const t = segmentHit(s.x, s.y, s.dx, s.dy, len, b.x, b.y, HIT_R);
+      const t = segmentHit(s.x, s.y, s.dx, s.dy, len, b.x, b.y, bugDef(b.kind).radius + SHOT_RADIUS);
       if (t >= 0 && t < best) {
         best = t;
         hitBug = b;
@@ -137,13 +134,13 @@ export function stepShots(state: ArenaState): void {
       if (owner) {
         owner.streak++;
         if (hitBug.hp <= 0) {
-          const points = KILL_POINTS * mult(owner.streak);
+          const points = bugDef(hitBug.kind).points * mult(owner.streak);
           owner.score += points;
           owner.kills++;
-          ev.kills.push({ bug: hitBug.id, by: owner.id, x: hitBug.x, y: hitBug.y, points });
+          ev.kills.push({ bug: hitBug.id, by: owner.id, x: hitBug.x, y: hitBug.y, points, kind: hitBug.kind });
         }
       } else if (hitBug.hp <= 0) {
-        ev.kills.push({ bug: hitBug.id, by: 0, x: hitBug.x, y: hitBug.y, points: 0 });
+        ev.kills.push({ bug: hitBug.id, by: 0, x: hitBug.x, y: hitBug.y, points: 0, kind: hitBug.kind });
       }
       ev.shotsEnded.push({ id: s.id, hit: true, travelled: s.travelled + best });
       continue;

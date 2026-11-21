@@ -2,7 +2,7 @@
 // the browser runs `stepMover` to predict its own robot. No clock, no Math.random, no DOM: time
 // comes in as the fixed step and randomness from the arena's seeded generator. This file holds
 // the state, players and lives, and the step's order; shots, heat and the streak live in
-// combat.ts, crawlers and spawning in bugs.ts, down, revive and bleed-out in downs.ts.
+// combat.ts, bugs (spawning, the mix of kinds, contact) in bugs/ with one file per kind, down, revive and bleed-out in downs.ts.
 import type { Team } from "../../server/rules";
 import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
@@ -115,6 +115,10 @@ export type Player = Mover & {
   budget: number;
 };
 
+/**
+ * One bug, of any kind. Flat, with no per-kind objects: the phase fields mean what the kind's
+ * step (bugs/<kind>.ts) makes them mean, and every spawn starts them at 0.
+ */
 export type Bug = {
   id: number;
   kind: BugKind;
@@ -125,6 +129,15 @@ export type Bug = {
   hp: number;
   /** The player it chases this tick (0: none). */
   target: number;
+  /** Its phase: an index into its kind's `phases` (0: the first). */
+  phase: number;
+  /** Ticks spent in this phase. */
+  phaseTicks: number;
+  /** A locked unit direction (for example a dasher's lunge line), when its phase has one. */
+  dx: number;
+  dy: number;
+  /** Units left in a committed move. */
+  travel: number;
 };
 
 export type Shot = {
@@ -146,8 +159,10 @@ export type Shot = {
 export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number };
 /** A shot that ended this tick: on a bug (a hit) or at its range or a wall (a miss), `travelled` units from the barrel. */
 export type ShotEnded = { id: number; hit: boolean; travelled: number };
-/** A bug killed this tick, at (x, y). `by` is the shot's owner, 0 if that life is over (no points). */
-export type Kill = { bug: number; by: number; x: number; y: number; points: number };
+/** A bug of `kind` killed this tick, at (x, y). `by` is the shot's owner, 0 if that life is over (no points). */
+export type Kill = { bug: number; by: number; x: number; y: number; points: number; kind: BugKind };
+/** A bug of `kind` touched `player` this tick, costing them a hit. */
+export type Touch = { player: number; kind: BugKind };
 /** A finished life, as the server saves it. */
 export type LifeEnd = { id: number; score: number; kills: number; ticks: number };
 /** A revive this tick: player `id` brought back by `by`, who scored `points`. */
@@ -160,6 +175,8 @@ export type ArenaEvents = {
   kills: Kill[];
   /** Ids of players who took a hit. */
   hitsTaken: number[];
+  /** Which bug kind touched whom (each one also in hitsTaken). */
+  touches: Touch[];
   livesEnded: LifeEnd[];
   /** Ids of players who went down. */
   downs: number[];
@@ -192,7 +209,7 @@ export function createArena(seed: number): ArenaState {
     shots: [],
     nextBugId: 1,
     nextShotId: 1,
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], livesEnded: [], downs: [], revives: [] },
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [] },
   };
 }
 
@@ -560,8 +577,8 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  *    going out, respawns at a safeSpot in a life that is no longer their first; a player who is
  *    up and holding fire loses any spawn protection left, before they fire;
  * 2. fire and heat, players who are up only (combat.ts);
- * 3. bugs: personal spawn budgets, spawning out of view, chasing, contact hits; the last hit
- *    puts a player down (bugs.ts);
+ * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits; the
+ *    last hit puts a player down (bugs/);
  * 4. shots: travel, hits, kills, misses (combat.ts);
  * 5. downs: revive progress, revives and bleed-outs (downs.ts);
  * 6. spawn protection counts down (after contact, so a join and a respawn are both protected for
@@ -574,6 +591,7 @@ export function stepArena(state: ArenaState): void {
   ev.shotsEnded.length = 0;
   ev.kills.length = 0;
   ev.hitsTaken.length = 0;
+  ev.touches.length = 0;
   ev.livesEnded.length = 0;
   ev.downs.length = 0;
   ev.revives.length = 0;

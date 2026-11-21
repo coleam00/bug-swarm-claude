@@ -69,6 +69,13 @@ export function buildBugSprites(pxPerUnit: number): Record<BugLookId, HTMLCanvas
   return bugs;
 }
 
+/** One look's leg frames at `pxPerUnit`, for a look that is not one of release 1's (the arena's bug kinds). */
+export function buildBugLookSprites(look: BugLook, pxPerUnit: number): HTMLCanvasElement[] {
+  const frames: HTMLCanvasElement[] = [];
+  for (let f = 0; f < LEG_FRAMES; f++) frames.push(bugSprite(look, f, pxPerUnit));
+  return frames;
+}
+
 /** A soft glow in `colour` (a #rrggbb), like buildSprites' `glows`, for additive blending. */
 export function buildGlow(colour: string): HTMLCanvasElement {
   return glowSprite(colour);

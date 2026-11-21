@@ -2,7 +2,8 @@
 // and a bug is about to touch it, and then away from the bug. The fill bot (#66): its reaction,
 // its wobble, and walking to a downed player, on hand-built observations and in a stepped arena.
 import { describe, expect, test } from "bun:test";
-import { CRAWLER_RADIUS, DOWN_TICKS, PLAYER_RADIUS, WORLD_H, WORLD_W } from "./constants";
+import { MAX_BUG_RADIUS } from "./bugs/registry";
+import { DOWN_TICKS, PLAYER_RADIUS, WORLD_H, WORLD_W } from "./constants";
 import {
   DASH_CONTACT,
   FILL_REACT_MAX_TICKS,
@@ -39,7 +40,7 @@ function decide(gap: number, ready = true): PolicyInput {
 }
 
 describe("dasher", () => {
-  const touching = PLAYER_RADIUS + CRAWLER_RADIUS;
+  const touching = PLAYER_RADIUS + MAX_BUG_RADIUS;
 
   test("a bug about to touch it: it dashes, away from the bug", () => {
     const out = decide(touching + DASH_CONTACT - 5);

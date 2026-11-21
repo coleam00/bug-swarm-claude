@@ -2,7 +2,8 @@
 // A policy reads an Observation (filled in-process by `observe`, or by bots from snapshots) and
 // writes one tick's input. Pure: randomness comes from the rng it is handed, never the arena's.
 //
-// The specs below are fixed. Tuning the game changes constants.ts only, never these: a gate that
+// The specs below are fixed. Tuning the game changes constants.ts and the bug kinds' files
+// (bugs/), never these: a gate that
 // fails is not passed by weakening the mover (engineering.md, "Skill is measured").
 //
 // - idle: never moves, never fires.
@@ -31,7 +32,8 @@
 //   line, never in a gate.
 //
 // Every policy presses dash while out, so it respawns; only the dasher presses it in a life.
-import { BARREL, CRAWLER_RADIUS, DT, PLAYER_RADIUS, REVIVE_RANGE, SHOT_SPEED } from "./constants";
+import { MAX_BUG_RADIUS } from "./bugs/registry";
+import { BARREL, DT, PLAYER_RADIUS, REVIVE_RANGE, SHOT_SPEED } from "./constants";
 import { nextRandom, type Rng } from "./rng";
 import { wrapAngle, type ArenaState } from "./sim";
 
@@ -326,7 +328,7 @@ export const aimer: Policy = (obs, mem, rng, out) => {
 /** Whether a bug is within DASH_CONTACT of touching the policy's robot, now or one tick on. */
 function aboutToTouch(obs: Observation): boolean {
   const { x, y } = obs.self;
-  const reach = PLAYER_RADIUS + CRAWLER_RADIUS + DASH_CONTACT;
+  const reach = PLAYER_RADIUS + MAX_BUG_RADIUS + DASH_CONTACT;
   const r2 = reach * reach;
   for (let i = 0; i < obs.bugCount; i++) {
     const b = obs.bugs[i]!;
