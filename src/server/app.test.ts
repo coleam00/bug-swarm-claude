@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { createApp } from "./app";
-import { computeStats, hideName, openDb } from "./db";
+import { RUN_ENDED, computeStats, hideName, openDb } from "./db";
+import { MAX_UPGRADES, UPGRADE_IDS } from "./rules";
 
 let dir: string;
 let db: Database;
@@ -136,8 +137,21 @@ describe("run end", () => {
     const a = app();
     const runId = await startRun(a);
     expect((await post(a, `/api/runs/${runId}/end`, { score: 1 })).status).toBe(400);
-    const tooMany = { ...endBody(1), upgrades: Array.from({ length: 11 }, () => "x") };
+    const tooMany = { ...endBody(1), upgrades: Array.from({ length: MAX_UPGRADES + 1 }, () => UPGRADE_IDS[0]) };
     expect((await post(a, `/api/runs/${runId}/end`, tooMany)).status).toBe(400);
+    for (const upgrades of [["laser-of-doom"], [UPGRADE_IDS[0], 7], "review-laser"]) {
+      expect((await post(a, `/api/runs/${runId}/end`, { ...endBody(1), upgrades })).status).toBe(400);
+    }
+  });
+
+  test("stores the upgrades the run took, in pick order", async () => {
+    const a = app();
+    const runId = await startRun(a);
+    clock += 45_000;
+    const upgrades = [UPGRADE_IDS[0], UPGRADE_IDS[0]];
+    expect((await post(a, `/api/runs/${runId}/end`, { ...endBody(45, 0, 45), upgrades })).status).toBe(200);
+    const row = db.query("SELECT upgrades FROM events WHERE type = ? AND run_id = ?").get(RUN_ENDED, runId) as { upgrades: string };
+    expect(JSON.parse(row.upgrades)).toEqual(upgrades);
   });
 
   test("a score impossible for the server's elapsed time is 422", async () => {

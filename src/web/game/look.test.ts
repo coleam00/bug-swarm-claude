@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BUG_LOOK_IDS, BUG_LOOKS, PALETTE, bugLookId } from "./look";
 import { BUG_KINDS } from "./config";
-import { createState, step } from "./sim";
+import { choose, createState, step } from "./sim";
 
 describe("bug looks", () => {
   test("every look has a size, a palette glow and moving legs", () => {
@@ -26,6 +26,7 @@ describe("bug looks", () => {
     const seen = new Set<string>();
     for (let i = 0; i < 45 * 60; i++) {
       step(s, { kind: "none" }, 1 / 60);
+      if (s.choice) choose(s, 0);
       s.hits = 0; // kept alive past the fast bug's start
       for (const b of s.bugs) {
         seen.add(b.kind.id);

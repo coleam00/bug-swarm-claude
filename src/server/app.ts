@@ -11,7 +11,7 @@ import {
   upsertPlayer,
   type TopRow,
 } from "./db";
-import { checkName, checkScore } from "./rules";
+import { MAX_UPGRADES, checkName, checkScore, isUpgradeId, type UpgradeId } from "./rules";
 
 /** At most this many run starts per IP per window (architecture.md, "Boundaries"). */
 export const RUN_STARTS_PER_WINDOW = 30;
@@ -19,8 +19,6 @@ export const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** Hundreds of clients polling the top 10 cost one query a second. */
 export const TOP_CACHE_MS = 1000;
 export const MAX_BODY_BYTES = 2048;
-const MAX_UPGRADES = 10;
-const MAX_UPGRADE_LENGTH = 32;
 const PLAYER_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 export type AppOptions = {
@@ -145,12 +143,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-function isUpgrades(v: unknown): v is string[] {
-  return (
-    Array.isArray(v) &&
-    v.length <= MAX_UPGRADES &&
-    v.every((u) => typeof u === "string" && u.length <= MAX_UPGRADE_LENGTH)
-  );
+/** The upgrades a run took, in pick order: known ids only, so what is stored is always real. */
+function isUpgrades(v: unknown): v is UpgradeId[] {
+  return Array.isArray(v) && v.length <= MAX_UPGRADES && v.every(isUpgradeId);
 }
 
 /** Drops IPs with no start inside the window, so the map doesn't grow without bound. */

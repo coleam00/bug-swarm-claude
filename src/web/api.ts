@@ -32,7 +32,7 @@ export async function endRun(runId: string, result: RunResult): Promise<"saved" 
   try {
     const res = await call(`/api/runs/${encodeURIComponent(runId)}/end`, {
       method: "POST",
-      body: JSON.stringify({ ...result, upgrades: [] }),
+      body: JSON.stringify(result),
     });
     if (res.ok) return "saved";
     console.error(`run ${runId}: saving the score failed: HTTP ${res.status}`);

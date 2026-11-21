@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BASE_BUG } from "../config";
 import { createRng } from "../rng";
-import { createState, step, type Bug, type Input, type State } from "../sim";
+import { choose, createState, step, type Bug, type Input, type State } from "../sim";
 import { createChanges, detectChanges, type Changes } from "./changes";
 
 const DT = 1 / 60;
@@ -102,6 +102,7 @@ describe("changes between frames", () => {
       const c = createChanges(createRng(1));
       for (let i = 0; i < 1800 && !s.over; i++) {
         step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
+        if (s.choice) choose(s, 0);
         if (detect) detectChanges(c, s, () => {}, () => {});
       }
       return s;
@@ -116,6 +117,7 @@ describe("changes between frames", () => {
     let hits = 0;
     for (let i = 0; i < 3600 && !s.over; i++) {
       step(s, { kind: "direction", dx: Math.sin(i / 50), dy: Math.cos(i / 70) }, DT);
+      if (s.choice) choose(s, 0);
       detectChanges(c, s, () => squashes++, () => hits++);
     }
     expect(s.squashes).toBeGreaterThan(10);

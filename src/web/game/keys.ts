@@ -13,3 +13,13 @@ export function keysToInput(pressed: ReadonlySet<string>): Input {
   const dy = any(DOWN) - any(UP);
   return dx === 0 && dy === 0 ? { kind: "none" } : { kind: "direction", dx, dy };
 }
+
+/** Keys that pick card 1 to 3 of an upgrade choice: the digit row and the numpad. */
+export const CHOICE_KEYS: ReadonlyMap<string, number> = new Map([
+  ["Digit1", 0],
+  ["Digit2", 1],
+  ["Digit3", 2],
+  ["Numpad1", 0],
+  ["Numpad2", 1],
+  ["Numpad3", 2],
+]);

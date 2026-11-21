@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { endRun, fetchBest, fetchTop, startRun } from "./api";
+import type { RunResult } from "./game/loop";
 
 const realFetch = globalThis.fetch;
 let respond: () => Response | Promise<Response>;
+let sent: unknown;
 beforeEach(() => {
-  globalThis.fetch = (async () => respond()) as unknown as typeof fetch;
+  sent = undefined;
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    sent = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    return respond();
+  }) as unknown as typeof fetch;
   spyOn(console, "error").mockImplementation(() => {}); // failures are logged; keep the output clean
 });
 afterEach(() => {
@@ -14,7 +20,7 @@ afterEach(() => {
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const down = () => Promise.reject(new TypeError("Failed to fetch"));
-const RESULT = { score: 10, squashes: 1, seconds: 3, touch: false };
+const RESULT: RunResult = { score: 10, squashes: 1, seconds: 3, touch: false, upgrades: ["review-laser", "review-laser"] };
 
 test("startRun: a run id, a name refusal, or a failure", async () => {
   respond = () => json(200, { runId: "run-1" });
@@ -32,6 +38,7 @@ test("startRun: a run id, a name refusal, or a failure", async () => {
 test("endRun: saved only when the server accepted the score", async () => {
   respond = () => json(200, { ok: true });
   expect(await endRun("run-1", RESULT)).toBe("saved");
+  expect(sent).toEqual(RESULT); // the upgrades taken go with the finish
   respond = () => json(500, {});
   expect(await endRun("run-1", RESULT)).toBe("failed");
   respond = () => json(422, { error: "implausible" });

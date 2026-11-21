@@ -1,13 +1,16 @@
 // The game itself: pure and time-stepped. It never reads a clock, Math.random or the DOM; time
 // comes in as `dt` and randomness from the seeded generator in the state, so `bun test` can
 // play it with fixed inputs and the same seed always plays the same run.
-import { POINTS_PER_SECOND, POINTS_PER_SQUASH } from "../../server/rules";
+import { POINTS_PER_SECOND, POINTS_PER_SQUASH, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import type { Arena } from "./arena";
 import {
   BASE_BUG,
   BUG_KINDS,
+  CHOICE_CARDS,
+  CHOICE_EVERY,
   FIRE_INTERVAL,
   INVULN_SECONDS,
+  LASER_PIERCE,
   MAX_BUGS,
   MAX_HITS,
   MOVING_FIRE_RATE,
@@ -20,18 +23,40 @@ import {
 } from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
 
-// A shot squashes at most one bug, so the robot squashes at most MOVING_FIRE_RATE / FIRE_INTERVAL
-// bugs a second. That must stay under the server's plausibility cap (MAX_SQUASHES_PER_SECOND in
-// rules.ts); a test in sim.test.ts holds it there.
+// The server's squash cap (MAX_SQUASHES_PER_SECOND in rules.ts): a squash takes a bug, so
+// squashes never exceed bugs spawned, and bugs spawn at most once every SPAWN_MIN seconds of run
+// time. Run time never runs ahead of the server's clock (a choice pauses the run, which only
+// adds real time), so a run squashes at most 1 / SPAWN_MIN bugs a second whatever shots
+// pierce. A test in sim.test.ts holds that under the cap.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
 export type Bug = { x: number; y: number; hp: number; kind: BugKind };
-export type Shot = { x: number; y: number; vx: number; vy: number; life: number };
+export type Shot = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  /** Bugs this shot may still pass through (review laser). */
+  pierce: number;
+  /** Bugs it already struck, so a piercing shot hits each bug once. */
+  hit: Bug[];
+};
 
 export type State = {
   arena: Arena;
   rng: Rng;
+  /** Draws the upgrade cards. Its own generator, so taking a choice never changes the swarm. */
+  drawRng: Rng;
+  /** Each upgrade's level: 0 not taken, up to UPGRADE_MAX_LEVEL. */
+  levels: Record<UpgradeId, number>;
+  /** The upgrades taken, in pick order, repeats included. */
+  taken: UpgradeId[];
+  /** The cards on offer while the run waits for a choice; null while it plays. */
+  choice: UpgradeId[] | null;
+  /** The run time of the next choice. */
+  nextChoiceAt: number;
   robot: { x: number; y: number };
   bugs: Bug[];
   shots: Shot[];
@@ -48,10 +73,18 @@ export type State = {
   over: boolean;
 };
 
+/** Mixed into the run's seed for the card draw, so it isn't the swarm's sequence. */
+const DRAW_SEED_MIX = 0x9e3779b9;
+
 export function createState(seed: number, arena: Arena): State {
   return {
     arena: { w: arena.w, h: arena.h },
     rng: createRng(seed),
+    drawRng: createRng((seed ^ DRAW_SEED_MIX) | 0),
+    levels: Object.fromEntries(UPGRADE_IDS.map((id) => [id, 0])) as Record<UpgradeId, number>,
+    taken: [],
+    choice: null,
+    nextChoiceAt: CHOICE_EVERY,
     robot: { x: arena.w / 2, y: arena.h / 2 },
     bugs: [],
     shots: [],
@@ -71,9 +104,12 @@ export function score(state: State): number {
   return POINTS_PER_SQUASH * state.squashes + POINTS_PER_SECOND * Math.floor(state.time);
 }
 
-/** Advances the run by `dt` seconds. Mutates `state`; does nothing once the run is over. */
+/**
+ * Advances the run by `dt` seconds. Mutates `state`; does nothing once the run is over, or
+ * while a choice waits (`state.choice`), so the pause never counts as time survived.
+ */
 export function step(state: State, input: Input, dt: number): void {
-  if (state.over) return;
+  if (state.over || state.choice) return;
   const moved = moveRobot(state, input, dt);
   spawnBugs(state, dt);
   moveBugs(state, dt);
@@ -82,6 +118,37 @@ export function step(state: State, input: Input, dt: number): void {
   hitBugs(state);
   hitRobot(state, dt);
   state.time += dt;
+  if (!state.over && state.time >= state.nextChoiceAt - 1e-9) offerChoice(state);
+}
+
+/** Every CHOICE_EVERY seconds: up to CHOICE_CARDS different upgrades not yet at their top level. */
+function offerChoice(state: State): void {
+  state.nextChoiceAt += CHOICE_EVERY;
+  const pool = UPGRADE_IDS.filter((id) => state.levels[id] < UPGRADE_MAX_LEVEL);
+  if (pool.length === 0) return;
+  const cards = Math.min(CHOICE_CARDS, pool.length);
+  // A partial Fisher-Yates: the first `cards` of the pool, shuffled.
+  for (let i = 0; i < cards; i++) {
+    const j = i + Math.floor(nextRandom(state.drawRng) * (pool.length - i));
+    const t = pool[i]!;
+    pool[i] = pool[j]!;
+    pool[j] = t;
+  }
+  state.choice = pool.slice(0, cards);
+}
+
+/**
+ * Takes card `index` of the choice on offer: that upgrade goes up a level and the run resumes.
+ * Returns false, changing nothing, when no choice waits or there is no such card.
+ */
+export function choose(state: State, index: number): boolean {
+  const cards = state.choice;
+  if (!cards || !Number.isInteger(index) || index < 0 || index >= cards.length) return false;
+  const id = cards[index]!;
+  state.levels[id]++;
+  state.taken.push(id);
+  state.choice = null;
+  return true;
 }
 
 /** Moves the robot and says whether it moved this step (pushing into a wall is not moving). */
@@ -191,7 +258,8 @@ function fire(state: State, dt: number, moved: boolean): void {
   const dist = Math.sqrt(best) || 1;
   const vx = ((nearest.x - rx) / dist) * SHOT_SPEED;
   const vy = ((nearest.y - ry) / dist) * SHOT_SPEED;
-  state.shots.push({ x: rx, y: ry, vx, vy, life: SHOT_LIFETIME });
+  const pierce = LASER_PIERCE[state.levels["review-laser"]]!;
+  state.shots.push({ x: rx, y: ry, vx, vy, life: SHOT_LIFETIME, pierce, hit: [] });
   state.fireTimer += FIRE_INTERVAL;
 }
 
@@ -213,7 +281,15 @@ function hitBugs(state: State): void {
     for (let j = 0; j < bugs.length; j++) {
       const b = bugs[j]!;
       if ((b.x - s.x) ** 2 + (b.y - s.y) ** 2 > b.kind.radius ** 2) continue;
-      removeAt(shots, i);
+      // A piercing shot overlaps a bug for a step or two, and two at once in a clump.
+      if (s.hit.includes(b)) continue;
+      // One bug a step: a piercing shot moves on and meets the next on a later step.
+      if (s.pierce > 0) {
+        s.pierce--;
+        s.hit.push(b);
+      } else {
+        removeAt(shots, i);
+      }
       b.hp--;
       if (b.hp <= 0) {
         removeAt(bugs, j);

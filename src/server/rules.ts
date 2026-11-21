@@ -13,6 +13,23 @@ export const ELAPSED_SLACK_SECONDS = 2;
 /** Squashes per second of real elapsed time above which a run can't be real. */
 export const MAX_SQUASHES_PER_SECOND = 6;
 
+// Upgrades.
+/**
+ * Every upgrade that is built, by id: the game's draw pool, and the only ids the server stores.
+ * An upgrade joins this list in the pull request that builds it (test-shield, refactor-bomb and
+ * ci-drone come next), so nothing unbuilt is ever offered.
+ */
+export const UPGRADE_IDS = ["review-laser"] as const;
+export type UpgradeId = (typeof UPGRADE_IDS)[number];
+/** Picking an upgrade again makes it stronger, up to this level; then it leaves the pool. */
+export const UPGRADE_MAX_LEVEL = 2;
+/** The most upgrades a finished run may report. Every upgrade at its top level must fit. */
+export const MAX_UPGRADES = 10;
+
+export function isUpgradeId(v: unknown): v is UpgradeId {
+  return (UPGRADE_IDS as readonly unknown[]).includes(v);
+}
+
 // Names.
 export const NAME_MIN = 2;
 export const NAME_MAX = 16;

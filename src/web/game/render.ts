@@ -19,7 +19,7 @@ import {
   TEXT_STROKE,
   bugLookId,
 } from "./look";
-import { MAX_HITS, ROBOT_RADIUS } from "./config";
+import { LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
 import { score, type State } from "./sim";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
@@ -122,17 +122,24 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
       ctx.drawImage(s.bugs[id][frame]!, -half, -half, half * 2, half * 2);
     }
 
-    // Shots: a glow stretched along the flight, with a bright core.
+    // Shots: a glow stretched along the flight, with a bright core. The review laser draws
+    // them longer, and its top level a little wider.
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = SHOT_CORE;
     const shotGlow = s.glows[SHOT_GLOW]!;
+    const laser = state.levels["review-laser"];
+    const beam = LASER_BEAM[laser]!;
+    const glowLength = SHOT_GLOW_LENGTH * beam;
+    const coreLength = SHOT_CORE_LENGTH * beam;
+    const glowWidth = laser > 1 ? SHOT_GLOW_WIDTH * 1.3 : SHOT_GLOW_WIDTH;
+    const coreWidth = laser > 1 ? SHOT_CORE_WIDTH * 1.5 : SHOT_CORE_WIDTH;
     for (const shot of state.shots) {
       const v = Math.hypot(shot.vx, shot.vy) || 1;
       const c = shot.vx / v;
       const sn = shot.vy / v;
       ctx.setTransform(k * c, k * sn, -k * sn, k * c, k * shot.x + ox, k * shot.y + oy);
-      ctx.drawImage(shotGlow, 6 - SHOT_GLOW_LENGTH, -SHOT_GLOW_WIDTH / 2, SHOT_GLOW_LENGTH, SHOT_GLOW_WIDTH);
-      ctx.fillRect(2 - SHOT_CORE_LENGTH, -SHOT_CORE_WIDTH / 2, SHOT_CORE_LENGTH, SHOT_CORE_WIDTH);
+      ctx.drawImage(shotGlow, 6 - glowLength, -glowWidth / 2, glowLength, glowWidth);
+      ctx.fillRect(2 - coreLength, -coreWidth / 2, coreLength, coreWidth);
     }
 
     // Squash particles.
