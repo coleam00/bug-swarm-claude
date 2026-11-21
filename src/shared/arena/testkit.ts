@@ -2,7 +2,8 @@
 // hand, bugs placed by hand, and stepping with the personal spawn budget held at zero so only
 // the bugs a test places are in play. Players placed by hand start without spawn protection.
 // Test-only; nothing in the game imports it.
-import { CRAWLER, CRAWLER_HP, DOWN_TICKS, HITS_PER_LIFE } from "./constants";
+import { bugDef } from "./bugs/registry";
+import { BUG_KINDS, DOWN_TICKS, HITS_PER_LIFE, type BugKind } from "./constants";
 import { clampInput, createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Player } from "./sim";
 
 export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Player[] } {
@@ -19,8 +20,9 @@ export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Pl
   return { a, ps };
 }
 
-export function placeBug(a: ArenaState, x: number, y: number): Bug {
-  const b: Bug = { id: a.nextBugId++, kind: CRAWLER, x, y, vx: 0, vy: 0, hp: CRAWLER_HP, target: 0 };
+/** Places a bug of `kind` (the base kind, a crawler, by default) at (x, y), as a spawn would start it. */
+export function placeBug(a: ArenaState, x: number, y: number, kind: BugKind = BUG_KINDS[0]): Bug {
+  const b: Bug = { id: a.nextBugId++, kind, x, y, vx: 0, vy: 0, hp: bugDef(kind).hp, target: 0, phase: 0, phaseTicks: 0, dx: 0, dy: 0, travel: 0 };
   a.bugs.push(b);
   return b;
 }

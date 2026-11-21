@@ -1,5 +1,7 @@
-// Every tuning number of the arena (release 2), in one place. Shared by the server (authoritative)
-// and the browser (prediction of your own robot), so both step with the same numbers.
+// The arena's tuning numbers (release 2). Shared by the server (authoritative) and the browser
+// (prediction of your own robot), so both step with the same numbers. Each bug kind's own numbers
+// (radius, speed, hit points, points, phases, spawn mix) live in its file in bugs/ (#65,
+// architecture.md "Bug kinds (the recipe)"); the arena-wide ones are here.
 
 /** The fixed simulation step, ms. The server ticks at 1000 / TICK_MS = 20 Hz. */
 export const TICK_MS = 50;
@@ -56,7 +58,7 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
@@ -109,20 +111,14 @@ export const HEAT_LOCK_S = 1.5;
 /** Heat from which the HUD arc flashes, warning of the lock. */
 export const HEAT_WARN = 0.85;
 
-// ---- Bugs (#55: crawlers only). Names in BUG_KINDS; the per-kind seam comes with the second kind. ----
+// ---- Bugs. Every kind's id in BUG_KINDS; each kind's numbers in its own file in bugs/ (#65). ----
 
-/** Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). */
+/**
+ * Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). The first
+ * is the base kind: a spawn is the base kind unless the mix picks another (bugs/index.ts).
+ */
 export const BUG_KINDS = ["crawler"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
-export const [CRAWLER] = BUG_KINDS;
-/** A crawler's collision radius, units. */
-export const CRAWLER_RADIUS = 12;
-/** A crawler's speed, units per second, straight at the nearest player who is up (not down). */
-export const CRAWLER_SPEED = 160;
-/** Shots a crawler takes to die. */
-export const CRAWLER_HP = 1;
-/** Points for a kill, before the streak multiplier. */
-export const KILL_POINTS = 10;
 
 // ---- Spawning (#55). Pressure is personal: each player who is up brings their own spawn budget. ----
 
@@ -159,7 +155,7 @@ export const HITS_PER_LIFE = 3;
 export const INVULN_S = 1;
 /** A life over waits this long before a press respawns you, seconds (release 1's restart guard). */
 export const RESPAWN_DELAY_S = 0.8;
-/** The arena's wave clock, seconds per wave. Shown, and later unlocks kinds; never spawn volume. */
+/** The arena's wave clock, seconds per wave. Shown, and unlocks bug kinds (#65); never spawn volume. */
 export const WAVE_S = 30;
 /** Streak multiplier steps: [hits in a row, multiplier], highest first. Below the last: x1. */
 export const STREAK_STEPS: readonly (readonly [number, number])[] = [

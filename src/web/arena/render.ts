@@ -8,7 +8,7 @@
 // the seconds left. It reuses release 1's sprites and pooled
 // effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
 // built on resize only; a frame allocates nothing but the strings of a value that changed.
-import { DOWN_S, HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
+import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
 import type { SnapshotMe } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
@@ -18,7 +18,6 @@ import { TRAIL_SECONDS, trailSlot, type Trail } from "../game/fx/trail";
 import type { Insets } from "../game/hud";
 import { hudLayout } from "../game/hud";
 import {
-  BUG_LOOKS,
   GLOW_SHOT,
   GLOW_WHITE,
   LETTERBOX,
@@ -34,13 +33,14 @@ import {
   TEXT_FONT,
   TEXT_STROKE,
   VIGNETTE,
-  type BugLookId,
 } from "../game/look";
-import { BUG_SPRITE_HALF, ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildBugSprites, buildGlow, buildRobot, floorTile, robotMarkSprite } from "../game/sprites";
+import { ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildBugLookSprites, buildGlow, buildRobot, floorTile, robotMarkSprite } from "../game/sprites";
 import { STICK_RANGE, stickKnob, type Stick } from "../game/stick";
 import { TEAM_LOOK } from "../teams";
 import type { Camera } from "./camera";
 import type { DashButton } from "./controls";
+import { BUG_DRAW } from "./draw/bugs";
+import type { BugFrame } from "./draw/bugs/kind";
 import { edgeArrow, minimapDotOn, type EdgeArrow } from "./help";
 import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
@@ -67,16 +67,12 @@ const MINIMAP_VIEW = "rgba(248, 250, 252, 0.25)";
 const MINIMAP_DOT = 3;
 const MINIMAP_BUG = "rgba(251, 146, 60, 0.85)";
 const STATS_FONT = "bold 16px system-ui, sans-serif";
-/** Leg frames walked forward then back: 0 1 2 3 2 1 (release 1's). */
-const LEG_CYCLE = [0, 1, 2, 3, 2, 1];
 const PARTICLE_SIZE = 7;
 /** A shot: a glow this long behind its head with a bright core, world units (release 1's look). */
 const SHOT_GLOW_LENGTH = 28;
 const SHOT_GLOW_WIDTH = 14;
 const SHOT_CORE_LENGTH = 18;
 const SHOT_CORE_WIDTH = 2.4;
-/** How each bug kind looks, from release 1's looks. */
-const BUG_LOOK: Record<BugKind, BugLookId> = { crawler: "base" };
 /** The heat arc around your robot: its radius, width and the most it sweeps (270 degrees, open at the bottom). */
 const HEAT_RADIUS = PLAYER_RADIUS + 8;
 const HEAT_WIDTH = 3.5;
@@ -186,8 +182,23 @@ export type Robot = {
   revBy: number;
 };
 
-/** The bugs to draw this frame, world units, in typed arrays filled by main.ts. */
-export type BugsView = { x: Float32Array; y: Float32Array; heading: Float32Array; phase: Float32Array; kind: Uint8Array; count: number };
+/**
+ * The bugs to draw this frame, world units, in typed arrays filled by main.ts: where each is, the
+ * way it faces, its leg animation offset (0 to 1), its kind's index in BUG_KINDS, and (v6) its
+ * phase (an index into its kind's phases), the angle that phase locked (radians) and the seconds
+ * it has been in that phase.
+ */
+export type BugsView = {
+  x: Float32Array;
+  y: Float32Array;
+  heading: Float32Array;
+  anim: Float32Array;
+  kind: Uint8Array;
+  phase: Uint8Array;
+  angle: Float32Array;
+  phaseS: Float32Array;
+  count: number;
+};
 
 /** The life-over overlay's text, built once when the life ends. */
 export type OverView = { title: string; score: string; line: string; prompt: string; ready: boolean };
@@ -235,7 +246,22 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let teams: Record<Team, TeamSprites> | null = null;
   let white: HTMLCanvasElement | null = null;
   let glows: HTMLCanvasElement[] = [];
-  let bugSprites: Record<BugLookId, HTMLCanvasElement[]> | null = null;
+  // Each bug kind's leg frames and glow, by its index in BUG_KINDS.
+  let bugFrames: HTMLCanvasElement[][] = [];
+  let bugGlows: HTMLCanvasElement[] = [];
+  const bugFrame: BugFrame = {
+    ctx,
+    k: 1,
+    ox: 0,
+    oy: 0,
+    t: 0,
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    frames: [],
+    glow: document.createElement("canvas"),
+  };
   let mark: HTMLCanvasElement | null = null;
   let floor: CanvasPattern | null = null;
   let vignette: HTMLCanvasElement | null = null;
@@ -291,7 +317,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     };
     glows = PALETTE.map((c) => buildGlow(c));
     white = glows[GLOW_WHITE]!;
-    bugSprites = buildBugSprites(ppu);
+    bugFrames = BUG_KINDS.map((kind) => buildBugLookSprites(BUG_DRAW[kind].look, ppu));
+    bugGlows = BUG_KINDS.map((kind) => glows[BUG_DRAW[kind].look.glow]!);
     mark = robotMarkSprite(ppu);
     const tile = floorTile(ppu, TILE);
     floor = ctx.createPattern(tile, "repeat");
@@ -442,22 +469,33 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fill();
   }
 
+  /** Every bug: first what each kind draws under the bodies (aim lines), then the bodies in view. */
   function drawBugs(b: BugsView, t: number, k: number, ox: number, oy: number): void {
+    const f = bugFrame;
+    f.k = k;
+    f.ox = ox;
+    f.oy = oy;
+    f.t = t;
+    f.left = vl;
+    f.top = vt;
+    f.right = vr;
+    f.bottom = vb;
     for (let i = 0; i < b.count; i++) {
-      const x = b.x[i]!;
-      const y = b.y[i]!;
-      if (!inView(x, y)) continue;
-      const id = BUG_LOOK.crawler;
-      const look = BUG_LOOKS[id];
-      const phase = b.phase[i]!;
-      const a = b.heading[i]! + look.jitter * Math.sin(TAU * (t * look.jitterHz + phase));
-      const c = Math.cos(a);
-      const sn = Math.sin(a);
-      const u = t * look.legHz + phase;
-      const frame = LEG_CYCLE[Math.floor((u - Math.floor(u)) * LEG_CYCLE.length)]!;
-      const half = look.radius * BUG_SPRITE_HALF;
-      ctx.setTransform(k * c, k * sn, -k * sn, k * c, k * x + ox, k * y + oy);
-      ctx.drawImage(bugSprites![id][frame]!, -half, -half, half * 2, half * 2);
+      const kind = b.kind[i]!;
+      const d = BUG_DRAW[BUG_KINDS[kind] as BugKind];
+      if (!d?.under) continue;
+      f.frames = bugFrames[kind]!;
+      f.glow = bugGlows[kind]!;
+      d.under(f, b, i);
+    }
+    for (let i = 0; i < b.count; i++) {
+      if (!inView(b.x[i]!, b.y[i]!)) continue;
+      const kind = b.kind[i]!;
+      const d = BUG_DRAW[BUG_KINDS[kind] as BugKind];
+      if (!d) continue;
+      f.frames = bugFrames[kind]!;
+      f.glow = bugGlows[kind]!;
+      d.draw(f, b, i);
     }
   }
 

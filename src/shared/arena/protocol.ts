@@ -91,14 +91,19 @@ export type SnapshotPlayer = [
   dashing: 0 | 1,
   spawnProtected: 0 | 1,
 ];
-/** One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). */
-export type SnapshotBug = [id: number, kind: number, x: number, y: number];
+/**
+ * One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). v6: a bug whose phase is not 0 (its
+ * kind's first) adds a tail: phase (an index into its kind's phases), angle (its locked
+ * direction, radians to 0.01) and ticksIn (ticks spent in that phase). A bug in phase 0, every
+ * crawler for one, costs no more bytes than before.
+ */
+export type SnapshotBug = [id: number, kind: number, x: number, y: number] | [id: number, kind: number, x: number, y: number, phase: number, angle: number, ticksIn: number];
 /** A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001). It flies per shotTravelAt. */
 export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number];
 /** A shot ended this tick: id, hit (1) or miss (0), units flown from the barrel (to 0.1). */
 export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
-/** A bug killed this tick: bug id, by (0: nobody scores), x, y, points. */
-export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number];
+/** A bug killed this tick: bug id, by (0: nobody scores), x, y, points, its kind's index in BUG_KINDS (v6). */
+export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number, kind: number];
 /**
  * A downed player (v4): id, seconds left before bleeding out (to 0.01), the player holding revive
  * progress (0: none), and that progress, 0 to 1 (to 0.01). Only downed players have a row.
@@ -272,11 +277,11 @@ export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
 export type SharedSource = {
   tick: number;
   players: readonly PlayerRow[];
-  bugs: readonly { id: number; kind: string; x: number; y: number }[];
+  bugs: readonly { id: number; kind: string; x: number; y: number; phase: number; phaseTicks: number; dx: number; dy: number }[];
   events: {
     shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number }[];
     shotsEnded: readonly { id: number; hit: boolean; travelled: number }[];
-    kills: readonly { bug: number; by: number; x: number; y: number; points: number }[];
+    kills: readonly { bug: number; by: number; x: number; y: number; points: number; kind: string }[];
   };
 };
 
@@ -292,7 +297,8 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
   for (let i = 0; i < src.bugs.length; i++) {
     const g = src.bugs[i]!;
     if (i > 0) b += ",";
-    b += `[${g.id},${kinds.indexOf(g.kind)},${q1(g.x)},${q1(g.y)}]`;
+    b += `[${g.id},${kinds.indexOf(g.kind)},${q1(g.x)},${q1(g.y)}`;
+    b += g.phase === 0 ? "]" : `,${g.phase},${q2(Math.atan2(g.dy, g.dx))},${g.phaseTicks}]`;
   }
   b += "]";
   const ev = src.events;
@@ -314,7 +320,7 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
   for (let i = 0; i < ev.kills.length; i++) {
     const x = ev.kills[i]!;
     if (i > 0) k += ",";
-    k += `[${x.bug},${x.by},${q1(x.x)},${q1(x.y)},${x.points}]`;
+    k += `[${x.bug},${x.by},${q1(x.x)},${q1(x.y)},${x.points},${kinds.indexOf(x.kind)}]`;
   }
   k += "]";
   let d = "[";

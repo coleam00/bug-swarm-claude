@@ -3,9 +3,10 @@
 // (one life per policy per seed, alone); aiming late joiners living at least 0.8x as long as early
 // ones (the mover's ratio is reported, not gated); and an idle newcomer living at least 10 s at
 // every arena age (newcomers joining seeded arenas that aimer bots have played in). The dasher
-// (#60) is printed beside the first gate and against the aimer, not gated. Tested in
-// skill-lib.test.ts on a few seeds.
-import { DASH_TICKS, DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+// (#60) is printed beside the first gate and against the aimer, not gated. Per bug kind (#65) it
+// also prints how many of each spawned in a life and how many hits each landed (first gate's
+// lives). Tested in skill-lib.test.ts on a few seeds.
+import { BUG_KINDS, DASH_TICKS, DT, WORLD_H, WORLD_W, type BugKind } from "../src/shared/arena/constants";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
   AIMER,
@@ -22,7 +23,35 @@ import {
 } from "../src/shared/arena/policies";
 import { clampInput, createArena, joinPlayer, stepArena, type ArenaState } from "../src/shared/arena/sim";
 
-export type LifeResult = { score: number; kills: number; seconds: number; capped: boolean; dashes: number };
+/** A count per bug kind. */
+export type PerKind = Record<BugKind, number>;
+
+function perKind(): PerKind {
+  return Object.fromEntries(BUG_KINDS.map((k) => [k, 0])) as PerKind;
+}
+
+export type LifeResult = {
+  score: number;
+  kills: number;
+  seconds: number;
+  capped: boolean;
+  dashes: number;
+  /** Bugs of each kind that spawned in the arena during the life (alone, all of them were for this player). */
+  spawned: PerKind;
+  /** Hits the player took from each kind. */
+  touches: PerKind;
+};
+
+/**
+ * Adds the last step's bugs to `spawned` by kind (every bug with an id from `firstNew`: those still
+ * here, and any shot in the same step; a touch never comes the step a bug spawns, 560 units away)
+ * and the hits player `id` took to `touches` by kind.
+ */
+function countKinds(state: ArenaState, firstNew: number, id: number, spawned: PerKind, touches: PerKind): void {
+  for (const b of state.bugs) if (b.id >= firstNew) spawned[b.kind]++;
+  for (const k of state.events.kills) if (k.bug >= firstNew) spawned[k.kind]++;
+  for (const x of state.events.touches) if (x.player === id) touches[x.kind]++;
+}
 
 /** The aimer's median score must be at least this many times the mover's. */
 export const GATE_RATIO = 2;
@@ -47,17 +76,21 @@ export function playLife(policy: PolicyName, seed: number, maxSeconds: number): 
   const maxTicks = Math.round(maxSeconds / DT);
   let seq = 0;
   let dashes = 0;
+  const spawned = perKind();
+  const touches = perKind();
   for (let t = 0; t < maxTicks; t++) {
     observe(state, p.id, WORLD_W, WORLD_H, obs);
     act(obs, mem, rng, out);
     p.input = clampInput({ seq: ++seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash });
+    const firstNew = state.nextBugId;
     stepArena(state);
     // A dash the simulation started this tick (not one the policy merely asked for).
     if (p.dashTicks === DASH_TICKS) dashes++;
+    countKinds(state, firstNew, p.id, spawned, touches);
     const ended = state.events.livesEnded[0];
-    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes };
+    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches };
   }
-  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes };
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches };
 }
 
 /** The value at fraction `q` (0 to 1) of sorted numbers, interpolated. */
@@ -82,6 +115,10 @@ export type PolicySummary = {
   /** Dashes per life, median. */
   medianDashes: number;
   capped: number;
+  /** Bugs of each kind spawned in a life, median. */
+  medianSpawned: PerKind;
+  /** Hits taken from each kind in a life, median. */
+  medianTouches: PerKind;
 };
 
 export type SkillReport = {
@@ -100,6 +137,11 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
   const secs = lives.map((l) => l.seconds).sort((a, b) => a - b);
   const kills = lives.map((l) => l.kills).sort((a, b) => a - b);
   const dashes = lives.map((l) => l.dashes).sort((a, b) => a - b);
+  const medianOf = (pick: (l: LifeResult) => PerKind) => {
+    const m = perKind();
+    for (const k of BUG_KINDS) m[k] = quantile(lives.map((l) => pick(l)[k]).sort((a, b) => a - b), 0.5);
+    return m;
+  };
   return {
     policy,
     lives: lives.length,
@@ -112,6 +154,8 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
     medianKills: quantile(kills, 0.5),
     medianDashes: quantile(dashes, 0.5),
     capped: lives.filter((l) => l.capped).length,
+    medianSpawned: medianOf((l) => l.spawned),
+    medianTouches: medianOf((l) => l.touches),
   };
 }
 
@@ -154,6 +198,10 @@ export function formatSkill(r: SkillReport): string[] {
     lines.push(
       `dasher vs aimer: ${(dash.medianScore / aim.medianScore).toFixed(2)}x median score, ${(dash.medianSeconds / aim.medianSeconds).toFixed(2)}x median life, ${dash.medianDashes} dashes a life (median)`,
     );
+  }
+  lines.push("bug kinds, median a life: spawned / hits landed on the player");
+  for (const p of r.policies) {
+    lines.push(`${p.policy.padEnd(8)}${BUG_KINDS.map((k) => `${k} ${p.medianSpawned[k]} / ${p.medianTouches[k]}`).join(", ")}`);
   }
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");
   return lines;
@@ -249,16 +297,20 @@ export function playNewcomer(aged: AgedArena, policy: PolicyName, seed: number, 
   const act = POLICIES[policy];
   const maxTicks = Math.round(maxSeconds / DT);
   let dashes = 0;
+  const spawned = perKind();
+  const touches = perKind();
   for (let t = 0; t < maxTicks; t++) {
     for (const b of bots) drive(state, b, POLICIES.aimer, true);
     drive(state, me, act, false);
+    const firstNew = state.nextBugId;
     stepArena(state);
     if (p.dashTicks === DASH_TICKS) dashes++;
+    countKinds(state, firstNew, p.id, spawned, touches);
     for (const ended of state.events.livesEnded) {
-      if (ended.id === p.id) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes };
+      if (ended.id === p.id) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches };
     }
   }
-  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes };
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches };
 }
 
 /** Life lengths at one join age: median, quartiles, how many hit the cap, and bugs alive at the join (median). */

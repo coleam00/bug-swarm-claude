@@ -135,6 +135,8 @@ export type KillQueue = {
   y: Float32Array;
   points: Uint16Array;
   by: Int32Array;
+  /** The killed bug's kind, its index in BUG_KINDS. */
+  kind: Uint8Array;
   used: Uint8Array;
   cursor: number;
   live: number;
@@ -149,6 +151,7 @@ export function createKillQueue(capacity = KILL_CAPACITY): KillQueue {
     y: new Float32Array(capacity),
     points: new Uint16Array(capacity),
     by: new Int32Array(capacity),
+    kind: new Uint8Array(capacity),
     used: new Uint8Array(capacity),
     cursor: 0,
     live: 0,
@@ -156,7 +159,7 @@ export function createKillQueue(capacity = KILL_CAPACITY): KillQueue {
 }
 
 /** A kill from a snapshot's `k`, shown once the drawing time reaches `tick`. A full ring drops the oldest. */
-export function queueKill(q: KillQueue, tick: number, x: number, y: number, points: number, by: number): void {
+export function queueKill(q: KillQueue, tick: number, x: number, y: number, points: number, by: number, kind = 0): void {
   const i = q.cursor;
   q.cursor = (i + 1) % q.used.length;
   if (!q.used[i]) q.live++;
@@ -166,6 +169,7 @@ export function queueKill(q: KillQueue, tick: number, x: number, y: number, poin
   q.y[i] = y;
   q.points[i] = points;
   q.by[i] = by;
+  q.kind[i] = kind;
 }
 
 /** Shows every queued kill whose tick `at` has reached (`isMine` picks yours, timed like your shots). */
@@ -174,14 +178,14 @@ export function drainKills(
   at: number,
   isMine: (by: number) => boolean,
   mine: boolean,
-  show: (x: number, y: number, points: number, by: number) => void,
+  show: (x: number, y: number, points: number, by: number, kind: number) => void,
 ): void {
   if (q.live === 0) return;
   for (let i = 0; i < q.used.length; i++) {
     if (!q.used[i] || isMine(q.by[i]!) !== mine || at < q.tick[i]!) continue;
     q.used[i] = 0;
     q.live--;
-    show(q.x[i]!, q.y[i]!, q.points[i]!, q.by[i]!);
+    show(q.x[i]!, q.y[i]!, q.points[i]!, q.by[i]!, q.kind[i]!);
   }
 }
 
