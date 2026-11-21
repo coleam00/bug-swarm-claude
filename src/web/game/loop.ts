@@ -8,6 +8,7 @@ import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, setTextScale, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import { createFpsMeter, tickFps } from "./fps";
+import { createSteerLatch, firstSteer } from "../hint";
 import { createChoiceGate, pickChoice, showChoice } from "./guard";
 import type { UpgradeId } from "../../server/rules";
 import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
@@ -133,16 +134,12 @@ export function startGame(
   let pointerSteers = false;
   let touch = false;
   let input: Input = NONE;
-  let moved = false;
+  const steer = createSteerLatch();
   const updateInput = () => {
     if (keys.size > 0) input = keysToInput(keys);
     else if (stick.active) input = stickDrive(stick, stickOut) ? stickOut : NONE;
     else input = pointerSteers ? target : NONE;
-    // kind, not identity: opposing keys (A+D) give a fresh { kind: "none" }.
-    if (!moved && input.kind !== "none") {
-      moved = true;
-      opts.onMove?.();
-    }
+    if (firstSteer(steer, input)) opts.onMove?.();
   };
   const aimAt = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();

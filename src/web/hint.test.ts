@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { HINT_MS, createHint, dismissHint, forgetHintForTests, hintLeft, hintText, takeFirstRun } from "./hint";
+import { createSteerLatch, firstSteer, forgetHintForTests, hintText, takeFirstRun } from "./hint";
+import { keysToInput } from "./game/keys";
 
 // A stand-in for the browser's localStorage.
 let store: Map<string, string>;
@@ -24,7 +25,6 @@ test("the hint shows on a browser's first run only, also after a reload", () => 
   expect(takeFirstRun()).toBe(false); // the next run on this page
   forgetHintForTests(); // a reload, same browser storage
   expect(takeFirstRun()).toBe(false);
-  expect(store.get("bugswarm.hinted")).toBe("1");
 });
 
 test("with storage blocked the hint shows once, then not again on this page", () => {
@@ -37,20 +37,18 @@ test("with storage blocked the hint shows once, then not again on this page", ()
   expect(takeFirstRun()).toBe(false);
 });
 
-test("the hint is gone HINT_MS (4 s) after it shows", () => {
-  expect(HINT_MS).toBe(4000);
-  const h = createHint(1000);
-  expect(hintLeft(h, 1000)).toBe(4000);
-  expect(hintLeft(h, 4000)).toBe(1000);
-  expect(hintLeft(h, 5000)).toBe(0);
-  expect(hintLeft(h, 9000)).toBe(0);
+test("the first steering input dismisses the hint, once; held opposing keys are no movement", () => {
+  const latch = createSteerLatch();
+  expect(firstSteer(latch, { kind: "none" })).toBe(false);
+  expect(firstSteer(latch, keysToInput(new Set(["KeyA", "KeyD"])))).toBe(false); // A+D cancel out
+  expect(firstSteer(latch, keysToInput(new Set(["KeyW"])))).toBe(true);
+  expect(firstSteer(latch, keysToInput(new Set(["KeyW"])))).toBe(false); // only the first
+  expect(firstSteer(latch, { kind: "stick", dx: 1, dy: 0 })).toBe(false);
 });
 
-test("the first movement dismisses the hint at once", () => {
-  const h = createHint(0);
-  dismissHint(h);
-  expect(hintLeft(h, 0)).toBe(0);
-  expect(hintLeft(h, 2000)).toBe(0);
+test("a drag or the mouse counts as the first movement too", () => {
+  expect(firstSteer(createSteerLatch(), { kind: "stick", dx: 0.5, dy: 0 })).toBe(true);
+  expect(firstSteer(createSteerLatch(), { kind: "target", x: 10, y: 20 })).toBe(true);
 });
 
 test("touch and desktop each get their own text", () => {

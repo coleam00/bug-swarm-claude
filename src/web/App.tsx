@@ -3,7 +3,7 @@ import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server
 import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
 import { restartIn } from "./game/guard";
-import { createHint, dismissHint, hintLeft, hintText, takeFirstRun, type Hint } from "./hint";
+import { HINT_MS, hintText, takeFirstRun } from "./hint";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { saveNotice, upgradeLevels, type SaveState } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
@@ -175,17 +175,16 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   // The first-run steering hint (hint.ts). Decided once per mounted run in a ref, like `start`:
   // StrictMode's second effect run must not find it already taken and hide it. Never in a stress
   // run, so `bun run bench` neither draws it nor uses it up.
-  const hint = useRef<Hint | null | undefined>(undefined);
+  const firstRun = useRef<boolean | null>(null);
   const [hintShown, setHintShown] = useState<string | null>(null);
 
   useEffect(() => {
     const { player } = latest.current;
-    if (hint.current === undefined) hint.current = !STRESS && takeFirstRun() ? createHint(performance.now()) : null;
+    if (firstRun.current === null) firstRun.current = !STRESS && takeFirstRun();
     let hintTimer: ReturnType<typeof setTimeout> | undefined;
-    const left = hint.current ? hintLeft(hint.current, performance.now()) : 0;
-    if (left > 0) {
+    if (firstRun.current) {
       setHintShown(hintText(coarsePointer()));
-      hintTimer = setTimeout(() => setHintShown(null), left);
+      hintTimer = setTimeout(() => setHintShown(null), HINT_MS);
     }
     if (!start.current && !STRESS) {
       start.current = startRun(player.id, player.name ?? "", player.team).then((s) => {
@@ -197,10 +196,7 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
     const running = startGame(canvas.current!, {
       stress: STRESS,
       onChoice: setCards,
-      onMove: () => {
-        if (hint.current) dismissHint(hint.current);
-        setHintShown(null);
-      },
+      onMove: () => setHintShown(null),
       onOver: (result) => {
         // Stamped once: the second report (once saved) keeps the same restart window.
         const diedAt = performance.now();

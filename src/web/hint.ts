@@ -1,7 +1,8 @@
 // The steering hint over the arena on a browser's first run: "Drag anywhere to move" on touch,
 // "WASD, arrows or mouse" otherwise. It goes on the first movement or after HINT_MS.
 // Remembered in localStorage; where that is unavailable it shows once per page load.
-// Times are passed in (performance.now() in the browser), as guard.ts does.
+// loop.ts calls firstSteer from its input events to tell App the player has moved.
+import type { Input } from "./game/sim";
 
 const KEY = "bugswarm.hinted";
 /** How long the hint stays when the player doesn't move. */
@@ -31,20 +32,21 @@ export function hintText(coarse: boolean): string {
   return coarse ? "Drag anywhere to move" : "WASD, arrows or mouse";
 }
 
-export type Hint = { shownAt: number; gone: boolean };
+/** Whether the run has had its first steering input yet. */
+export type SteerLatch = { moved: boolean };
 
-export function createHint(now: number): Hint {
-  return { shownAt: now, gone: false };
+export function createSteerLatch(): SteerLatch {
+  return { moved: false };
 }
 
-/** The player moved: the hint goes. */
-export function dismissHint(h: Hint): void {
-  h.gone = true;
-}
-
-/** Ms until the hint must be gone at `now`; 0 once it is dismissed or HINT_MS has passed. */
-export function hintLeft(h: Hint, now: number): number {
-  return h.gone ? 0 : Math.max(0, h.shownAt + HINT_MS - now);
+/**
+ * True exactly once: for the run's first input that steers. Checked by kind, not identity:
+ * opposing keys held together (A+D) give a fresh { kind: "none" }, which is no movement.
+ */
+export function firstSteer(latch: SteerLatch, input: Input): boolean {
+  if (latch.moved || input.kind === "none") return false;
+  latch.moved = true;
+  return true;
 }
 
 /** For tests: forget the in-memory flag, as a fresh page load would. */
