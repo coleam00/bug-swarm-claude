@@ -13,6 +13,7 @@
     "pacing": "bun scripts/pacing.ts",
     "load": "bun scripts/load.ts",
     "bots": "bun scripts/bots.ts",
+    "skill": "bun scripts/skill.ts",
     "reset": "bun scripts/reset.ts"
   },
   "dependencies": {

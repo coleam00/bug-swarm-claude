@@ -1,12 +1,21 @@
-// The pure half of `bun run bots`: arguments, the bots' names, how a bot wanders and aims, and
-// the summary. No network here, so `bun test` covers it; `bots.ts` opens the sockets.
-import { WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+// The pure half of `bun run bots`: arguments, the bots' names, how a bot wanders and aims, what a
+// policy bot sees (from snapshots), and the summary. No network here, so `bun test` covers it;
+// `bots.ts` opens the sockets.
+import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { createObservation, setObservedBug, type Observation } from "../src/shared/arena/policies";
+import type { Snapshot } from "../src/shared/arena/protocol";
 import { nextRandom, type Rng } from "../src/shared/arena/rng";
 import { TEAMS, type Team } from "../src/server/rules";
 
-export const USAGE = "usage: bun run bots -- --url <base url> [--count 18] [--seconds 60]";
+export const USAGE = "usage: bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer]";
 
-export type BotsArgs = { url: string; count: number; seconds: number };
+/** How bots play: `wander` (#52's walk and aim sweep, never firing) or a policy from policies.ts. */
+export const BOT_POLICIES = ["wander", "mover", "aimer"] as const;
+export type BotPolicy = (typeof BOT_POLICIES)[number];
+/** Bots aim and fire with the aimer unless told otherwise (#55). */
+export const DEFAULT_BOT_POLICY: BotPolicy = "aimer";
+
+export type BotsArgs = { url: string; count: number; seconds: number; policy: BotPolicy };
 
 const INT_FLAGS = {
   count: { def: 18, min: 1, max: 1000 },
@@ -24,7 +33,7 @@ export function parseBotsArgs(argv: string[]): BotsArgs {
     const m = /^--([a-z]+)(?:=(.*))?$/.exec(arg);
     if (!m) throw new Error(`unexpected argument "${arg}"`);
     const key = m[1]!;
-    if (key !== "url" && !(INT_FLAG_NAMES as string[]).includes(key)) throw new Error(`unknown flag --${key}`);
+    if (key !== "url" && key !== "policy" && !(INT_FLAG_NAMES as string[]).includes(key)) throw new Error(`unknown flag --${key}`);
     let value = m[2];
     if (value === undefined) {
       value = args[++i];
@@ -40,7 +49,9 @@ export function parseBotsArgs(argv: string[]): BotsArgs {
     throw new Error(`--url "${seen.url}" is not a URL`);
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("--url must be http or https");
-  const out: BotsArgs = { url: url.href.replace(/\/+$/, ""), count: 0, seconds: 0 };
+  const policy = seen.policy ?? DEFAULT_BOT_POLICY;
+  if (!(BOT_POLICIES as readonly string[]).includes(policy)) throw new Error(`--policy must be one of ${BOT_POLICIES.join(", ")}`);
+  const out: BotsArgs = { url: url.href.replace(/\/+$/, ""), count: 0, seconds: 0, policy: policy as BotPolicy };
   for (const key of INT_FLAG_NAMES) {
     const { def, min, max } = INT_FLAGS[key];
     const raw = seen[key];
@@ -115,6 +126,49 @@ export function randomPlayerId(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`) and every
+ * bug, with each bug's velocity derived from how far it moved since the last snapshot that had it.
+ */
+export type ObservationTracker = { obs: Observation; update(m: Snapshot, you: number): void };
+
+export function createObservationTracker(): ObservationTracker {
+  const obs = createObservation();
+  obs.world.w = WORLD_W;
+  obs.world.h = WORLD_H;
+  let last = new Map<number, { x: number; y: number; tick: number }>();
+  let next = new Map<number, { x: number; y: number; tick: number }>();
+  return {
+    obs,
+    update(m, you) {
+      const s = obs.self;
+      for (const p of m.p) {
+        if (p[0] !== you) continue;
+        s.x = p[1];
+        s.y = p[2];
+        s.vx = p[3];
+        s.vy = p[4];
+        s.aim = p[5];
+      }
+      s.alive = m.me.al === 1;
+      s.heat = m.me.he;
+      s.locked = m.me.lk === 1;
+      next.clear();
+      for (let i = 0; i < m.b.length; i++) {
+        const [id, , x, y] = m.b[i]!;
+        const before = last.get(id);
+        const gap = before ? (m.tick - before.tick) * DT : 0;
+        const vx = before && gap > 0 ? (x - before.x) / gap : 0;
+        const vy = before && gap > 0 ? (y - before.y) / gap : 0;
+        setObservedBug(obs, i, x, y, vx, vy);
+        next.set(id, { x, y, tick: m.tick });
+      }
+      obs.bugCount = m.b.length;
+      [last, next] = [next, last];
+    },
+  };
+}
+
 export type Tally = {
   joins: number;
   /** The arena id in each welcome. */
@@ -123,10 +177,19 @@ export type Tally = {
   messages: number;
   /** Error messages, connect failures and unexpected closes, each with what it was. */
   errors: string[];
+  /** The score of every life the server ended (its "over" events). */
+  lives: number[];
 };
 
 export function createTally(): Tally {
-  return { joins: 0, arenas: new Set(), messages: 0, errors: [] };
+  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [] };
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const v = [...values].sort((a, b) => a - b);
+  const mid = v.length >> 1;
+  return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
 }
 
 type TickStats = { p50: number | null; p95: number | null } | null;
@@ -139,10 +202,11 @@ export function formatSummary(args: BotsArgs, tally: Tally, seconds: number, tic
   const errorKinds = new Map<string, number>();
   for (const e of tally.errors) errorKinds.set(e, (errorKinds.get(e) ?? 0) + 1);
   const lines = [
-    `bots: ${args.count} against ${args.url} for ${seconds.toFixed(1)} s`,
+    `bots: ${args.count} (${args.policy}) against ${args.url} for ${seconds.toFixed(1)} s`,
     `joins: ${tally.joins} of ${args.count}`,
     `arenas used: ${tally.arenas.size} (${[...tally.arenas].sort((a, b) => a - b).join(", ") || "none"})`,
     `messages received: ${tally.messages} (${perSecond.toFixed(1)}/s overall, ${(perSecond / Math.max(1, tally.joins)).toFixed(1)}/s per bot)`,
+    `lives ended: ${tally.lives.length}, median score ${median(tally.lives) ?? "-"}`,
     `errors: ${tally.errors.length}${errorKinds.size ? ` (${[...errorKinds].map(([k, n]) => `${k} x${n}`).join(", ")})` : ""}`,
     `server tick: p50 ${ms(tick?.p50)}, p95 ${ms(tick?.p95)}${tick ? "" : " (stats unavailable)"}`,
   ];

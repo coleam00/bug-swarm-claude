@@ -1,0 +1,169 @@
+// Shots, heat and the hit streak (#55), stepped by sim.ts stepArena. Pure and deterministic.
+import {
+  BARREL,
+  CRAWLER_RADIUS,
+  DT,
+  FIRE_RATE,
+  HEAT_COOL_PER_S,
+  HEAT_LOCK_S,
+  HEAT_PER_SHOT,
+  KILL_POINTS,
+  SHOT_RADIUS,
+  SHOT_RANGE,
+  SHOT_SPEED,
+  SHOT_SPREAD,
+  STREAK_STEPS,
+  WORLD_H,
+  WORLD_W,
+} from "./constants";
+import { nextRandom } from "./rng";
+import type { ArenaState, Bug, Player, Shot } from "./sim";
+
+/** The streak multiplier for `streak` hits in a row: x1, x1.5 from 5, x2 from 10, x3 from 20. */
+export function mult(streak: number): number {
+  for (const [hits, m] of STREAK_STEPS) if (streak >= hits) return m;
+  return 1;
+}
+
+const LOCK_TICKS = Math.round(HEAT_LOCK_S / DT);
+/** Heat counts as full from just under 1, so 18 shots of 1/18 lock despite rounding. */
+const FULL_HEAT = 1 - 1e-9;
+
+/**
+ * How far a shot has flown at snapshot tick `tick`, when it was reported fired in the snapshot of
+ * tick `firedTick`: a shot fired during a step also flies its first 45 units in that step. The
+ * browser draws shots with this, so it and the server agree to the tick.
+ */
+export function shotTravelAt(firedTick: number, tick: number): number {
+  return Math.min(SHOT_RANGE, Math.max(0, SHOT_SPEED * DT * (tick - firedTick + 1)));
+}
+
+/**
+ * Fire and heat for one alive player, one tick:
+ * - locked: count the lock down, heat draining to 0 over it; no shot;
+ * - fire held: shots leave the barrel along the aim (plus spread) every 1/FIRE_RATE s, each adding
+ *   HEAT_PER_SHOT; full heat locks the gun for HEAT_LOCK_S;
+ * - fire released: heat cools, and the cooldown runs out without banking shots.
+ */
+export function stepFire(state: ArenaState, p: Player): void {
+  if (p.lockTicks > 0) {
+    p.lockTicks--;
+    p.heat = p.lockTicks / LOCK_TICKS;
+    p.fireCooldown = Math.max(p.fireCooldown - DT, 0);
+    return;
+  }
+  if (!p.input.fire) {
+    // The gun cools only once its cooldown has run out, so tapping fire between shots does not dodge heat.
+    if (p.fireCooldown <= 0) p.heat = Math.max(0, p.heat - HEAT_COOL_PER_S * DT);
+    p.fireCooldown = Math.max(p.fireCooldown - DT, 0);
+    return;
+  }
+  p.fireCooldown -= DT;
+  while (p.fireCooldown <= 0 && p.lockTicks === 0) {
+    fireShot(state, p);
+    p.heat += HEAT_PER_SHOT;
+    p.fireCooldown += 1 / FIRE_RATE;
+    if (p.heat >= FULL_HEAT) {
+      p.heat = 1;
+      p.lockTicks = LOCK_TICKS;
+    }
+  }
+}
+
+function fireShot(state: ArenaState, p: Player): void {
+  const angle = p.aim + (nextRandom(state.rng) * 2 - 1) * SHOT_SPREAD;
+  const dx = Math.cos(angle);
+  const dy = Math.sin(angle);
+  const id = state.nextShotId++;
+  const x = p.x + Math.cos(p.aim) * BARREL;
+  const y = p.y + Math.sin(p.aim) * BARREL;
+  state.shots.push({ id, owner: p.id, life: p.lifeStartTick, x, y, dx, dy, travelled: 0 });
+  state.events.shotsFired.push({ id, owner: p.id, x, y, angle });
+}
+
+const HIT_R = CRAWLER_RADIUS + SHOT_RADIUS;
+
+/**
+ * Where along the segment from (x, y) in unit direction (dx, dy), of length `len`, it first
+ * touches the circle at (cx, cy) of radius `r`: 0 if it starts inside, else the entry distance,
+ * or -1 if it misses. A swept test: a shot moves 45 units a tick against a 30-unit bug.
+ */
+export function segmentHit(x: number, y: number, dx: number, dy: number, len: number, cx: number, cy: number, r: number): number {
+  const fx = x - cx;
+  const fy = y - cy;
+  const c = fx * fx + fy * fy - r * r;
+  if (c <= 0) return 0;
+  const b = fx * dx + fy * dy;
+  if (b >= 0) return -1;
+  const disc = b * b - c;
+  if (disc < 0) return -1;
+  const t = -b - Math.sqrt(disc);
+  return t <= len ? t : -1;
+}
+
+/** The player credited for `s`: its owner, still in the life that fired it; else null. */
+function creditFor(state: ArenaState, s: Shot): Player | null {
+  for (const p of state.players) if (p.id === s.owner) return p.alive && p.lifeStartTick === s.life ? p : null;
+  return null;
+}
+
+/**
+ * Every shot flies one step. It hits the first live bug its path touches (the smallest entry
+ * distance; ties: the lower index) and ends: the bug loses a hit point, the owner's streak grows,
+ * and a kill scores KILL_POINTS times the multiplier of the streak including this hit. A shot that
+ * reaches SHOT_RANGE or a wall ends as a miss and resets its owner's streak. Shots never touch
+ * players. A shot whose owner left, or whose life ended, flies on and scores nothing.
+ */
+export function stepShots(state: ArenaState): void {
+  const ev = state.events;
+  const bugs = state.bugs;
+  let keep = 0;
+  for (let i = 0; i < state.shots.length; i++) {
+    const s = state.shots[i]!;
+    const len = Math.min(SHOT_SPEED * DT, SHOT_RANGE - s.travelled);
+    let hitBug: Bug | null = null;
+    let best = Infinity;
+    for (const b of bugs) {
+      if (b.hp <= 0) continue;
+      const t = segmentHit(s.x, s.y, s.dx, s.dy, len, b.x, b.y, HIT_R);
+      if (t >= 0 && t < best) {
+        best = t;
+        hitBug = b;
+      }
+    }
+    const owner = creditFor(state, s);
+    if (hitBug) {
+      hitBug.hp--;
+      if (owner) {
+        owner.streak++;
+        if (hitBug.hp <= 0) {
+          const points = KILL_POINTS * mult(owner.streak);
+          owner.score += points;
+          owner.kills++;
+          ev.kills.push({ bug: hitBug.id, by: owner.id, x: hitBug.x, y: hitBug.y, points });
+        }
+      } else if (hitBug.hp <= 0) {
+        ev.kills.push({ bug: hitBug.id, by: 0, x: hitBug.x, y: hitBug.y, points: 0 });
+      }
+      ev.shotsEnded.push({ id: s.id, hit: true, travelled: s.travelled + best });
+      continue;
+    }
+    s.x += s.dx * len;
+    s.y += s.dy * len;
+    s.travelled += len;
+    if (s.travelled >= SHOT_RANGE - 1e-9 || s.x < 0 || s.x > WORLD_W || s.y < 0 || s.y > WORLD_H) {
+      if (owner) owner.streak = 0;
+      ev.shotsEnded.push({ id: s.id, hit: false, travelled: s.travelled });
+      continue;
+    }
+    state.shots[keep++] = s;
+  }
+  state.shots.length = keep;
+  // Bugs killed this step leave the arena.
+  let alive = 0;
+  for (let i = 0; i < bugs.length; i++) {
+    const b = bugs[i]!;
+    if (b.hp > 0) bugs[alive++] = b;
+  }
+  bugs.length = alive;
+}

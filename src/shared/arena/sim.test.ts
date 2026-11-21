@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_SPEED, PLAYER_RADIUS, SPAWN_MARGIN, WORLD_H, WORLD_W } from "./constants";
+import { DT, HITS_PER_LIFE, INVULN_S, MAX_SPEED, PLAYER_RADIUS, RESPAWN_DELAY_S, SPAWN_MARGIN, WORLD_H, WORLD_W } from "./constants";
+import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
 import {
   clampInput,
   createArena,
@@ -149,8 +150,8 @@ describe("arena", () => {
     const a = createArena(1);
     const p1 = joinPlayer(a, "one", "tabs");
     const p2 = joinPlayer(a, "two", "spaces");
-    expect(leavePlayer(a, p1.id)).toBe(true);
-    expect(leavePlayer(a, p1.id)).toBe(false);
+    expect(leavePlayer(a, p1.id)).toEqual({ life: { id: p1.id, score: 0, kills: 0, ticks: 0 } });
+    expect(leavePlayer(a, p1.id)).toBeNull();
     expect(a.players.map((p) => p.id)).toEqual([p2.id]);
     expect(joinPlayer(a, "three", "tabs").id).toBe(3);
   });
@@ -170,5 +171,99 @@ describe("arena", () => {
     expect(y2 - p2.y).toBeCloseTo((120 + 240) * 0.05, 9);
     expect([p1.aim, p2.aim]).toEqual([1, -2]);
     expect(noInput().mx).toBe(0);
+  });
+});
+
+describe("lives", () => {
+  test("a bug touching you costs a hit and is gone; you are untouchable for INVULN_S; 3 hits end the life once", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.score = 40;
+    p.kills = 4;
+    p.streak = 6;
+    placeBug(a, 1210, 1200);
+    stepQuiet(a);
+    expect(a.events.hitsTaken).toEqual([p.id]);
+    expect([p.hits, a.bugs.length, p.streak]).toEqual([1, 0, 6]);
+    // A second bug arriving inside the protection does nothing...
+    placeBug(a, 1210, 1200);
+    const protectedTicks = Math.round(INVULN_S / DT) - 1;
+    for (let i = 0; i < protectedTicks; i++) {
+      stepQuiet(a);
+      expect(a.events.hitsTaken).toEqual([]);
+      a.bugs[0]!.x = p.x + 10;
+      a.bugs[0]!.y = p.y;
+    }
+    // ...and lands once it runs out.
+    stepQuiet(a);
+    expect(a.events.hitsTaken).toEqual([p.id]);
+    p.invulnTicks = 0;
+    placeBug(a, p.x + 10, p.y);
+    stepQuiet(a);
+    expect(p.hits).toBe(HITS_PER_LIFE);
+    expect(p.alive).toBe(false);
+    expect(a.events.livesEnded).toEqual([{ id: p.id, score: 40, kills: 4, ticks: a.tick - 1 }]);
+    placeBug(a, p.x, p.y);
+    stepQuiet(a, 5);
+    expect(a.events.livesEnded).toEqual([]);
+    expect(p.hits).toBe(HITS_PER_LIFE);
+  });
+
+  test("an out player does not move or fire, and respawns on a dash press 0.8 s after going out, not before", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.hits = HITS_PER_LIFE - 1;
+    p.score = 70;
+    placeBug(a, 1210, 1200);
+    stepQuiet(a);
+    expect(p.alive).toBe(false);
+    const outAt = a.tick - 1;
+    const delay = Math.round(RESPAWN_DELAY_S / DT);
+    while (a.tick - outAt < delay) {
+      hold(p, { mx: 1, fire: true, dash: true });
+      stepQuiet(a);
+      expect(p.alive).toBe(false);
+      expect([p.x, p.y]).toEqual([1210 - 10, 1200]);
+      expect(a.events.shotsFired).toEqual([]);
+    }
+    hold(p, { dash: false });
+    stepQuiet(a, 3);
+    expect(p.alive).toBe(false);
+    hold(p, { dash: true });
+    stepQuiet(a);
+    expect(p.alive).toBe(true);
+    expect([p.hits, p.score, p.kills, p.streak, p.heat]).toEqual([0, 0, 0, 0, 0]);
+    expect(p.invulnTicks).toBeGreaterThan(0);
+    expect(p.lifeStartTick).toBe(a.tick - 1);
+  });
+
+  test("leaving ends an alive life and returns it; the step's own list is untouched", () => {
+    const { a, ps } = arenaWith([1200, 1200], [600, 600]);
+    const [p1, p2] = [ps[0]!, ps[1]!];
+    p2.hits = HITS_PER_LIFE - 1;
+    p2.score = 30;
+    placeBug(a, 610, 600);
+    stepQuiet(a, 10);
+    p1.score = 25;
+    p1.kills = 2;
+    expect(leavePlayer(a, p1.id)).toEqual({ life: { id: p1.id, score: 25, kills: 2, ticks: 10 } });
+    expect(leavePlayer(a, p2.id)).toEqual({ life: null });
+  });
+
+  test("the same seed and inputs give the same arena after 2000 ticks", () => {
+    const run = () => {
+      const a = createArena(77);
+      const p1 = joinPlayer(a, "one", "tabs");
+      const p2 = joinPlayer(a, "two", "spaces");
+      for (let t = 0; t < 2000; t++) {
+        p1.input = clampInput({ seq: t, mx: Math.cos(t / 40), my: Math.sin(t / 40), aim: t / 30, fire: t % 30 < 15, dash: t % 50 === 0 });
+        p2.input = clampInput({ seq: t, mx: -1, my: 0.3, aim: -t / 25, fire: true, dash: t % 70 === 0 });
+        stepArena(a);
+      }
+      return JSON.stringify(a);
+    };
+    const first = run();
+    expect(run()).toBe(first);
+    expect(JSON.parse(first).bugs.length + JSON.parse(first).nextBugId).toBeGreaterThan(10);
   });
 });

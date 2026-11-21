@@ -1,6 +1,8 @@
 // Floating "+10" labels over squashed bugs. Squashes close together in place and time merge into
 // one label ("+30") so a full swarm never piles labels into unreadable clutter. A fixed pool: when
-// it is full the label with the least life left is overwritten. Pure (no DOM, no canvas).
+// it is full the label with the least life left is overwritten. Pure (no DOM, no canvas). A
+// squash scores POINTS_PER_SQUASH unless told otherwise (the arena's streak multiplier, #55):
+// a label sums its points, and `textLabel` gives its text without building a string per frame.
 import { POINTS_PER_SQUASH } from "../../../server/rules";
 
 /** The most labels alive at once. */
@@ -23,8 +25,10 @@ export type Texts = {
   y: Float32Array;
   /** Seconds left; a slot is free when this is 0. */
   life: Float32Array;
-  /** Squashes in the label: its text is TEXT_LABELS[count]. */
+  /** Squashes in the label: with the default points, its text is TEXT_LABELS[count]. */
   count: Uint8Array;
+  /** Points in the label, summed over its squashes. */
+  points: Uint16Array;
   /** Seconds since the label last took a squash. */
   since: Float32Array;
   /** TEXT_MERGE_PX in arena units at the current layout (setTextScale). */
@@ -38,6 +42,7 @@ export function createTexts(capacity = TEXT_CAPACITY): Texts {
     y: new Float32Array(capacity),
     life: new Float32Array(capacity),
     count: new Uint8Array(capacity),
+    points: new Uint16Array(capacity),
     since: new Float32Array(capacity),
     mergeRadius: TEXT_MERGE_PX,
     live: 0,
@@ -49,8 +54,8 @@ export function setTextScale(t: Texts, cssPxPerUnit: number): void {
   t.mergeRadius = TEXT_MERGE_PX / cssPxPerUnit;
 }
 
-/** One squash at x, y: merged into the nearest recent label in reach, or a label of its own. */
-export function spawnText(t: Texts, x: number, y: number): void {
+/** One squash at x, y scoring `points`: merged into the nearest recent label in reach, or a label of its own. */
+export function spawnText(t: Texts, x: number, y: number, points: number = POINTS_PER_SQUASH): void {
   const cap = t.life.length;
   const r2 = t.mergeRadius * t.mergeRadius;
   let near = -1;
@@ -76,6 +81,7 @@ export function spawnText(t: Texts, x: number, y: number): void {
   if (near >= 0) {
     // Its position stays put: moving it to each squash would make it jump.
     t.count[near]!++;
+    t.points[near] = Math.min(65535, t.points[near]! + points);
     t.life[near] = TEXT_SECONDS;
     t.since[near] = 0;
     return;
@@ -86,7 +92,23 @@ export function spawnText(t: Texts, x: number, y: number): void {
   t.y[i] = y;
   t.life[i] = TEXT_SECONDS;
   t.count[i] = 1;
+  t.points[i] = Math.min(65535, points);
   t.since[i] = 0;
+}
+
+/** Labels for point sums that are not in TEXT_LABELS, built once each, the first time one shows. */
+const otherLabels = new Map<number, string>();
+
+/** Label `i`'s text: "+" and its points. */
+export function textLabel(t: Texts, i: number): string {
+  const pts = t.points[i]!;
+  if (pts % POINTS_PER_SQUASH === 0 && pts / POINTS_PER_SQUASH <= TEXT_MAX_SQUASHES) return TEXT_LABELS[pts / POINTS_PER_SQUASH]!;
+  let label = otherLabels.get(pts);
+  if (label === undefined) {
+    label = `+${pts}`;
+    otherLabels.set(pts, label);
+  }
+  return label;
 }
 
 export function updateTexts(t: Texts, dt: number): void {

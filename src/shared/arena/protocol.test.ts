@@ -7,6 +7,7 @@ import {
   encodeInput,
   encodeSnapshot,
   encodeSnapshotPlayers,
+  encodeSnapshotShared,
   parseClientMessage,
   parseServerMessage,
   utf8Bytes,
@@ -45,6 +46,7 @@ describe("parseClientMessage", () => {
       "42",
       '"input"',
       s([input]),
+      s({ ...input, t: "over" }),
     ]) {
       expect(parseClientMessage(raw)).toBeNull();
     }
@@ -110,23 +112,48 @@ describe("parseClientMessage", () => {
 });
 
 describe("server messages", () => {
-  test("a snapshot is built from a shared players part and round-trips, quantized", () => {
+  test("a snapshot is built from a shared part and your own numbers, and round-trips, quantized", () => {
     const players = [
-      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456 },
-      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159 },
+      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3 },
+      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0 },
+      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9 },
     ];
-    const shared = encodeSnapshotPlayers(players);
-    const msg = parseServerMessage(encodeSnapshot(9, 4, shared));
+    const src = {
+      tick: 9,
+      players,
+      bugs: [{ id: 7, kind: "crawler", x: 100.04, y: 200.06 }],
+      events: {
+        shotsFired: [{ id: 11, owner: 1, x: 30.123, y: 20.5, angle: 0.12345 }],
+        shotsEnded: [
+          { id: 10, hit: true, travelled: 123.456 },
+          { id: 9, hit: false, travelled: 700 },
+        ],
+        kills: [{ bug: 6, by: 2, x: 50.06, y: 60, points: 15 }],
+      },
+    };
+    const shared = encodeSnapshotShared(src, ["crawler"], 3);
+    const me = { sc: 120, ki: 9, st: 6, mu: 1.5, he: 0.4567, lk: 0 as const, hl: 2, al: 1 as const };
+    expect(shared.startsWith(`"p":${encodeSnapshotPlayers(players)},`)).toBe(true);
+    const msg = parseServerMessage(encodeSnapshot(9, 4, me, shared));
     expect(msg).toEqual({
       t: "snapshot",
       tick: 9,
       ack: 4,
+      me: { ...me, he: 0.46 },
       p: [
-        [1, 10.12, 20.5, -3, 0, 1.235],
-        [2, 2386, 14, 300, -300, -3.142],
+        [1, 10.12, 20.5, -3, 0, 1.235, 1, 1],
+        [2, 2386, 14, 300, -300, -3.142, 1, 0],
+        [3, 5, 5, 0, 0, 0, 0, 0],
       ],
+      b: [[7, 0, 100, 200.1]],
+      s: [[11, 1, 30.12, 20.5, 0.123]],
+      e: [
+        [10, 1, 123.5],
+        [9, 0, 700],
+      ],
+      k: [[6, 2, 50.1, 60, 15]],
+      w: 3,
     });
-    expect(parseServerMessage(encodeSnapshot(1, 0, encodeSnapshotPlayers([])))).toEqual({ t: "snapshot", tick: 1, ack: 0, p: [] });
   });
 
   test("parseServerMessage accepts only known types", () => {

@@ -1,8 +1,9 @@
 // Interpolation of everyone else: the last few snapshots, and an estimate of the server's tick
-// from when they arrived, so other players are drawn INTERP_DELAY_MS behind the server, between
-// two snapshots, and move smoothly at any frame rate. Pure: the frame time comes in as a number.
+// from when they arrived, so other players and the bugs are drawn INTERP_DELAY_MS behind the
+// server, between two snapshots, and move smoothly at any frame rate. Pure: the frame time comes
+// in as a number.
 import { INTERP_DELAY_MS, TICK_MS } from "../../shared/arena/constants";
-import type { SnapshotPlayer } from "../../shared/arena/protocol";
+import type { SnapshotBug, SnapshotPlayer } from "../../shared/arena/protocol";
 
 /** Snapshots kept: half a second at 20 Hz. */
 export const INTERP_BUFFER = 10;
@@ -13,7 +14,13 @@ export const CLOCK_RESET_TICKS = 5;
 /** How far behind the server's tick other players are drawn, in ticks. */
 export const DELAY_TICKS = INTERP_DELAY_MS / TICK_MS;
 
-type Frame = { tick: number; p: SnapshotPlayer[] };
+type Frame = {
+  tick: number;
+  p: SnapshotPlayer[];
+  b: SnapshotBug[];
+  /** The bugs by id, for the frame after the one drawn from. */
+  bi: Map<number, SnapshotBug>;
+};
 
 export type Interp = {
   /** Oldest first. */
@@ -35,10 +42,12 @@ export function resetInterp(it: Interp): void {
 }
 
 /** A snapshot arrived at `nowMs`. Out-of-order or repeated ticks are ignored. */
-export function pushSnapshot(it: Interp, tick: number, players: SnapshotPlayer[], nowMs: number): void {
+export function pushSnapshot(it: Interp, tick: number, players: SnapshotPlayer[], nowMs: number, bugs: SnapshotBug[] = []): void {
   const newest = it.frames[it.frames.length - 1];
   if (newest && tick <= newest.tick) return;
-  it.frames.push({ tick, p: players });
+  const bi = new Map<number, SnapshotBug>();
+  for (const b of bugs) bi.set(b[0], b);
+  it.frames.push({ tick, p: players, b: bugs, bi });
   if (it.frames.length > INTERP_BUFFER) it.frames.shift();
   const target = tick - nowMs / TICK_MS;
   if (it.offset === null || Math.abs(target - it.offset) > CLOCK_RESET_TICKS) {
@@ -67,12 +76,17 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
+/** Where a player is drawn: position, aim, and whether they are in a life and untouchable then. */
+export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean };
+
 /**
  * Where player `id` is at server tick `at`, into `out`: between the two snapshots around it (aim
  * along the shorter arc), the oldest before the buffer, the newest when snapshots are late. False
- * when the newest snapshot doesn't have them: they left.
+ * when the newest snapshot doesn't have them: they left. Across a life ending or a respawn there
+ * is no in-between: the earlier snapshot holds until the later one's tick, so a respawn never
+ * slides across the map.
  */
-export function sample(it: Interp, id: number, at: number, out: { x: number; y: number; aim: number }): boolean {
+export function sample(it: Interp, id: number, at: number, out: Sampled): boolean {
   const frames = it.frames;
   const n = frames.length;
   if (n === 0) return false;
@@ -89,13 +103,51 @@ export function sample(it: Interp, id: number, at: number, out: { x: number; y: 
     out.x = rb[1];
     out.y = rb[2];
     out.aim = rb[5];
+    out.alive = rb[6] === 1;
+    out.inv = rb[7] === 1;
+    return true;
+  }
+  if (ra[6] !== rb[6]) {
+    out.x = ra[1];
+    out.y = ra[2];
+    out.aim = ra[5];
+    out.alive = ra[6] === 1;
+    out.inv = ra[7] === 1;
     return true;
   }
   const t = Math.min(1, Math.max(0, (at - fa.tick) / (fb.tick - fa.tick)));
   out.x = ra[1] + (rb[1] - ra[1]) * t;
   out.y = ra[2] + (rb[2] - ra[2]) * t;
   out.aim = lerpAngle(ra[5], rb[5], t);
+  out.alive = ra[6] === 1;
+  out.inv = ra[7] === 1;
   return true;
+}
+
+/**
+ * The two snapshots to draw bugs from at tick `at`: `from` (the one at or before it, else the
+ * oldest), `to` (the next, or null) and how far between (`t`). Draw `from`'s bugs, each moved
+ * toward its row in `to.bi` (a bug missing there died: hold it), so a bug vanishes when it is seen
+ * to die, not 100 ms early.
+ */
+export type BugSpan = { from: Frame | null; to: Frame | null; t: number };
+
+export function bugSpan(it: Interp, at: number, span: BugSpan): BugSpan {
+  const frames = it.frames;
+  const n = frames.length;
+  span.from = null;
+  span.to = null;
+  span.t = 0;
+  if (n === 0) return span;
+  let a = n - 1;
+  while (a > 0 && frames[a]!.tick > at) a--;
+  span.from = frames[a]!;
+  const next = a + 1 < n ? frames[a + 1]! : null;
+  if (next && at > span.from.tick) {
+    span.to = next;
+    span.t = Math.min(1, (at - span.from.tick) / (next.tick - span.from.tick));
+  }
+  return span;
 }
 
 /** The newest snapshot, for the ids and the minimap. */

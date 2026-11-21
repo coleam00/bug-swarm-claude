@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
-import { DELAY_TICKS, INTERP_BUFFER, createInterp, pushSnapshot, renderTick, sample } from "./interp";
+import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
-const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim];
-const out = () => ({ x: 0, y: 0, aim: 0 });
+const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0];
+const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false });
 
 describe("sampling", () => {
   test("halfway between two snapshots is halfway between their positions", () => {
@@ -13,7 +13,7 @@ describe("sampling", () => {
     pushSnapshot(it, 11, [row(1, 110, 180)], 50);
     const o = out();
     expect(sample(it, 1, 10.5, o)).toBe(true);
-    expect(o).toEqual({ x: 105, y: 190, aim: 0 });
+    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false });
   });
 
   test("aim turns along the shorter arc, across the -pi/pi seam", () => {
@@ -81,5 +81,39 @@ describe("the tick clock", () => {
     pushSnapshot(it, 100, [], 10_000);
     pushSnapshot(it, 300, [], 12_000); // 200 ticks later, 2 s later: 160 ticks off
     expect(renderTick(it, 12_000)).toBe(300 - DELAY_TICKS);
+  });
+});
+
+describe("lives and bugs", () => {
+  test("a respawn does not slide across the map: the out snapshot holds until the new one", () => {
+    const it = createInterp();
+    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0]], 0);
+    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1]], 50);
+    const o = out();
+    sample(it, 1, 10.9, o);
+    expect([o.x, o.alive]).toEqual([100, false]);
+    sample(it, 1, 11, o);
+    expect([o.x, o.alive, o.inv]).toEqual([2000, true, true]);
+  });
+
+  test("bugs are drawn from the snapshot at or before the drawing time, moving toward the next", () => {
+    const it = createInterp();
+    pushSnapshot(it, 10, [], 0, [
+      [1, 0, 100, 100],
+      [2, 0, 500, 500],
+    ]);
+    pushSnapshot(it, 11, [], 50, [[1, 0, 108, 100]]);
+    const span: BugSpan = { from: null, to: null, t: 0 };
+    bugSpan(it, 10.5, span);
+    expect(span.from!.tick).toBe(10);
+    expect(span.to!.tick).toBe(11);
+    expect(span.t).toBe(0.5);
+    // Bug 2 died by tick 11, but is still drawn at 10.5; it is gone from tick 11 on.
+    expect(span.from!.b.map((b) => b[0])).toEqual([1, 2]);
+    expect(span.to!.bi.get(1)![2]).toBe(108);
+    expect(span.to!.bi.has(2)).toBe(false);
+    bugSpan(it, 11.2, span);
+    expect(span.from!.b.map((b) => b[0])).toEqual([1]);
+    expect(span.to).toBeNull();
   });
 });

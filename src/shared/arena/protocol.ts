@@ -14,10 +14,13 @@ export const SERVER_TYPES = ["welcome", "snapshot", "event", "error"] as const;
 export type ServerType = (typeof SERVER_TYPES)[number];
 export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 
-/** What an `event` reports. Later items append hit, kill, down, revive, pickup and life-over. */
-export const EVENT_KINDS = ["join", "leave"] as const;
+/**
+ * What an `event` reports: a join, a leave, or your life being over (sent to you only). Hits,
+ * kills and shots travel in snapshots. Later items append down, revive and pickup.
+ */
+export const EVENT_KINDS = ["join", "leave", "over"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER] = EVENT_KINDS;
 
 /** Why the server refused a hello. The socket closes after each. */
 export const ERROR_CODES = ["version", "name", "team", "hello"] as const;
@@ -70,8 +73,35 @@ export type Welcome = {
   roster: RosterEntry[];
 };
 
-/** One player in a snapshot: id, x, y, vx, vy, aim. Positions and velocities to 0.01, aim to 0.001. */
-export type SnapshotPlayer = [id: number, x: number, y: number, vx: number, vy: number, aim: number];
+/**
+ * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable (0/1). Positions and
+ * velocities to 0.01, aim to 0.001. Fields are only ever appended, never reordered.
+ */
+export type SnapshotPlayer = [id: number, x: number, y: number, vx: number, vy: number, aim: number, alive: 0 | 1, invulnerable: 0 | 1];
+/** One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). */
+export type SnapshotBug = [id: number, kind: number, x: number, y: number];
+/** A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001). It flies per shotTravelAt. */
+export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number];
+/** A shot ended this tick: id, hit (1) or miss (0), units flown from the barrel (to 0.1). */
+export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
+/** A bug killed this tick: bug id, by (0: nobody scores), x, y, points. */
+export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number];
+
+/** Your own numbers, in your snapshots only. */
+export type SnapshotMe = {
+  /** Score, kills, hits in a row and its multiplier, this life. */
+  sc: number;
+  ki: number;
+  st: number;
+  mu: number;
+  /** Gun heat, 0 to 1 (to 0.01), and whether the gun is locked (0/1). */
+  he: number;
+  lk: 0 | 1;
+  /** Hits left this life. */
+  hl: number;
+  /** In a life (1) or out (0). */
+  al: 0 | 1;
+};
 
 export type Snapshot = {
   t: typeof SNAPSHOT;
@@ -80,9 +110,28 @@ export type Snapshot = {
   ack: number;
   /** Every player in the arena (at most 20), so the minimap shows everyone. */
   p: SnapshotPlayer[];
+  /** Every bug in the arena (at most MAX_BUGS_PER_ARENA). */
+  b: SnapshotBug[];
+  /** Shots fired, shots ended and bugs killed in this tick. */
+  s: SnapshotShot[];
+  e: SnapshotShotEnd[];
+  k: SnapshotKill[];
+  /** The arena's wave. */
+  w: number;
+  me: SnapshotMe;
 };
 
-export type ArenaEvent = { t: typeof EVENT; kind: EventKind; id: number; name?: string; team?: string };
+export type ArenaEvent = {
+  t: typeof EVENT;
+  kind: EventKind;
+  id: number;
+  name?: string;
+  team?: string;
+  /** With "over": the life's score, kills and length. */
+  score?: number;
+  kills?: number;
+  seconds?: number;
+};
 
 export type ErrorMessage = { t: typeof ERROR; code: ErrorCode };
 
@@ -158,26 +207,76 @@ export function parseServerMessage(raw: unknown): ServerMessage | null {
   }
 }
 
+const q1 = (v: number) => Math.round(v * 10) / 10;
 const q2 = (v: number) => Math.round(v * 100) / 100;
 const q3 = (v: number) => Math.round(v * 1000) / 1000;
 
-/**
- * The players part of a snapshot, as JSON, built once per tick and shared by every socket in the
- * arena: `[[id,x,y,vx,vy,aim],...]`, quantized.
- */
-export function encodeSnapshotPlayers(players: readonly { id: number; x: number; y: number; vx: number; vy: number; aim: number }[]): string {
+type PlayerRow = { id: number; x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; invulnTicks: number };
+
+/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv],...]`, quantized. */
+export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
   let s = "[";
   for (let i = 0; i < players.length; i++) {
     const p = players[i]!;
     if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)}]`;
+    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0}]`;
   }
   return s + "]";
 }
 
-/** One socket's snapshot: its own ack around the shared players JSON. */
-export function encodeSnapshot(tick: number, ack: number, playersJson: string): string {
-  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"p":${playersJson}}`;
+/** What the shared part of a snapshot is built from: sim.ts ArenaState fits it. */
+export type SharedSource = {
+  tick: number;
+  players: readonly PlayerRow[];
+  bugs: readonly { id: number; kind: string; x: number; y: number }[];
+  events: {
+    shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number }[];
+    shotsEnded: readonly { id: number; hit: boolean; travelled: number }[];
+    kills: readonly { bug: number; by: number; x: number; y: number; points: number }[];
+  };
+};
+
+/**
+ * The part of a snapshot every socket in an arena shares, built once per tick: `"p":...,"b":...,
+ * "s":...,"e":...,"k":...,"w":...` (no braces). `kinds` is BUG_KINDS, passed in so this file
+ * imports no simulation; `wave` is the arena's wave.
+ */
+export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[], wave: number): string {
+  let b = "[";
+  for (let i = 0; i < src.bugs.length; i++) {
+    const g = src.bugs[i]!;
+    if (i > 0) b += ",";
+    b += `[${g.id},${kinds.indexOf(g.kind)},${q1(g.x)},${q1(g.y)}]`;
+  }
+  b += "]";
+  const ev = src.events;
+  let s = "[";
+  for (let i = 0; i < ev.shotsFired.length; i++) {
+    const f = ev.shotsFired[i]!;
+    if (i > 0) s += ",";
+    s += `[${f.id},${f.owner},${q2(f.x)},${q2(f.y)},${q3(f.angle)}]`;
+  }
+  s += "]";
+  let e = "[";
+  for (let i = 0; i < ev.shotsEnded.length; i++) {
+    const x = ev.shotsEnded[i]!;
+    if (i > 0) e += ",";
+    e += `[${x.id},${x.hit ? 1 : 0},${q1(x.travelled)}]`;
+  }
+  e += "]";
+  let k = "[";
+  for (let i = 0; i < ev.kills.length; i++) {
+    const x = ev.kills[i]!;
+    if (i > 0) k += ",";
+    k += `[${x.bug},${x.by},${q1(x.x)},${q1(x.y)},${x.points}]`;
+  }
+  k += "]";
+  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"w":${wave}`;
+}
+
+/** One socket's snapshot: its own ack and numbers around the shared part. */
+export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared: string): string {
+  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al}},${shared}}`;
 }
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean): string {

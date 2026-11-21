@@ -1,31 +1,44 @@
-// Draws an arena frame: the floor grid, the walls, every robot with its trail, barrel and name
-// tag, your own ring, the sticks, the minimap and the F readout. It reuses release 1's sprites
-// (src/web/game/sprites.ts) so the arena looks like the same game: the robot sprite in each
-// team's colour, the glow, the marker ring and one tile of the floor grid, repeated. Sprites are
-// built on resize only; a frame allocates nothing but the strings of a name that changed.
-import { PLAYER_RADIUS, WORLD_H, WORLD_W } from "../../shared/arena/constants";
+// Draws an arena frame: the floor grid, the walls, the bugs, every shot as a glowing streak, the
+// sparks, kill bursts and floating scores, every robot with its trail, barrel and name tag, your
+// own ring and heat arc, the HUD (score, multiplier, "streak lost", wave, hits left), the life-over
+// overlay, the sticks, the minimap and the F readout. It reuses release 1's sprites and pooled
+// effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
+// built on resize only; a frame allocates nothing but the strings of a value that changed.
+import { HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
+import type { SnapshotMe } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
+import type { Particles } from "../game/fx/particles";
+import type { Shake } from "../game/fx/shake";
+import { TEXT_SECONDS, textLabel, type Texts } from "../game/fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "../game/fx/trail";
 import type { Insets } from "../game/hud";
 import { hudLayout } from "../game/hud";
 import {
+  BUG_LOOKS,
+  GLOW_SHOT,
   GLOW_WHITE,
   LETTERBOX,
   PALETTE,
   ROBOT_HALO_ALPHA,
   ROBOT_HALO_RADIUS,
+  SHOT_CORE,
   STICK_KNOB,
   STICK_KNOB_RADIUS,
   STICK_RING,
   STICK_RING_WIDTH,
+  TEXT_FILL,
+  TEXT_FONT,
   TEXT_STROKE,
   VIGNETTE,
+  type BugLookId,
 } from "../game/look";
-import { ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildGlow, buildRobot, floorTile, robotMarkSprite } from "../game/sprites";
+import { BUG_SPRITE_HALF, ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildBugSprites, buildGlow, buildRobot, floorTile, robotMarkSprite } from "../game/sprites";
 import { STICK_RANGE, stickKnob, type Stick } from "../game/stick";
 import { TEAM_LOOK } from "../teams";
 import type { Camera } from "./camera";
+import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
+import { shotTravel, type ClientShots } from "./shots";
 
 /** The floor tile's side, world units (a multiple of the grid spacing). */
 const TILE = 240;
@@ -46,12 +59,86 @@ const MINIMAP_FILL = "rgba(5, 7, 13, 0.75)";
 const MINIMAP_EDGE = "rgba(34, 211, 238, 0.7)";
 const MINIMAP_VIEW = "rgba(248, 250, 252, 0.25)";
 const MINIMAP_DOT = 3;
+const MINIMAP_BUG = "rgba(251, 146, 60, 0.85)";
 const STATS_FONT = "bold 16px system-ui, sans-serif";
+/** Leg frames walked forward then back: 0 1 2 3 2 1 (release 1's). */
+const LEG_CYCLE = [0, 1, 2, 3, 2, 1];
+const PARTICLE_SIZE = 7;
+/** A shot: a glow this long behind its head with a bright core, world units (release 1's look). */
+const SHOT_GLOW_LENGTH = 28;
+const SHOT_GLOW_WIDTH = 14;
+const SHOT_CORE_LENGTH = 18;
+const SHOT_CORE_WIDTH = 2.4;
+/** How each bug kind looks, from release 1's looks. */
+const BUG_LOOK: Record<BugKind, BugLookId> = { crawler: "base" };
+/** The heat arc around your robot: its radius, width and the most it sweeps (270 degrees, open at the bottom). */
+const HEAT_RADIUS = PLAYER_RADIUS + 8;
+const HEAT_WIDTH = 3.5;
+const HEAT_SWEEP = Math.PI * 1.5;
+const HEAT_START = Math.PI * 0.75;
+const HEAT_TRACK = "rgba(248, 250, 252, 0.14)";
+const HEAT_COOL = "#fde047";
+const HEAT_HOT = "#fb923c";
+const HEAT_WARN_ON = "#f87171";
+const HEAT_WARN_OFF = "#ffffff";
+/** A robot that can't be hit blinks this fast, cycles a second. */
+const BLINK_HZ = 8;
+// The HUD.
+const SCORE_FONT = "bold 30px system-ui, sans-serif";
+const MULT_FONT = "bold 22px system-ui, sans-serif";
+const LOST_FONT = "bold 16px system-ui, sans-serif";
+const WAVE_FONT = "bold 20px system-ui, sans-serif";
+const MULT_ON = "#fde047";
+const MULT_OFF = "#94a3b8";
+const LOST_FILL = "#f87171";
+const PIP_RADIUS = 6;
+const PIP_GAP = 18;
+const PIP_FULL = "#f8fafc";
+const PIP_EMPTY = "rgba(248, 250, 252, 0.25)";
+const HIT_EDGE = "rgba(248, 113, 113, 1)";
+const OVER_SHADE = "rgba(5, 7, 13, 0.6)";
+const OVER_TITLE_FONT = "bold 44px system-ui, sans-serif";
+const OVER_SCORE_FONT = "bold 30px system-ui, sans-serif";
+const OVER_LINE_FONT = "bold 20px system-ui, sans-serif";
 
-/** One robot to draw, world units. */
-export type Robot = { id: number; x: number; y: number; aim: number; team: Team; name: string; trail: Trail };
+/** One robot to draw, world units. `inv`: untouchable, so it blinks. */
+export type Robot = { id: number; x: number; y: number; aim: number; team: Team; name: string; trail: Trail; inv: boolean };
+
+/** The bugs to draw this frame, world units, in typed arrays filled by main.ts. */
+export type BugsView = { x: Float32Array; y: Float32Array; heading: Float32Array; phase: Float32Array; kind: Uint8Array; count: number };
+
+/** The life-over overlay's text, built once when the life ends. */
+export type OverView = { title: string; score: string; line: string; prompt: string; ready: boolean };
+
+/** Everything a frame draws besides the camera. */
+export type Scene = {
+  robots: readonly Robot[];
+  count: number;
+  /** Your robot's index in `robots`, or -1 (out, or not yet in). */
+  self: number;
+  /** Seconds, for pulses and leg frames. */
+  t: number;
+  bugs: BugsView;
+  shots: ClientShots;
+  /** The ticks shots are drawn at: yours, and everyone else's. */
+  mineAt: number;
+  othersAt: number;
+  you: number | null;
+  particles: Particles;
+  texts: Texts;
+  shake: Shake;
+  /** Your numbers, or null before the first snapshot. */
+  me: SnapshotMe | null;
+  wave: number;
+  hud: HudFx;
+  over: OverView | null;
+  sticks: readonly Stick[];
+  stats: string | null;
+};
 
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
+
+const scoreFormat = new Intl.NumberFormat("en-US");
 
 export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const canvas = ctx.canvas;
@@ -61,20 +148,37 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let ppu = 0;
   let teams: Record<Team, TeamSprites> | null = null;
   let white: HTMLCanvasElement | null = null;
+  let glows: HTMLCanvasElement[] = [];
+  let bugSprites: Record<BugLookId, HTMLCanvasElement[]> | null = null;
   let mark: HTMLCanvasElement | null = null;
   let floor: CanvasPattern | null = null;
   let vignette: HTMLCanvasElement | null = null;
   let minimap: MinimapLayout = minimapLayout(1, 1, { top: 0, right: 0, bottom: 0, left: 0 });
-  let statsLeft = 16;
-  let statsTop = 16;
+  let hud = hudLayout(1, { top: 0, right: 0, bottom: 0, left: 0 });
   const knob = { x: 0, y: 0 };
   const dot = { x: 0, y: 0 };
+  // HUD strings, rebuilt only when their value changes.
+  let scoreShown = -1;
+  let scoreText = "";
+  const multTexts = new Map<number, string>();
+  const waveTexts = new Map<number, string>();
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
   let vt = 0;
   let vr = 0;
   let vb = 0;
-  const visible = (r: Robot) => r.x > vl && r.x < vr && r.y > vt && r.y < vb;
+  const inView = (x: number, y: number) => x > vl && x < vr && y > vt && y < vb;
+
+  const multText = (m: number) => {
+    let s = multTexts.get(m);
+    if (s === undefined) multTexts.set(m, (s = `x${m}`));
+    return s;
+  };
+  const waveText = (w: number) => {
+    let s = waveTexts.get(w);
+    if (s === undefined) waveTexts.set(w, (s = `Wave ${w}`));
+    return s;
+  };
 
   /** The canvas is `w` x `h` CSS px at `newDpr`; the camera's scale is CSS px per unit. */
   function resize(w: number, h: number, newDpr: number, cam: Camera, insets: Insets): void {
@@ -82,9 +186,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     cssH = h;
     dpr = newDpr;
     minimap = minimapLayout(w, h, insets);
-    const hud = hudLayout(w, insets);
-    statsLeft = hud.left;
-    statsTop = hud.top;
+    hud = hudLayout(w, insets);
     const k = dpr * cam.scale;
     if (teams && Math.abs(k - ppu) < 0.01) return;
     ppu = k;
@@ -92,7 +194,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       tabs: { body: buildRobot(ppu, TEAM_LOOK.tabs.color), glow: buildGlow(TEAM_LOOK.tabs.color) },
       spaces: { body: buildRobot(ppu, TEAM_LOOK.spaces.color), glow: buildGlow(TEAM_LOOK.spaces.color) },
     };
-    white = buildGlow(PALETTE[GLOW_WHITE]);
+    glows = PALETTE.map((c) => buildGlow(c));
+    white = glows[GLOW_WHITE]!;
+    bugSprites = buildBugSprites(ppu);
     mark = robotMarkSprite(ppu);
     const tile = floorTile(ppu, TILE);
     floor = ctx.createPattern(tile, "repeat");
@@ -128,6 +232,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    // Untouchable: the body blinks (the trail, halo and ring stay, so you never lose it).
+    if (r.inv && !flashOn(t, BLINK_HZ)) return;
     // The barrel under the body, so it reads as coming out of it.
     ctx.save();
     ctx.translate(r.x, r.y);
@@ -166,23 +272,192 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fill();
   }
 
-  /**
-   * One frame. `robots[0..count)` are drawn, `self` (an index, or -1) last and ringed. `t` is
-   * seconds, for the core's pulse. `stats` is the F readout's text, or null when it is off.
-   */
-  function draw(cam: Camera, robots: readonly Robot[], count: number, self: number, t: number, sticks: readonly Stick[], stats: string | null): void {
+  function drawBugs(b: BugsView, t: number, k: number, ox: number, oy: number): void {
+    for (let i = 0; i < b.count; i++) {
+      const x = b.x[i]!;
+      const y = b.y[i]!;
+      if (!inView(x, y)) continue;
+      const id = BUG_LOOK.crawler;
+      const look = BUG_LOOKS[id];
+      const phase = b.phase[i]!;
+      const a = b.heading[i]! + look.jitter * Math.sin(TAU * (t * look.jitterHz + phase));
+      const c = Math.cos(a);
+      const sn = Math.sin(a);
+      const u = t * look.legHz + phase;
+      const frame = LEG_CYCLE[Math.floor((u - Math.floor(u)) * LEG_CYCLE.length)]!;
+      const half = look.radius * BUG_SPRITE_HALF;
+      ctx.setTransform(k * c, k * sn, -k * sn, k * c, k * x + ox, k * y + oy);
+      ctx.drawImage(bugSprites![id][frame]!, -half, -half, half * 2, half * 2);
+    }
+  }
+
+  function drawShots(sc: Scene, k: number, ox: number, oy: number): void {
+    const s = sc.shots;
+    if (s.live === 0) return;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = SHOT_CORE;
+    const glow = glows[GLOW_SHOT]!;
+    for (let i = 0; i < s.used.length; i++) {
+      if (!s.used[i]) continue;
+      const travel = shotTravel(s, i, s.owner[i] === sc.you ? sc.mineAt : sc.othersAt);
+      if (travel < 0) continue;
+      const dx = s.dx[i]!;
+      const dy = s.dy[i]!;
+      const x = s.x0[i]! + dx * travel;
+      const y = s.y0[i]! + dy * travel;
+      if (!inView(x, y)) continue;
+      // The streak never reaches back behind the barrel.
+      const tail = Math.min(SHOT_GLOW_LENGTH, travel + 6);
+      const core = Math.min(SHOT_CORE_LENGTH, travel + 2);
+      ctx.setTransform(k * dx, k * dy, -k * dy, k * dx, k * x + ox, k * y + oy);
+      ctx.drawImage(glow, 6 - tail, -SHOT_GLOW_WIDTH / 2, tail, SHOT_GLOW_WIDTH);
+      ctx.fillRect(2 - core, -SHOT_CORE_WIDTH / 2, core, SHOT_CORE_WIDTH);
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  function drawParticles(p: Particles): void {
+    if (p.live === 0) return;
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < p.life.length; i++) {
+      const life = p.life[i]!;
+      if (life <= 0) continue;
+      const l = life / p.maxLife[i]!;
+      const size = PARTICLE_SIZE * (0.4 + 0.6 * l);
+      ctx.globalAlpha = l;
+      ctx.drawImage(glows[p.colour[i]!]!, p.x[i]! - size, p.y[i]! - size, size * 2, size * 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /** Your gun's heat: an arc around your robot, open at the bottom, flashing near the lock. */
+  function drawHeat(me: Robot, sm: SnapshotMe, t: number): void {
+    const locked = sm.lk === 1;
+    if (sm.he <= 0.005 && !locked) return;
+    ctx.lineCap = "round";
+    ctx.lineWidth = HEAT_WIDTH;
+    ctx.strokeStyle = HEAT_TRACK;
+    ctx.beginPath();
+    ctx.arc(me.x, me.y, HEAT_RADIUS, HEAT_START, HEAT_START + HEAT_SWEEP);
+    ctx.stroke();
+    const warn = heatWarning(sm.he, locked);
+    ctx.strokeStyle = warn ? (flashOn(t) ? HEAT_WARN_ON : HEAT_WARN_OFF) : sm.he < 0.6 ? HEAT_COOL : HEAT_HOT;
+    ctx.beginPath();
+    ctx.arc(me.x, me.y, HEAT_RADIUS, HEAT_START, HEAT_START + HEAT_SWEEP * Math.min(1, sm.he));
+    ctx.stroke();
+    ctx.lineCap = "butt";
+  }
+
+  function drawHud(sc: Scene): void {
+    const me = sc.me;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = TEXT_STROKE;
+    ctx.lineWidth = 4;
+    if (me) {
+      if (me.sc !== scoreShown) {
+        scoreShown = me.sc;
+        scoreText = scoreFormat.format(me.sc);
+      }
+      ctx.font = SCORE_FONT;
+      ctx.fillStyle = TEXT_FILL;
+      ctx.strokeText(scoreText, hud.left, hud.top);
+      ctx.fillText(scoreText, hud.left, hud.top);
+      // The multiplier, pulsing when it goes up.
+      const my = hud.top + 38;
+      const scale = pulseScale(sc.hud);
+      ctx.save();
+      ctx.translate(hud.left, my + 11);
+      ctx.scale(scale, scale);
+      ctx.font = MULT_FONT;
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = me.mu > 1 ? MULT_ON : MULT_OFF;
+      const mt = multText(me.mu);
+      ctx.strokeText(mt, 0, 0);
+      ctx.fillText(mt, 0, 0);
+      ctx.restore();
+      // "streak lost", flicking up and out.
+      if (sc.hud.lost > 0) {
+        const f = sc.hud.lost / STREAK_LOST_S;
+        ctx.globalAlpha = f;
+        ctx.font = LOST_FONT;
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = LOST_FILL;
+        const y = my + 11 - (1 - f) * 10;
+        ctx.strokeText("streak lost", hud.left + 58, y);
+        ctx.fillText("streak lost", hud.left + 58, y);
+        ctx.globalAlpha = 1;
+      }
+      // Hits left, flashing as one goes.
+      const py = my + 40;
+      const flash = sc.hud.hit > 0 && flashOn(sc.t, 10);
+      for (let i = 0; i < HITS_PER_LIFE; i++) {
+        ctx.beginPath();
+        ctx.arc(hud.left + PIP_RADIUS + i * PIP_GAP, py, PIP_RADIUS, 0, TAU);
+        ctx.fillStyle = i < me.hl ? PIP_FULL : flash ? LOST_FILL : PIP_EMPTY;
+        ctx.fill();
+      }
+    }
+    if (sc.wave > 0) {
+      ctx.font = WAVE_FONT;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = TEXT_FILL;
+      const wt = waveText(sc.wave);
+      ctx.strokeText(wt, hud.center, hud.top + 4);
+      ctx.fillText(wt, hud.center, hud.top + 4);
+    }
+  }
+
+  function drawOver(o: OverView, t: number): void {
+    ctx.fillStyle = OVER_SHADE;
+    ctx.fillRect(0, 0, cssW, cssH);
+    const cx = cssW / 2;
+    const cy = cssH / 2;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = TEXT_STROKE;
+    ctx.lineWidth = 5;
+    ctx.fillStyle = TEXT_FILL;
+    ctx.font = OVER_TITLE_FONT;
+    ctx.strokeText(o.title, cx, cy - 70);
+    ctx.fillText(o.title, cx, cy - 70);
+    ctx.font = OVER_SCORE_FONT;
+    ctx.fillStyle = MULT_ON;
+    ctx.strokeText(o.score, cx, cy - 18);
+    ctx.fillText(o.score, cx, cy - 18);
+    ctx.font = OVER_LINE_FONT;
+    ctx.fillStyle = TEXT_FILL;
+    ctx.strokeText(o.line, cx, cy + 22);
+    ctx.fillText(o.line, cx, cy + 22);
+    if (o.ready) {
+      ctx.globalAlpha = 0.65 + 0.35 * Math.sin(t * 4);
+      ctx.strokeText(o.prompt, cx, cy + 78);
+      ctx.fillText(o.prompt, cx, cy + 78);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** One frame. */
+  function draw(cam: Camera, sc: Scene): void {
     if (!teams || !floor) return;
+    const { robots, count, self, t } = sc;
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = LETTERBOX;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // The world, in world units, the camera's centre at the screen's centre.
+    // The world, in world units, the camera's centre (shaken) at the screen's centre.
     const k = dpr * cam.scale;
-    const left = cam.x - cam.w / 2;
-    const top = cam.y - cam.h / 2;
-    ctx.setTransform(k, 0, 0, k, Math.round(-left * k), Math.round(-top * k));
+    const left = cam.x - cam.w / 2 - sc.shake.offsetX;
+    const top = cam.y - cam.h / 2 - sc.shake.offsetY;
+    const ox = Math.round(-left * k);
+    const oy = Math.round(-top * k);
+    ctx.setTransform(k, 0, 0, k, ox, oy);
     const x0 = Math.max(0, left);
     const y0 = Math.max(0, top);
     const x1 = Math.min(WORLD_W, left + cam.w);
@@ -198,13 +473,19 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineWidth = WALL_WIDTH;
     ctx.strokeRect(0, 0, WORLD_W, WORLD_H);
 
-    // Robots in view (plus a margin for halos and names), yours last.
     const margin = PLAYER_RADIUS * 6;
     vl = left - margin;
     vt = top - margin;
     vr = left + cam.w + margin;
     vb = top + cam.h + margin;
-    for (let i = 0; i < count; i++) if (i !== self && visible(robots[i]!)) drawRobot(robots[i]!, t);
+
+    drawBugs(sc.bugs, t, k, ox, oy);
+    drawShots(sc, k, ox, oy);
+    ctx.setTransform(k, 0, 0, k, ox, oy);
+    drawParticles(sc.particles);
+
+    // Robots in view, yours last.
+    for (let i = 0; i < count; i++) if (i !== self && inView(robots[i]!.x, robots[i]!.y)) drawRobot(robots[i]!, t);
     const me = self >= 0 ? robots[self] : undefined;
     if (me) {
       ctx.globalCompositeOperation = "lighter";
@@ -215,6 +496,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       drawRobot(me, t);
       const mh = PLAYER_RADIUS * ROBOT_MARK_HALF;
       ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);
+      if (sc.me) drawHeat(me, sc.me, t);
     }
     // Name tags over every robot, as canvas text (never HTML: names are typed by viewers).
     ctx.font = NAME_FONT;
@@ -225,16 +507,44 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.strokeStyle = TEXT_STROKE;
     for (let i = 0; i < count; i++) {
       const r = robots[i]!;
-      if (!visible(r)) continue;
+      if (!inView(r.x, r.y)) continue;
       ctx.fillStyle = i === self ? NAME_FILL : TEAM_LOOK[r.team].color;
       drawName(r);
     }
 
-    // Screen space: the vignette, the sticks, the minimap, the readout.
+    // Screen space: the vignette, the hit flash, floating scores, the HUD, the sticks, the minimap.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (vignette) ctx.drawImage(vignette, 0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    for (const s of sticks) drawStick(s);
+    if (sc.hud.hit > 0) {
+      ctx.globalAlpha = 0.28 * (sc.hud.hit / HIT_FLASH_S);
+      ctx.strokeStyle = HIT_EDGE;
+      ctx.lineWidth = 24;
+      ctx.strokeRect(0, 0, cssW, cssH);
+      ctx.globalAlpha = 1;
+    }
+    const texts = sc.texts;
+    if (texts.live > 0) {
+      ctx.font = TEXT_FONT;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = TEXT_STROKE;
+      ctx.fillStyle = TEXT_FILL;
+      for (let i = 0; i < texts.life.length; i++) {
+        const life = texts.life[i]!;
+        if (life <= 0) continue;
+        ctx.globalAlpha = Math.min(1, (2 * life) / TEXT_SECONDS);
+        const x = (texts.x[i]! - left) * cam.scale;
+        const y = (texts.y[i]! - top) * cam.scale;
+        const label = textLabel(texts, i);
+        ctx.strokeText(label, x, y);
+        ctx.fillText(label, x, y);
+      }
+      ctx.globalAlpha = 1;
+    }
+    for (const s of sc.sticks) drawStick(s);
 
     const m = minimap;
     ctx.fillStyle = MINIMAP_FILL;
@@ -243,10 +553,16 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineWidth = 1;
     const vx = Math.max(0, left);
     const vy = Math.max(0, top);
-    ctx.strokeRect(m.x + (vx / WORLD_W) * m.size, m.y + (vy / WORLD_H) * m.size, (Math.min(WORLD_W, left + cam.w) - vx) / WORLD_W * m.size, (Math.min(WORLD_H, top + cam.h) - vy) / WORLD_H * m.size);
+    ctx.strokeRect(m.x + (vx / WORLD_W) * m.size, m.y + (vy / WORLD_H) * m.size, ((Math.min(WORLD_W, left + cam.w) - vx) / WORLD_W) * m.size, ((Math.min(WORLD_H, top + cam.h) - vy) / WORLD_H) * m.size);
     ctx.strokeStyle = MINIMAP_EDGE;
     ctx.lineWidth = 1.5;
     ctx.strokeRect(m.x, m.y, m.size, m.size);
+    ctx.fillStyle = MINIMAP_BUG;
+    const bugs = sc.bugs;
+    for (let i = 0; i < bugs.count; i++) {
+      toMinimap(m, bugs.x[i]!, bugs.y[i]!, dot);
+      ctx.fillRect(dot.x - 1, dot.y - 1, 2, 2);
+    }
     for (let i = 0; i < count; i++) {
       const r = robots[i]!;
       toMinimap(m, r.x, r.y, dot);
@@ -261,12 +577,15 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
     }
 
-    if (stats) {
+    if (sc.over) drawOver(sc.over, t);
+    else drawHud(sc);
+    // The F readout shows over everything, the life-over screen too.
+    if (sc.stats) {
       ctx.font = STATS_FONT;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText(stats, statsLeft, statsTop);
+      ctx.fillText(sc.stats, hud.left, hud.top + 100);
     }
   }
 

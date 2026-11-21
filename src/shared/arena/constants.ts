@@ -40,6 +40,97 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
+
+// ---- Shooting (#55). Holding fire shoots travelling shots from the barrel along the aim. ----
+
+/** Shots per second while fire is held and the gun is not locked. */
+export const FIRE_RATE = 7;
+/** Shot speed, units per second (45 units a tick). */
+export const SHOT_SPEED = 900;
+/** How far a shot flies before it ends as a miss, units. */
+export const SHOT_RANGE = 700;
+/** Each shot leaves at the aim plus a uniform random angle within +/- this, radians. */
+export const SHOT_SPREAD = 0.03;
+/** A shot's collision radius, units: it hits a bug within its radius plus this. */
+export const SHOT_RADIUS = 3;
+/** Shots leave from this far in front of the robot's centre, along the aim (the barrel tip). */
+export const BARREL = PLAYER_RADIUS + 6;
+
+// ---- Heat (#55). Each shot adds heat; full heat locks the gun. ----
+
+/** Heat one shot adds (heat runs 0 to 1): a held trigger locks on its 18th shot, about 2.4 s. */
+export const HEAT_PER_SHOT = 1 / 18;
+/**
+ * Heat lost per second while fire is released and the shot cooldown has run out (so tapping fire
+ * does not dodge heat). Bursts kept under the lock sustain about 4.6 shots/s, the held trigger's
+ * average with its lock, without ever locking.
+ */
+export const HEAT_COOL_PER_S = 0.75;
+/** How long full heat locks the gun, seconds; heat drains to 0 over the lock. */
+export const HEAT_LOCK_S = 1.5;
+/** Heat from which the HUD arc flashes, warning of the lock. */
+export const HEAT_WARN = 0.85;
+
+// ---- Bugs (#55: crawlers only). Names in BUG_KINDS; the per-kind seam comes with the second kind. ----
+
+/** Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). */
+export const BUG_KINDS = ["crawler"] as const;
+export type BugKind = (typeof BUG_KINDS)[number];
+export const [CRAWLER] = BUG_KINDS;
+/** A crawler's collision radius, units. */
+export const CRAWLER_RADIUS = 12;
+/** A crawler's speed, units per second, straight at the nearest alive player. */
+export const CRAWLER_SPEED = 160;
+/** Shots a crawler takes to die. */
+export const CRAWLER_HP = 1;
+/** Points for a kill, before the streak multiplier. */
+export const KILL_POINTS = 10;
+
+// ---- Spawning (#55). Pressure is personal: each alive player brings their own spawn budget. ----
+
+/** A new life's spawn rate, bugs per second. */
+export const SPAWN_BASE_PER_S = 0.3;
+/** How fast the rate rises with the life's age, bugs per second per second. */
+export const SPAWN_RAMP_PER_S2 = 0.05;
+/** The rate's ceiling, bugs per second. */
+export const SPAWN_MAX_PER_S = 8;
+/** A player's unspent spawn budget is capped here, so a full arena does not bank spawns. */
+export const SPAWN_BUDGET_CAP = 2;
+/** The most bugs in one arena; past it no bug spawns (keeps the tick inside its budget). */
+export const MAX_BUGS_PER_ARENA = 150;
+/** A bug spawns this far from the player it targets, units. */
+export const SPAWN_DIST_MIN = 560;
+export const SPAWN_DIST_MAX = 720;
+/** Tries per spawn to find a spot out of every player's view; a failed spawn waits a tick. */
+export const SPAWN_TRIES = 8;
+/**
+ * The longest side of the camera's view, units: sqrt(360,000 * 16 / 9), the 16:9 view of
+ * release 1's arena area (camera.ts, arenaForViewport). Spawns stay out of a square this wide.
+ */
+export const VIEW_MAX = 800;
+/** Extra margin around that square, units (covers the camera's smoothing lag). */
+export const VIEW_PAD = 40;
+/** How far past the wall the camera may look, units: camera.ts CAMERA_MARGIN. */
+export const VIEW_WALL_MARGIN = 60;
+
+// ---- Lives, waves and the streak (#55). ----
+
+/** Hits that end a life (a later item turns this into "down" with a revive). */
+export const HITS_PER_LIFE = 3;
+/** Untouchable time after a hit, and after a spawn, seconds. */
+export const INVULN_S = 1;
+/** A life over waits this long before a press respawns you, seconds (release 1's restart guard). */
+export const RESPAWN_DELAY_S = 0.8;
+/** A respawn lands at least this far from every bug, when it can (8 tries). */
+export const RESPAWN_CLEAR = 400;
+/** The arena's wave clock, seconds per wave. Shown, and later unlocks kinds; never spawn volume. */
+export const WAVE_S = 30;
+/** Streak multiplier steps: [hits in a row, multiplier], highest first. Below the last: x1. */
+export const STREAK_STEPS: readonly (readonly [number, number])[] = [
+  [20, 3],
+  [10, 2],
+  [5, 1.5],
+];

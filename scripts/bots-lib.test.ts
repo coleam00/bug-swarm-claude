@@ -3,19 +3,27 @@ import { WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createRng } from "../src/shared/arena/rng";
 import { stepPlayer } from "../src/shared/arena/sim";
 import { TEAMS } from "../src/server/rules";
+import type { Snapshot } from "../src/shared/arena/protocol";
+import { createObservationTracker } from "./bots-lib";
 import { AIM_TURN, WALL_AVOID, botName, botTeam, createTally, createWander, formatSummary, parseBotsArgs, stepWander, wsUrl } from "./bots-lib";
 
 describe("parseBotsArgs", () => {
-  test("defaults to 18 bots for 60 seconds, and strips a trailing slash", () => {
-    expect(parseBotsArgs(["--url", "http://127.0.0.1:3000/"])).toEqual({ url: "http://127.0.0.1:3000", count: 18, seconds: 60 });
+  test("defaults to 18 aimer bots for 60 seconds, and strips a trailing slash", () => {
+    expect(parseBotsArgs(["--url", "http://127.0.0.1:3000/"])).toEqual({ url: "http://127.0.0.1:3000", count: 18, seconds: 60, policy: "aimer" });
   });
 
   test("takes both flag forms and skips a bare --", () => {
-    expect(parseBotsArgs(["--", "--url=https://x.test", "--count", "5", "--seconds=10"])).toEqual({ url: "https://x.test", count: 5, seconds: 10 });
+    expect(parseBotsArgs(["--", "--url=https://x.test", "--count", "5", "--seconds=10", "--policy", "wander"])).toEqual({
+      url: "https://x.test",
+      count: 5,
+      seconds: 10,
+      policy: "wander",
+    });
+    expect(parseBotsArgs(["--url", "http://x", "--policy=mover"]).policy).toBe("mover");
   });
 
   test("refuses a missing url, unknown flags and anything but positive whole numbers", () => {
-    for (const argv of [[], ["--count", "3"], ["--url", "ftp://x"], ["--url", "nope"], ["--url", "http://x", "--count", "0"], ["--url", "http://x", "--seconds", "1.5"], ["--url", "http://x", "--count", "-2"], ["--url", "http://x", "--policy", "aimer"], ["--url"]]) {
+    for (const argv of [[], ["--count", "3"], ["--url", "ftp://x"], ["--url", "nope"], ["--url", "http://x", "--count", "0"], ["--url", "http://x", "--seconds", "1.5"], ["--url", "http://x", "--count", "-2"], ["--url", "http://x", "--policy", "sniper"], ["--url", "http://x", "--policy", "idle"], ["--url"]]) {
       expect(() => parseBotsArgs(argv)).toThrow();
     }
   });
@@ -85,9 +93,42 @@ test("the summary counts joins, arenas, messages per second, errors and the tick
   tally.messages = 21_600;
   tally.errors.push("close 1006", "close 1006", "error name");
   // The values, not the wording: messages per second overall and per bot, errors grouped by kind.
-  const text = formatSummary({ url: "http://127.0.0.1:3000", count: 18, seconds: 60 }, tally, 60, { p50: 0.12, p95: 0.4 }).join(" ");
-  for (const part of ["18 of 18", "360.0/s", "20.0/s", "errors: 3", "close 1006 x2", "error name x1", "0.12", "0.40"]) {
+  tally.lives.push(300, 40, 120);
+  const text = formatSummary({ url: "http://127.0.0.1:3000", count: 18, seconds: 60, policy: "aimer" }, tally, 60, { p50: 0.12, p95: 0.4 }).join(" ");
+  for (const part of ["18 of 18", "360.0/s", "20.0/s", "errors: 3", "close 1006 x2", "error name x1", "0.12", "0.40", "lives ended: 3", "median score 120", "aimer"]) {
     expect(text).toContain(part);
   }
-  expect(formatSummary({ url: "u", count: 1, seconds: 1 }, createTally(), 1, null).join(" ")).toContain("unavailable");
+  expect(formatSummary({ url: "u", count: 1, seconds: 1, policy: "wander" }, createTally(), 1, null).join(" ")).toContain("unavailable");
+});
+
+test("a policy bot sees itself from its row and its numbers, and each bug's velocity from its last two positions", () => {
+  const t = createObservationTracker();
+  const snap = (tick: number, b: [number, number, number, number][], al: 0 | 1 = 1): Snapshot => ({
+    t: "snapshot",
+    tick,
+    ack: 0,
+    p: [
+      [1, 100, 100, 0, 0, 0, 1, 0],
+      [2, 500, 600, 30, -40, 1.5, 1, 0],
+    ],
+    b,
+    s: [],
+    e: [],
+    k: [],
+    w: 1,
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al },
+  });
+  t.update(snap(10, [[7, 0, 300, 300]]), 2);
+  expect(t.obs.self).toEqual({ x: 500, y: 600, vx: 30, vy: -40, aim: 1.5, alive: true, heat: 0.42, locked: true });
+  expect(t.obs.bugCount).toBe(1);
+  expect(t.obs.bugs[0]).toEqual({ x: 300, y: 300, vx: 0, vy: 0 });
+  t.update(snap(11, [[9, 0, 50, 50], [7, 0, 308, 294]]), 2);
+  expect(t.obs.bugs[1]!.vx).toBeCloseTo(160, 6);
+  expect(t.obs.bugs[1]!.vy).toBeCloseTo(-120, 6);
+  expect(t.obs.bugs[0]).toEqual({ x: 50, y: 50, vx: 0, vy: 0 });
+  // A snapshot skipped: the gap counts.
+  t.update(snap(13, [[7, 0, 324, 282]], 0), 2);
+  expect(t.obs.bugCount).toBe(1);
+  expect(t.obs.bugs[0]!.vx).toBeCloseTo(160, 6);
+  expect(t.obs.self.alive).toBe(false);
 });
