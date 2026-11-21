@@ -6,6 +6,10 @@
 //   word at a time, never across the space between two: "Anna Ziegler" holds "nazi" and "Matt
 //   Watson" holds "twat" only once the space is gone. A run of one- and two-letter words is a
 //   word spelled out, so it is joined back first: "F-U_C K", "n a z i" and "fu ck" are one word.
+//   Such a short word is also read glued to the word before it, the word after it and both, so
+//   an uneven split ("f uck", "ni gger", "who re", "shi t") is one word too. A split into two
+//   pieces of three letters or more ("ret ard", "nig ger") passes; the owner hides those with
+//   `bun run hide`.
 // - Each word normalised: lowercased, the digit swaps 0->o, 1->i, 3->e, 4->a, 5->s, 7->t, 8->b
 //   undone. "5h17" is "shit".
 // - Repeated letters: each run of a letter in an entry matches that many OR MORE of it in the
@@ -41,7 +45,9 @@
 // "porn" (Pornthep), "Nazia", "Gnazio", "McCoon", "Coonie" and "Kunti", a whole word such as
 // "Moby Dick" or "DeHoe", and two names glued into one word ("AnnaZiegler"): only spaces,
 // "-" and "_" separate words for BLOCKED_ANYWHERE, because splitting at capitals would let
-// "CunTface" through.
+// "CunTface" through. Gluing short words to their neighbours also refuses some initials and
+// two-letter names beside a word: "F Aguilar" and "Rafa G" (fag), "T Watson" (twat), "Anna L"
+// and "Anna Al" (anal), "Ji Smith" (jism), "Andy Ke" (dyke).
 //
 // RESERVED_NAMES: refused for players with "That name is reserved". Matched against the whole
 // normalised name with the same repeated-letter rule ("Cole Medin", "c0le_medin" and "Addmin"

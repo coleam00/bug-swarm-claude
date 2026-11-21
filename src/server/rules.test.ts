@@ -97,6 +97,9 @@ describe("name rules", () => {
     expect(names.filter((n) => !checkName(n).ok)).toEqual([]);
     // A word spelled out in one- and two-letter pieces is still one word.
     refuses(["F a g", "n a z i", "k k k", "fu ck", "Big F a g", "sh it head", "N-I-G-G-A"]);
+    // A short piece is read glued to the word beside it, so an uneven split is one word too.
+    refuses(["f uck", "c unt", "ni gger", "f aggot", "s hit", "n azi", "p orn", "a sshole", "who re", "shi t"]);
+    refuses(["kik e", "dyk e", "spi c", "coo n", "Big f uck", "f uck you", "my ni gger", "F-uck", "c_unt"]);
   });
 
   test("an exception doesn't hide a blocked word beside it, and cutting it out joins nothing", () => {

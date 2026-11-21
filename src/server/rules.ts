@@ -103,23 +103,43 @@ const EXCEPTIONS_LONGEST_FIRST = [...EXCEPTIONS].sort((a, b) => b.length - a.len
  * The words of a name, split on space, - and _. A run of words of one or two characters is
  * joined back into one word, since that is a word spelled out ("f u c k", "n a z i", "fu ck"),
  * not several names. A word made only of digits inside a longer name is a number
- * ("load-4455"), not letters, so it is left out.
+ * ("load-4455"), not letters, so it is left out. `short` marks a word built from such a run.
  */
-function nameWords(name: string): string[] {
-  const words: string[] = [];
+function nameWords(name: string): { text: string; short: boolean }[] {
+  const words: { text: string; short: boolean }[] = [];
   let run = "";
   for (const w of name.split(/[ _-]+/).filter(Boolean)) {
     if (w.length <= 2) {
       run += w;
       continue;
     }
-    if (run) words.push(run);
+    if (run) words.push({ text: run, short: true });
     run = "";
-    words.push(w);
+    words.push({ text: w, short: false });
   }
-  if (run) words.push(run);
-  const lettered = words.filter((w) => !/^\d+$/.test(w));
+  if (run) words.push({ text: run, short: true });
+  const lettered = words.filter((w) => !/^\d+$/.test(w.text));
   return lettered.length > 0 ? lettered : words;
+}
+
+/**
+ * The words to look for blocked words in: each word, and each short word (one or two letters,
+ * or a run of them) glued to the word before it, the word after it, and both. A blocked word
+ * split by one space into a short piece and a longer one ("f uck", "ni gger", "who re", "shi t")
+ * is read whole again. A split into two pieces of three letters or more ("ret ard") is not.
+ */
+function lookupWords(name: string): string[] {
+  const words = nameWords(name);
+  const out = words.map((w) => w.text);
+  words.forEach((w, i) => {
+    if (!w.short) return;
+    const before = words[i - 1]?.text ?? "";
+    const after = words[i + 1]?.text ?? "";
+    if (before) out.push(before + w.text);
+    if (after) out.push(w.text + after);
+    if (before && after) out.push(before + w.text + after);
+  });
+  return out;
 }
 
 /** An exception becomes "|", not "", so cutting it out can't join two halves into a word. */
@@ -134,12 +154,13 @@ function cutExceptions(compact: string): string {
  * length or characters: the boards use it to hide stored names that the lists now refuse.
  *
  * Blocked words are looked for inside each word of the name, never across the space between
- * two words: "Anna Ziegler" holds "nazi" and "Matt Watson" holds "twat" only once the space is
- * gone. BLOCKED_WHOLE words are also looked for in the parts of a word that a capital starts
- * ("BigDick", "ImASpic"). Reserved names are matched against the whole name.
+ * two longer words: "Anna Ziegler" holds "nazi" and "Matt Watson" holds "twat" only once the
+ * space is gone. A short word is also read glued to its neighbours (lookupWords). BLOCKED_WHOLE
+ * words are also looked for in the parts of a word that a capital starts ("BigDick",
+ * "ImASpic"). Reserved names are matched against the whole name.
  */
 export function listedReason(name: string): "blocked" | "reserved" | null {
-  const words = nameWords(name);
+  const words = lookupWords(name);
   const parts = words.flatMap((w) => w.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2").split(" "));
   const wordReadings = words.flatMap(readings);
   if (wordReadings.some((c) => ANYWHERE.test(cutExceptions(c)))) return "blocked";
