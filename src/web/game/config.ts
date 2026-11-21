@@ -86,5 +86,5 @@ export const BOMB_RING_SECONDS = 0.5;
 /** What each upgrade's card says. A Record over the ids, so an id without a card fails tsc. */
 export const UPGRADES: Record<UpgradeId, { name: string; line: string }> = {
   [REVIEW_LASER]: { name: "Review laser", line: "Shots pierce through bugs" },
-  [REFACTOR_BOMB]: { name: "Refactor bomb", line: "Clears the screen, recharges in 30 s" },
+  [REFACTOR_BOMB]: { name: "Refactor bomb", line: "Clears the screen, recharges in 30 s (15 s if taken twice)" },
 };

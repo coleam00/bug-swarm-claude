@@ -599,7 +599,7 @@ describe("refactor bomb", () => {
   });
 
   test("picked twice it recharges faster, counted from the last blast", () => {
-    expect(BOMB_RECHARGE[2]).toBeLessThan(BOMB_RECHARGE[1]);
+    expect(BOMB_RECHARGE[2]).toBe(15);
     const s = armed();
     pickBomb(s);
     place(s, 1);
@@ -616,6 +616,9 @@ describe("refactor bomb", () => {
     stepTo(s, first + BOMB_RECHARGE[2] + 0.1);
     expect(s.bugs).toHaveLength(0);
     expect(s.bombAt).toBeCloseTo(first + BOMB_RECHARGE[2], 1);
+    const second = s.bombAt;
+    stepTo(s, second + 7.5);
+    expect(bombCharge(s)).toBeCloseTo(0.5, 2); // the indicator fills over the level-2 recharge
   });
 
   test("it holds its charge while the arena is empty", () => {

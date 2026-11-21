@@ -130,7 +130,7 @@ export function score(state: State): number {
  */
 export function step(state: State, input: Input, dt: number): void {
   if (state.over || state.choice) return;
-  // First, so it clears only bugs a frame has already drawn, never one spawned this step.
+  // First, so it never clears a bug in the step that bug spawned.
   refactorBomb(state);
   const moved = moveRobot(state, input, dt);
   spawnBugs(state, dt);
