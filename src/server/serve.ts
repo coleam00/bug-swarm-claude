@@ -41,7 +41,7 @@ export type RunningServer = {
 
 /** How long stop waits for the sockets to finish closing before it cuts them, ms. */
 export const SOCKET_CLOSE_WAIT_MS = 500;
-/** The shutdown's backstop: the process exits by then whatever is still running, ms (Railway's limit is 5 s here, #69). */
+/** The shutdown's backstop: the process exits by then whatever is still running, ms (the item asks for 5 s, #69; Railway must allow at least that: architecture.md, "Hosting"). */
 export const SHUTDOWN_BUDGET_MS = 4500;
 
 export type ShutdownDeps = {
