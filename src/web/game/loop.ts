@@ -8,6 +8,7 @@ import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, setTextScale, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import { createFpsMeter, tickFps } from "./fps";
+import { createSteerLatch, firstSteer } from "../hint";
 import { createChoiceGate, pickChoice, showChoice } from "./guard";
 import type { UpgradeId } from "../../server/rules";
 import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
@@ -85,6 +86,8 @@ export function startGame(
   opts: {
     onOver: (result: RunResult) => void;
     onChoice: (cards: readonly UpgradeId[] | null) => void;
+    /** Called once, on the run's first steering input (from input events, never the frame loop). */
+    onMove?: () => void;
     /** A stress run's bug count (stress.ts); 0 or absent for a normal run. */
     stress?: number;
   },
@@ -131,10 +134,12 @@ export function startGame(
   let pointerSteers = false;
   let touch = false;
   let input: Input = NONE;
+  const steer = createSteerLatch();
   const updateInput = () => {
     if (keys.size > 0) input = keysToInput(keys);
     else if (stick.active) input = stickDrive(stick, stickOut) ? stickOut : NONE;
     else input = pointerSteers ? target : NONE;
+    if (firstSteer(steer, input)) opts.onMove?.();
   };
   const aimAt = (e: PointerEvent) => {
     const rect = canvas.getBoundingClientRect();

@@ -89,6 +89,11 @@
       .choice b { font-size: 24px; }
       .choice span { font-size: 20px; opacity: 0.85; }
       .choice kbd { font: inherit; font-size: 16px; opacity: 0.6; }
+      /* The first-run steering hint: below the HUD, above the robot's start. Touches pass through it. */
+      .hint { position: fixed; left: 50%; top: 24%; transform: translateX(-50%); pointer-events: none; margin: 0; padding: 10px 18px;
+        border-radius: 12px; background: rgba(15, 23, 42, 0.75); color: #f8fafc; font-family: system-ui, sans-serif; font-size: 22px;
+        text-align: center; width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; animation: hint-in 250ms ease-out both; }
+      @keyframes hint-in { from { opacity: 0; } }
       @media (orientation: landscape) {
         .choice-cards { flex-direction: row; width: min(100%, 900px); }
         .choice button { flex: 1 1 0; justify-content: center; }
