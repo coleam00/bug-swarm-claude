@@ -123,6 +123,7 @@ function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string
             setMessage(null);
           }}
         />
+        <p className="setup-hint">Phone: put your thumb down anywhere and drag to steer. Computer: WASD, arrow keys or the mouse.</p>
         {message && (
           <p role="alert" className="setup-alert">
             {message}

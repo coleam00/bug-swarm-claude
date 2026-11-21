@@ -48,6 +48,12 @@ export const TEXT_FONT = "bold 26px system-ui, sans-serif";
 export const TEXT_FILL = "#ffffff";
 export const TEXT_STROKE = "#05070d";
 
+/** The touch joystick, drawn under the finger: a faint ring at full-speed range and a knob. */
+export const STICK_RING = "rgba(125, 211, 252, 0.3)";
+export const STICK_RING_WIDTH = 2;
+export const STICK_KNOB = "rgba(248, 250, 252, 0.3)";
+export const STICK_KNOB_RADIUS = 22;
+
 export type BugLook = {
   /** Drawn radius of the shell, in arena units. */
   radius: number;

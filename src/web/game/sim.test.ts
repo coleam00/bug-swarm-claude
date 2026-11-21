@@ -153,6 +153,23 @@ describe("steering", () => {
     expect(s.robot.y).toBeCloseTo(491.924, 2);
   });
 
+  test("a stick moves the robot at its length's fraction of full speed, capped at full", () => {
+    const half = quiet();
+    run(half, { kind: "stick", dx: 0, dy: -0.5 }, 30); // 0.5 s at half of 260 units/s
+    expect(half.robot.x).toBeCloseTo(225, 6);
+    expect(half.robot.y).toBeCloseTo(400 - 65, 6);
+    const full = quiet();
+    run(full, { kind: "stick", dx: 0.6, dy: -0.8 }, 30);
+    expect(Math.hypot(full.robot.x - 225, full.robot.y - 400)).toBeCloseTo(130, 6);
+    const over = quiet();
+    run(over, { kind: "stick", dx: 3, dy: -4 }, 30); // length 5: still full speed
+    expect(over.robot.x).toBeCloseTo(full.robot.x, 6);
+    expect(over.robot.y).toBeCloseTo(full.robot.y, 6);
+    const still = quiet();
+    run(still, { kind: "stick", dx: 0, dy: 0 }, 30);
+    expect(still.robot).toEqual({ x: 225, y: 400 });
+  });
+
   test("the robot stays inside the arena, portrait and landscape", () => {
     for (const arena of [TALL, WIDE]) {
       const s = quiet(arena);
@@ -333,6 +350,9 @@ describe("auto-fire", () => {
     const walled = quiet();
     walled.robot.x = 450 - 14;
     expect(shotsInASecond(walled, () => ({ kind: "direction", dx: 1, dy: 0 }))).toBe(4);
+    // A gentle stick still counts as moving.
+    const slow = (i: number): Input => ({ kind: "stick", dx: i % 2 ? 0.2 : -0.2, dy: 0 });
+    expect(shotsInASecond(quiet(), slow)).toBe(Math.ceil(MOVING_FIRE_RATE / FIRE_INTERVAL));
   });
 });
 

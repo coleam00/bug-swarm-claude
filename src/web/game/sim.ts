@@ -44,7 +44,16 @@ import { createRng, nextRandom, type Rng } from "./rng";
 // A stress run (`createState`'s `stress`) is exempt: it refills the swarm every step, and it is
 // never submitted.
 
-export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
+/**
+ * The player's steering for one step. "direction": full speed that way, whatever its length (keys).
+ * "target": toward a point at full speed, stopping on it (mouse). "stick": a joystick (touch, see
+ * stick.ts), its length the fraction of full speed, clamped to 1.
+ */
+export type Input =
+  | { kind: "none" }
+  | { kind: "direction"; dx: number; dy: number }
+  | { kind: "target"; x: number; y: number }
+  | { kind: "stick"; dx: number; dy: number };
 
 export type Bug = { x: number; y: number; hp: number; kind: BugKind };
 export type Shot = {
@@ -241,6 +250,13 @@ function moveRobot(state: State, input: Input, dt: number): boolean {
     if (len > 0) {
       r.x += (input.dx / len) * reach;
       r.y += (input.dy / len) * reach;
+    }
+  } else if (input.kind === "stick") {
+    const len = Math.hypot(input.dx, input.dy);
+    if (len > 0) {
+      const m = Math.min(len, 1);
+      r.x += (input.dx / len) * m * reach;
+      r.y += (input.dy / len) * m * reach;
     }
   } else if (input.kind === "target") {
     const dx = input.x - r.x;
