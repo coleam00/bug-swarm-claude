@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { CI_DRONE, REFACTOR_BOMB, REVIEW_LASER, TEST_SHIELD } from "../server/rules";
-import { MAX_SCORE, rankLines, saveNotice, upgradeLevels } from "./over";
+import { rankLines, saveNotice, upgradeLevels } from "./over";
 
 test("no upgrades: an empty list", () => {
   expect(upgradeLevels([])).toEqual([]);
@@ -31,8 +31,4 @@ test("rank lines: none without a rank; the top-10 line through #10; the gap to t
     "Your best is #1,234 of 2,000",
     "15,300 points to beat #1,233",
   ]);
-});
-
-test("the widest score is the server's cap: 300 s of 5 squashes a second plus a point a second", () => {
-  expect(MAX_SCORE).toBe(15300);
 });

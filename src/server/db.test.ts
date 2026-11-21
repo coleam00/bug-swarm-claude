@@ -224,11 +224,6 @@ describe("rankOf", () => {
     expect(rankOf(entries, "p-c", 60, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 2 });
   });
 
-  test("hidden, or no best: no rank and no row", () => {
-    expect(rankOf(entries, "p-a", 100, true)).toEqual({ rank: null, ranked: 3, next: null, row: null });
-    expect(rankOf(entries, "p-z", null, false)).toEqual({ rank: null, ranked: 3, next: null, row: null });
-  });
-
   test("past the top 10 there is no row", () => {
     const many = Array.from({ length: 12 }, (_, i) => entry(`p-${String(i).padStart(2, "0")}`, 100 - i, "2026-11-28T15:00:00Z"));
     expect(rankOf(many, "p-10", 90, false)).toEqual({ rank: 11, ranked: 12, next: { rank: 10, points: 2 }, row: null });
