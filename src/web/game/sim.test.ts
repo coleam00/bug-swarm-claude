@@ -12,6 +12,7 @@ import {
   DRONE_FIRE_INTERVAL,
   DRONE_ORBIT,
   DRONE_RANGE,
+  DRONE_STILL_RATE,
   FIRE_INTERVAL,
   INVULN_SECONDS,
   LASER_PIERCE,
@@ -22,9 +23,12 @@ import {
   ROBOT_SPEED,
   SHIELD_CHARGES,
   SPAWN_MIN,
+  SPAWN_PLATEAU,
   SPAWN_START,
   STRESS_SECONDS,
   spawnInterval,
+  SURGE_FROM,
+  SURGE_SPEED,
 } from "./config";
 import { bombCharge, bombRing, choose, createState, droneCount, droneX, droneY, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
 
@@ -187,9 +191,10 @@ describe("bugs", () => {
   });
 
   test("the swarm ramps: spawns come faster as the run goes on, down to a floor", () => {
-    for (let t = 1; t <= 120; t++) expect(spawnInterval(t)).toBeLessThanOrEqual(spawnInterval(t - 1));
+    for (let t = 1; t <= 300; t++) expect(spawnInterval(t)).toBeLessThanOrEqual(spawnInterval(t - 1));
     expect(spawnInterval(0)).toBe(SPAWN_START);
     expect(spawnInterval(120)).toBe(SPAWN_MIN);
+    expect(spawnInterval(300)).toBe(SPAWN_MIN);
     for (let seed = 1; seed <= 5; seed++) {
       const s = createState(seed, TALL);
       const spawnedAt: number[] = [];
@@ -213,6 +218,29 @@ describe("bugs", () => {
     step(s, NONE, DT);
     const after = Math.hypot(s.bugs[0]!.x - s.robot.x, s.bugs[0]!.y - s.robot.y);
     expect(before - after).toBeCloseTo(BASE_BUG.speed * DT, 5);
+  });
+
+  test("the surge: past SURGE_FROM spawns keep coming faster, from the plateau to the last floor", () => {
+    expect(spawnInterval(SURGE_FROM)).toBe(SPAWN_PLATEAU);
+    expect(spawnInterval(SURGE_FROM + 10)).toBeLessThan(SPAWN_PLATEAU);
+    expect(spawnInterval(SURGE_FROM + 10)).toBeGreaterThan(SPAWN_MIN);
+  });
+
+  test("the surge: past SURGE_FROM every bug speeds up with run time, and not before", () => {
+    const FAST = BUG_KINDS.find((k) => k.id === "fast")!;
+    for (const [time, factor] of [
+      [10, 1],
+      [SURGE_FROM, 1],
+      [SURGE_FROM + 20, 1 + SURGE_SPEED * 20],
+    ] as const) {
+      const s = quiet();
+      s.nextChoiceAt = Infinity;
+      s.time = time;
+      s.bugs.push({ x: 225, y: 50, hp: 1000, kind: BASE_BUG }, { x: 225, y: 750, hp: 1000, kind: FAST });
+      step(s, NONE, DT);
+      expect(s.bugs[0]!.y).toBeCloseTo(50 + BASE_BUG.speed * factor * DT, 5);
+      expect(s.bugs[1]!.y).toBeCloseTo(750 - FAST.speed * factor * DT, 5);
+    }
   });
 });
 
@@ -811,10 +839,14 @@ describe("CI drone", () => {
     return s;
   }
 
-  /** Drone shots fired over `seconds` at a still bug in range that can't die, gun held. */
-  function droneShots(s: State, seconds: number): number {
+  /**
+   * Drone shots fired over `seconds` at a still bug in range that can't die, gun held. The robot
+   * moves (a step either way, never far) unless `still`: a drone reloads slower while it stands.
+   */
+  function droneShots(s: State, seconds: number, still = false): number {
     s.bugs.push({ x: s.robot.x, y: s.robot.y - 120, hp: 1e9, kind: STILL_BASE });
-    run(s, NONE, Math.round(seconds * 60));
+    const x = s.robot.x;
+    for (let i = 0; i < Math.round(seconds * 60); i++) advance(s, still ? NONE : { kind: "target", x: i % 2 ? x - 1 : x + 1, y: s.robot.y });
     return s.shots.filter((shot) => shot.drone).length + (1e9 - s.bugs[0]!.hp);
   }
 
@@ -864,6 +896,14 @@ describe("CI drone", () => {
     const double = droneShots(two, seconds);
     expect(single).toBeGreaterThanOrEqual(6);
     expect(Math.abs(double - 2 * single)).toBeLessThanOrEqual(1);
+  });
+
+  test("it reloads at DRONE_STILL_RATE while the robot stands still", () => {
+    const seconds = 6 * DRONE_FIRE_INTERVAL;
+    const moving = droneShots(withDrone(1), seconds);
+    const still = droneShots(withDrone(1), seconds, true);
+    expect(moving).toBeGreaterThanOrEqual(6);
+    expect(Math.abs(still - DRONE_STILL_RATE * moving)).toBeLessThanOrEqual(1);
   });
 
   test("its shots squash bugs in range; it holds fire at a bug out of range", () => {

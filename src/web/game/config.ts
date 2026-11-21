@@ -27,8 +27,9 @@ export const MAX_HITS = 3;
 /** A safety cap for the frame budget, not part of the difficulty: an idle run ends long before it. */
 export const MAX_BUGS = 200;
 // The spawn interval falls in two stages: quickly over the first 50 s or so, past what a robot
-// standing still can shoot down, then a little more slowly to its floor, so a robot that keeps
-// moving (and fires faster) is overrun only after a minute or two more.
+// standing still can shoot down, then a little more slowly to a plateau at about 57 s. From
+// SURGE_FROM the swarm surges: the interval keeps falling to its last floor and every bug speeds
+// up, so a robot that keeps moving is overrun after a minute or two more, whatever it picked.
 /** Seconds between spawns at the start of a run, */
 export const SPAWN_START = 0.62;
 /** and the seconds it loses for every second survived early on. */
@@ -37,12 +38,31 @@ export const SPAWN_RAMP = 0.007;
 export const SPAWN_LATE = 0.45;
 /** and the seconds it loses for every second survived. */
 export const SPAWN_LATE_RAMP = 0.0035;
-/** The shortest interval, reached at about 57 s. Its inverse bounds squashes a second (sim.ts). */
-export const SPAWN_MIN = 0.25;
+/** Where the two stages level off, at about 57 s. */
+export const SPAWN_PLATEAU = 0.25;
+/** The second of the run the surge starts: the spawn interval and the bugs' speed ramp again. */
+export const SURGE_FROM = 60;
+/** The surge: seconds the spawn interval loses for every second survived past SURGE_FROM. */
+export const SURGE_SPAWN_RAMP = 0.003;
+/** The last floor, reached at about 83 s. Its inverse bounds squashes a second (sim.ts). */
+export const SPAWN_MIN = 0.18;
+/** The surge: the part of its base speed every bug gains for every second survived past SURGE_FROM. */
+export const SURGE_SPEED = 0.035;
 
 /** Seconds between spawns `time` seconds into a run: shorter as the run goes on, down to a floor. */
 export function spawnInterval(time: number): number {
-  return Math.max(SPAWN_MIN, SPAWN_START - SPAWN_RAMP * time, SPAWN_LATE - SPAWN_LATE_RAMP * time);
+  const ramp = Math.max(SPAWN_PLATEAU, SPAWN_START - SPAWN_RAMP * time, SPAWN_LATE - SPAWN_LATE_RAMP * time);
+  return time <= SURGE_FROM ? ramp : Math.max(SPAWN_MIN, ramp - SURGE_SPAWN_RAMP * (time - SURGE_FROM));
+}
+
+/**
+ * How fast the swarm moves `time` seconds into a run, as a multiple of each kind's base speed.
+ * It applies to every bug on screen at once, by run time: 1 up to SURGE_FROM, then rising
+ * without end, so no build holds forever. The fast bug passes the robot's speed at about 81 s
+ * and the base bug at about 114 s.
+ */
+export function swarmSpeed(time: number): number {
+  return 1 + SURGE_SPEED * Math.max(0, time - SURGE_FROM);
 }
 
 /**
@@ -102,8 +122,18 @@ export const DRONE_ORBIT = 34;
 export const DRONE_SPIN = 3;
 /** CI drone: the drone's drawn radius. */
 export const DRONE_RADIUS = 5;
-/** CI drone: seconds between a drone's shots. It doesn't reload faster while the robot moves. */
+/**
+ * CI drone: seconds between a drone's shots while the robot moves. It doesn't reload faster for
+ * moving, but slower for standing still (DRONE_STILL_RATE).
+ */
 export const DRONE_FIRE_INTERVAL = 0.5;
+/**
+ * CI drone: the part of its reload rate a drone keeps while the robot stands still, the gun's
+ * "moving pays" rule (owner ruling on #18, an intended change to the drone: as built while the
+ * robot moves, a third as fast while it stands). Without it an idle player who is offered the
+ * drone outlasts 60 s (bun run pacing: idle up to 84 s).
+ */
+export const DRONE_STILL_RATE = 1 / 3;
 /** CI drone: a drone fires only at a bug within this distance of itself. */
 export const DRONE_RANGE = 220;
 /** CI drone: seconds a drone's shot flies, enough to cross its range at SHOT_SPEED. */
@@ -114,5 +144,5 @@ export const UPGRADES: Record<UpgradeId, { name: string; line: string }> = {
   [REVIEW_LASER]: { name: "Review laser", line: "Shots pierce through bugs" },
   [REFACTOR_BOMB]: { name: "Refactor bomb", line: "Clears the screen, recharges in 30 s (15 s if taken twice)" },
   [TEST_SHIELD]: { name: "Test shield", line: "Blocks the next hit" },
-  [CI_DRONE]: { name: "CI drone", line: "A drone orbits you and fires too" },
+  [CI_DRONE]: { name: "CI drone", line: "A drone orbits you and fires too, faster while you move" },
 };

@@ -16,6 +16,7 @@ import {
   DRONE_RANGE,
   DRONE_SHOT_LIFETIME,
   DRONE_SPIN,
+  DRONE_STILL_RATE,
   FIRE_INTERVAL,
   INVULN_SECONDS,
   LASER_PIERCE,
@@ -29,15 +30,17 @@ import {
   SHOT_SPEED,
   STRESS_SECONDS,
   spawnInterval,
+  swarmSpeed,
   type BugKind,
 } from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
 
 // The server's squash cap (MAX_SQUASHES_PER_SECOND in rules.ts): a squash takes a bug, so
 // squashes never exceed bugs spawned, and bugs spawn at most once every SPAWN_MIN seconds of run
-// time. Run time never runs ahead of the server's clock (a choice pauses the run, which only
-// adds real time), so a run squashes at most 1 / SPAWN_MIN bugs a second whatever shots
-// pierce, bombs clear and however many drones fire. A test in sim.test.ts holds that under the cap.
+// time (the interval's last floor, past the surge). Run time never runs ahead of the server's
+// clock (a choice pauses the run, which only adds real time), so a run squashes at most
+// 1 / SPAWN_MIN bugs a second whatever shots pierce, bombs clear and however many drones fire.
+// A test in sim.test.ts holds that under the cap.
 // A stress run (`createState`'s `stress`) is exempt: it refills the swarm every step, and it is
 // never submitted.
 
@@ -182,7 +185,7 @@ export function step(state: State, input: Input, dt: number): void {
   if (state.stress === 0) spawnBugs(state, dt);
   moveBugs(state, dt);
   fire(state, dt, moved);
-  fireDrones(state, dt);
+  fireDrones(state, dt, moved);
   moveShots(state, dt);
   hitBugs(state);
   hitRobot(state, dt);
@@ -303,8 +306,9 @@ export function pickKind(time: number, roll: number): BugKind {
 
 function moveBugs(state: State, dt: number): void {
   const { x: rx, y: ry } = state.robot;
+  const m = swarmSpeed(state.time);
   for (const b of state.bugs) {
-    const reach = b.kind.speed * dt;
+    const reach = b.kind.speed * m * dt;
     const dx = rx - b.x;
     const dy = ry - b.y;
     const dist = Math.hypot(dx, dy);
@@ -387,15 +391,16 @@ export function droneY(state: State, i: number): number {
 
 /**
  * CI drone: each drone turns on its orbit and, on its own reload, fires at the nearest bug
- * within DRONE_RANGE of itself. Its shots never pierce: the review laser is the gun's.
+ * within DRONE_RANGE of itself. Its shots never pierce: the review laser is the gun's. It
+ * reloads at DRONE_STILL_RATE while the robot stands still.
  */
-function fireDrones(state: State, dt: number): void {
+function fireDrones(state: State, dt: number, moved: boolean): void {
   const count = droneCount(state);
   if (count === 0) return;
   state.droneAngle = (state.droneAngle + DRONE_SPIN * dt) % TAU;
   const timers = state.droneTimers;
   for (let i = 0; i < count; i++) {
-    timers[i]! -= dt;
+    timers[i]! -= moved ? dt : dt * DRONE_STILL_RATE;
     if (timers[i]! > 0) continue;
     const x = droneX(state, i);
     const y = droneY(state, i);
