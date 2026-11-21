@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
+import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 import {
   CLIENT_TYPES,
   SERVER_TYPES,
@@ -17,6 +17,8 @@ const PLAYER = "0123456789abcdef0123456789abcdef";
 const hello = { t: "hello", v: 1, name: "Robo", team: "tabs", player: PLAYER, touch: false };
 const input = { t: "input", seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true };
 const s = (m: unknown) => JSON.stringify(m);
+/** A player row's down fields while not down. */
+const UP = { down: false, downTick: 0, reviver: 0, reviveTicks: 0 };
 
 /** A valid hello padded with an ignored field to exactly `bytes` UTF-8 bytes. */
 function helloOf(bytes: number, pad = "x"): string {
@@ -114,9 +116,14 @@ describe("parseClientMessage", () => {
 describe("server messages", () => {
   test("a snapshot is built from a shared part and your own numbers, and round-trips, quantized", () => {
     const players = [
-      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3, dashTicks: 0 },
-      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0, dashTicks: 2 },
-      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9, dashTicks: 1 },
+      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3, dashTicks: 0, ...UP },
+      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0, dashTicks: 2, ...UP },
+      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9, dashTicks: 1, ...UP },
+      // Down: went down in the step before the snapshot of tick 9 (so one tick of DOWN_S has gone),
+      // with player 1 holding 13 of 40 steps of revive progress.
+      { id: 4, x: 50, y: 50, vx: 0, vy: 0, aim: 0, alive: true, invulnTicks: 0, dashTicks: 0, down: true, downTick: 8, reviver: 1, reviveTicks: 13 },
+      // Down for its whole DOWN_S: never shows below 0.
+      { id: 5, x: 60, y: 50, vx: 0, vy: 0, aim: 0, alive: true, invulnTicks: 0, dashTicks: 0, down: true, downTick: 9 - DOWN_TICKS - 1, reviver: 0, reviveTicks: 0 },
     ];
     const src = {
       tick: 9,
@@ -132,7 +139,7 @@ describe("server messages", () => {
       },
     };
     const shared = encodeSnapshotShared(src, ["crawler"], 3);
-    const me = { sc: 120, ki: 9, st: 6, mu: 1.5, he: 0.4567, lk: 0 as const, hl: 2, al: 1 as const, dk: 2, dc: 28 };
+    const me = { sc: 120, ki: 9, st: 6, mu: 1.5, he: 0.4567, lk: 0 as const, hl: 2, al: 1 as const, dk: 2, dc: 28, dn: 0 as const };
     expect(shared.startsWith(`"p":${encodeSnapshotPlayers(players)},`)).toBe(true);
     const msg = parseServerMessage(encodeSnapshot(9, 4, me, shared));
     expect(msg).toEqual({
@@ -144,6 +151,8 @@ describe("server messages", () => {
         [1, 10.12, 20.5, -3, 0, 1.235, 1, 1, 0],
         [2, 2386, 14, 300, -300, -3.142, 1, 0, 1],
         [3, 5, 5, 0, 0, 0, 0, 0, 0],
+        [4, 50, 50, 0, 0, 0, 1, 0, 0],
+        [5, 60, 50, 0, 0, 0, 1, 0, 0],
       ],
       b: [[7, 0, 100, 200.1]],
       s: [[11, 1, 30.12, 20.5, 0.123]],
@@ -152,8 +161,16 @@ describe("server messages", () => {
         [9, 0, 700],
       ],
       k: [[6, 2, 50.1, 60, 15]],
+      d: [
+        [4, 9.95, 1, 0.33],
+        [5, 0, 0, 0],
+      ],
       w: 3,
     });
+    // Nobody down: an empty list; and `dn` in your numbers.
+    const none = encodeSnapshotShared({ ...src, players: players.slice(0, 3) }, ["crawler"], 3);
+    expect(none).toContain(`"d":[],"w":3`);
+    expect(parseServerMessage(encodeSnapshot(9, 4, { ...me, hl: 0, dn: 1 }, none))).toMatchObject({ me: { hl: 0, dn: 1 }, d: [] });
   });
 
   test("parseServerMessage accepts only known types", () => {

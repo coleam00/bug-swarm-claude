@@ -115,8 +115,9 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
     s: [],
     e: [],
     k: [],
+    d: [],
     w: 1,
-    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al, dk: 0, dc: 0 },
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al, dk: 0, dc: 0, dn: 0 },
   });
   t.update(snap(10, [[7, 0, 300, 300]]), 2);
   expect(t.obs.self).toEqual({ x: 500, y: 600, vx: 30, vy: -40, aim: 1.5, alive: true, heat: 0.42, locked: true, dashReady: true });

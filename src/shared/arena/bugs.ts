@@ -24,7 +24,7 @@ import {
   WORLD_W,
 } from "./constants";
 import { nextRandom } from "./rng";
-import { canBeHit, hitPlayer, type ArenaState, type Player } from "./sim";
+import { canAct, canBeHit, hitPlayer, type ArenaState, type Player } from "./sim";
 
 /**
  * A player's spawn rate, bugs per second, for a life `ageSeconds` old: SPAWN_BASE_PER_S rising by
@@ -57,7 +57,10 @@ function inAnyView(state: ArenaState, x: number, y: number): boolean {
   return false;
 }
 
-/** Tries to spawn one crawler for `p`, out of every alive player's view. False if no try landed. */
+/**
+ * Tries to spawn one crawler for `p`, out of the view of every player in a life (downed ones
+ * included: they still watch the screen). False if no try landed.
+ */
 function trySpawn(state: ArenaState, p: Player): boolean {
   for (let i = 0; i < SPAWN_TRIES; i++) {
     const a = nextRandom(state.rng) * Math.PI * 2;
@@ -71,12 +74,12 @@ function trySpawn(state: ArenaState, p: Player): boolean {
   return false;
 }
 
-/** The nearest alive player to (x, y) (ties: the earlier in the list), or null. */
-function nearestAlive(state: ArenaState, x: number, y: number): Player | null {
+/** The nearest player who is up (not down) to (x, y) (ties: the earlier in the list), or null. */
+function nearestTarget(state: ArenaState, x: number, y: number): Player | null {
   let best: Player | null = null;
   let bestD = Infinity;
   for (const p of state.players) {
-    if (!p.alive) continue;
+    if (!canAct(p)) continue;
     const dx = p.x - x;
     const dy = p.y - y;
     const d = dx * dx + dy * dy;
@@ -92,15 +95,17 @@ const TOUCH = PLAYER_RADIUS + CRAWLER_RADIUS;
 
 /**
  * One tick of bugs:
- * 1. each alive player's budget grows by their life's spawnRate times DT (capped at
- *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them while the arena has room;
- * 2. each bug chases the nearest alive player at CRAWLER_SPEED (no one alive: it stands);
- * 3. a bug touching a player who can be hit costs them a hit and is gone, with no score.
+ * 1. each player who is up has their budget grow by their life's spawnRate times DT (capped at
+ *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them while the arena has room; a
+ *    downed player's budget waits;
+ * 2. each bug chases the nearest player who is up at CRAWLER_SPEED (no one up: it stands);
+ * 3. a bug touching a player who is up and can be hit costs them a hit and is gone, with no
+ *    score; bugs pass over downed players.
  */
 export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
   for (const p of state.players) {
-    if (!p.alive) continue;
+    if (!canAct(p)) continue;
     const age = (state.tick - p.lifeStartTick) * DT;
     p.budget = Math.min(SPAWN_BUDGET_CAP, p.budget + spawnRate(age) * DT);
     while (p.budget >= 1 && bugs.length < MAX_BUGS_PER_ARENA) {
@@ -109,7 +114,7 @@ export function stepBugs(state: ArenaState): void {
     }
   }
   for (const b of bugs) {
-    const target = nearestAlive(state, b.x, b.y);
+    const target = nearestTarget(state, b.x, b.y);
     if (!target) {
       b.vx = 0;
       b.vy = 0;

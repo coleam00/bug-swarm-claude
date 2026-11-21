@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BARREL, DT, HEAT_LOCK_S, HITS_PER_LIFE, KILL_POINTS, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
+import { BARREL, DOWN_TICKS, DT, HEAT_LOCK_S, KILL_POINTS, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
 import { mult, segmentHit, shotTravelAt } from "./combat";
 import { leavePlayer } from "./sim";
 import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
@@ -133,9 +133,9 @@ describe("shots", () => {
     hold(p, { fire: true });
     stepQuiet(a);
     hold(p, {});
-    // The life ends on the next tick, with the shot still flying at the bug.
-    p.hits = HITS_PER_LIFE - 1;
-    placeBug(a, 1180, 1200);
+    // The life ends on the next tick (down, and bled out at once), with the shot still flying at the bug.
+    p.down = true;
+    p.downTick = a.tick - DOWN_TICKS;
     stepQuiet(a);
     expect(a.events.livesEnded).toEqual([{ id: p.id, score: 0, kills: 0, ticks: 1 }]);
     let kill = null;

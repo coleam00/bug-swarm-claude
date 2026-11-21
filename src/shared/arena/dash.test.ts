@@ -13,7 +13,7 @@ import {
   WORLD_W,
 } from "./constants";
 import { canBeHit, clampInput, createArena, joinPlayer, stepArena } from "./sim";
-import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
+import { arenaWith, bleedNow, hold, placeBug, stepQuiet } from "./testkit";
 
 const at = (x = 1200, y = 1200) => {
   const { a, ps } = arenaWith([x, y]);
@@ -165,6 +165,7 @@ describe("dash", () => {
     p.hits = HITS_PER_LIFE - 1;
     placeBug(a, 1210, 1200);
     stepQuiet(a);
+    bleedNow(a, p); // the third hit puts you down (#59); bleeding out ends the life
     expect(p.alive).toBe(false);
     hold(p, { dash: true });
     while (!p.alive) stepQuiet(a);
