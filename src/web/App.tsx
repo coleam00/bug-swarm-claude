@@ -339,7 +339,7 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
               </li>
             ))}
           </ul>
-          )}
+        )}
       </section>
     </main>
   );
