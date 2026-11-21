@@ -89,7 +89,7 @@ export const CRAWLER_HP = 1;
 /** Points for a kill, before the streak multiplier. */
 export const KILL_POINTS = 10;
 
-// ---- Spawning (#55). Pressure is personal: each alive player brings their own spawn budget. ----
+// ---- Spawning (#55). Pressure is personal: each player who is up brings their own spawn budget. ----
 
 /** A new life's spawn rate, bugs per second. */
 export const SPAWN_BASE_PER_S = 0.3;
