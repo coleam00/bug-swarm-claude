@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { TEAMS, isTeam, nameKey, type Team } from "./rules";
+import { TEAMS, isShownName, isTeam, nameKey, type Team } from "./rules";
 
 // Every event the app records, named once. The server writes them and `bun run stats` reads them,
 // so both import this list instead of typing the strings. A run is a run_started and, if it
@@ -147,10 +147,13 @@ export type RankEntry = { playerId: string; name: string; score: number; firstAt
 /**
  * Every player with a finished run, by best score, non-hidden names only, highest first. Ties go
  * to the player who finished a run first, then to the lower player id, so the order is total.
- * The top 10 is its first ten rows and a player's rank is their place in it.
+ * The top 10 is its first ten rows and a player's rank is their place in it. Stored names the
+ * word lists now refuse (isShownName) are left out too: those rows stay stored, they are only
+ * not shown, and they are dropped before the cut to 10, so a high-ranked one doesn't shorten
+ * the board.
  */
 export function ranking(db: Database): RankEntry[] {
-  return db
+  const rows = db
     .query(
       `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(e.at) AS firstAt
        FROM events e JOIN players p ON p.id = e.player_id
@@ -159,6 +162,7 @@ export function ranking(db: Database): RankEntry[] {
        ORDER BY score DESC, firstAt ASC, p.id ASC`,
     )
     .all(RUN_ENDED) as RankEntry[];
+  return rows.filter((r) => isShownName(r.name));
 }
 
 /** The first ten rows of the ranking: best score per player, one row each. */
@@ -215,20 +219,21 @@ export function rankOf(entries: RankEntry[], playerId: string, best: number | nu
 }
 
 /**
- * Each team's total: the sum of its finished runs' scores, leaving out hidden names. A run
- * counts for the team stamped on it, so runs from before teams count for nobody.
+ * Each team's total: the sum of its finished runs' scores, leaving out hidden names and stored
+ * names the word lists now refuse (isShownName). A run counts for the team stamped on it, so
+ * runs from before teams count for nobody.
  */
 export function teamTotals(db: Database): Record<Team, number> {
   const rows = db
     .query(
-      `SELECT e.team AS team, SUM(e.score) AS total
+      `SELECT e.team AS team, p.name AS name, SUM(e.score) AS total
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND e.team IS NOT NULL AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
-       GROUP BY e.team`,
+       GROUP BY e.team, p.id`,
     )
-    .all(RUN_ENDED) as { team: string; total: number | null }[];
+    .all(RUN_ENDED) as { team: string; name: string; total: number | null }[];
   const totals = Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>;
-  for (const r of rows) if (isTeam(r.team)) totals[r.team] = r.total ?? 0;
+  for (const r of rows) if (isTeam(r.team) && isShownName(r.name)) totals[r.team] += r.total ?? 0;
   return totals;
 }
 

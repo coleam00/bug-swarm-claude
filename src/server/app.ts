@@ -19,7 +19,7 @@ import {
   type TopRow,
 } from "./db";
 import { ASSET_PATHS, asset } from "./art";
-import { MAX_UPGRADES, checkName, checkScore, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
+import { MAX_UPGRADES, checkName, checkScore, isShownName, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
 
 /**
  * At most this many run starts per client IP per window (architecture.md, "Boundaries"). Sized
@@ -225,8 +225,8 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const id = c.req.query("player");
     if (id === undefined || !PLAYER_ID.test(id)) return c.json({ top });
     const p = findPlayer(db, id);
-    // As the ranking's filter compares: lower(name) against the stored keys.
-    const isHidden = p !== null && hidden.has(p.name.toLowerCase());
+    // As the ranking's filters compare: lower(name) against the stored keys, and the word lists.
+    const isHidden = p !== null && (hidden.has(p.name.toLowerCase()) || !isShownName(p.name));
     return c.json({ top, me: rankOf(entries, id, playerBest(db, id), isHidden) });
   });
   app.get("/api/teams", (c) => c.json({ teams: cachedTeams() }));

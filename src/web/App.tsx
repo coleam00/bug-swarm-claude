@@ -6,9 +6,12 @@ import { restartIn } from "./game/guard";
 import { HINT_MS, hintText, takeFirstRun } from "./hint";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { fmt, rankLines, saveNotice, upgradeLevels, type SaveState } from "./over";
-import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
+import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeRefusedName, type Player } from "./player";
 import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
+
+/** Shown on name entry when a name the player already had is refused now. */
+const NAME_NOW_REFUSED = "Your name isn't allowed any more. Pick another.";
 
 // The thin shell around the canvas: name and team entry, the run, and the game-over screen.
 // No menus between runs: game over -> any key, a fresh tap or "Play again" -> the next run.
@@ -34,6 +37,7 @@ const TOP_POLL_MS = 4000;
 
 export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
+  const [notice, setNotice] = useState<string | null>(() => (takeRefusedName() !== null ? NAME_NOW_REFUSED : null));
   const runs = useRef(1);
   const phaseFor = (run: number): Phase => (nextScreen(loadPlayer(), STRESS > 0) === "play" ? { kind: "playing", run } : { kind: "setup" });
   const [phase, setPhase] = useState<Phase>(() => phaseFor(1));
@@ -47,7 +51,9 @@ export function App() {
     return (
       <SetupScreen
         player={player}
+        notice={notice}
         onDone={(name, team) => {
+          setNotice(null);
           setPlayerName(name);
           setPlayer(setPlayerTeam(team));
           play();
@@ -60,7 +66,10 @@ export function App() {
       <Game
         key={phase.run}
         player={player}
-        onNameRefused={() => setPlayer(setPlayerName(null))}
+        onNameRefused={() => {
+          setNotice(NAME_NOW_REFUSED);
+          setPlayer(setPlayerName(null));
+        }}
         // The save settles after the over screen shows; drop it if the player has moved on.
         onOver={(over) => setPhase((p) => (p.kind !== "setup" && p.run === phase.run ? { kind: "over", run: phase.run, over } : p))}
       />
@@ -74,10 +83,11 @@ export function App() {
  * a name, so they see only the team buttons, once; a tap picks and plays. A name the server
  * refused comes back here with the team kept.
  */
-function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string, team: Team) => void }) {
+function SetupScreen(props: { player: Player; notice: string | null; onDone: (name: string, team: Team) => void }) {
+  const { player, onDone } = props;
   const [value, setValue] = useState("");
   const [team, setTeam] = useState<Team | null>(player.team);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(props.notice);
   const known = player.name;
 
   if (known !== null) {
@@ -96,9 +106,11 @@ function SetupScreen({ player, onDone }: { player: Player; onDone: (name: string
       return setMessage(
         checked.reason === "blocked"
           ? "That name isn't allowed. Try another."
-          : checked.reason === "length"
-            ? `Use 2 to ${NAME_MAX} characters.`
-            : "Use letters, numbers, spaces, - and _ only.",
+          : checked.reason === "reserved"
+            ? "That name is reserved"
+            : checked.reason === "length"
+              ? `Use 2 to ${NAME_MAX} characters.`
+              : "Use letters, numbers, spaces, - and _ only.",
       );
     }
     if (!team) return setMessage("Pick a team.");

@@ -379,6 +379,16 @@ describe("top 10 and best", () => {
     expect((await standing(a, "player-0002")).me).toEqual({ rank: 1, ranked: 1, next: null, row: 0 });
   });
 
+  test("a stored name the word lists now refuse has no rank and doesn't count toward anyone's", async () => {
+    const a = app();
+    await play(a, "player-0001", "Old Name", 100);
+    await play(a, "player-0002", "Good", 50);
+    db.query("UPDATE players SET name = ? WHERE id = ?").run("fuuuck", "player-0001"); // stored before the list grew
+    clock += TOP_CACHE_MS;
+    expect((await standing(a, "player-0001")).me).toEqual({ rank: null, ranked: 1, next: null, row: null });
+    expect((await standing(a, "player-0002")).me).toEqual({ rank: 1, ranked: 1, next: null, row: 0 });
+  });
+
   test("no finished run, or an id the server never saw: no rank, the ranked count still given", async () => {
     const a = app();
     await play(a, "player-0001", "Ada", 100);
@@ -422,7 +432,7 @@ describe("top 10 and best", () => {
     db.transaction(() => {
       for (let i = 0; i < 500; i++) {
         const id = `player-${String(i).padStart(4, "0")}`;
-        upsertPlayer(db, id, `P${i}`, TABS, new Date(clock));
+        upsertPlayer(db, id, `Player ${i}`, TABS, new Date(clock)); // not "P155", which reads "piss"
         recordRunEnded(db, { runId: `run-${i}`, playerId: id, score: i, squashes: 0, seconds: 0, touch: false, upgrades: [], team: TABS }, new Date(clock + i));
       }
     })();
