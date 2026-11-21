@@ -75,8 +75,6 @@ export type ArenaSocketOptions = {
 };
 
 export type ArenaSockets = WebSocketHandler<SocketData> & {
-  /** Stops the hidden-name sweep (the server is stopping). */
-  stop(): void;
   /**
    * The server is stopping: sends every open socket `error restarting` and closes it, and refuses
    * every later one the same way. Call it after Rooms.endAll: it does not leave the arenas.
@@ -140,7 +138,6 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
   };
 
   return {
-    stop: stopSweep,
     restart() {
       restarting = true;
       stopSweep();
