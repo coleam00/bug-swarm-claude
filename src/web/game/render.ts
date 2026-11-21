@@ -4,6 +4,7 @@
 import type { Arena } from "./arena";
 import type { Changes } from "./fx/changes";
 import type { Particles } from "./fx/particles";
+import { POP_SECONDS, type Pops } from "./fx/pop";
 import type { Shake } from "./fx/shake";
 import { SQUASH_LABEL, TEXT_SECONDS, type Texts } from "./fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "./fx/trail";
@@ -16,9 +17,13 @@ import {
   BOMB_RING_WIDTH,
   BUG_LOOKS,
   LETTERBOX,
+  POP_GROWTH,
   ROBOT_GLOW,
   GLOW_WHITE,
   SHOT_CORE,
+  SHIELD_COLOUR,
+  SHIELD_INNER,
+  SHIELD_RADIUS,
   SHOT_GLOW,
   TEXT_FILL,
   TEXT_FONT,
@@ -30,7 +35,7 @@ import { LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
 import { bombCharge, bombRing, score, type State } from "./sim";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
-export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake };
+export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake; pops: Pops };
 
 const HUD_FONT = "bold 28px system-ui, sans-serif";
 const TAU = Math.PI * 2;
@@ -199,6 +204,40 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     ctx.drawImage(robotGlow, rx - core, ry - core, core * 2, core * 2);
     const hot = ROBOT_RADIUS * 0.45;
     ctx.drawImage(s.glows[GLOW_WHITE]!, rx - hot, ry - hot, hot * 2, hot * 2);
+
+    // The test shield: a bubble while it holds a charge (a second ring at 2), and a ring that
+    // grows and fades where it popped.
+    ctx.strokeStyle = SHIELD_COLOUR;
+    ctx.fillStyle = SHIELD_COLOUR;
+    if (state.shield > 0) {
+      ctx.globalAlpha = 0.08;
+      ctx.beginPath();
+      ctx.arc(rx, ry, SHIELD_RADIUS, 0, TAU);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.55 + 0.15 * Math.sin(t * 4);
+      ctx.stroke();
+      if (state.shield > 1) {
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(rx, ry, SHIELD_RADIUS * SHIELD_INNER, 0, TAU);
+        ctx.stroke();
+      }
+    }
+    const pops = fx.pops;
+    if (pops.live > 0) {
+      ctx.lineWidth = 3;
+      for (let i = 0; i < pops.life.length; i++) {
+        const life = pops.life[i]!;
+        if (life <= 0) continue;
+        const f = 1 - life / POP_SECONDS;
+        ctx.globalAlpha = 1 - f;
+        ctx.beginPath();
+        ctx.arc(pops.x[i]!, pops.y[i]!, SHIELD_RADIUS * (1 + (POP_GROWTH - 1) * f), 0, TAU);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
 
     // Floating "+10"s, in screen pixels so they stay big on a phone.

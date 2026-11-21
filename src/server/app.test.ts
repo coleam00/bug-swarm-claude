@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { createApp } from "./app";
 import { RUN_ENDED, computeStats, hideName, openDb } from "./db";
-import { MAX_UPGRADES, UPGRADE_IDS } from "./rules";
+import { MAX_UPGRADES, REVIEW_LASER, TEST_SHIELD, UPGRADE_IDS } from "./rules";
 
 let dir: string;
 let db: Database;

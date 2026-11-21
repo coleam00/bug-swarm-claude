@@ -1,5 +1,5 @@
 // How the game looks: every colour and size the renderer uses, in one place. Pure data.
-import { BUG_KINDS } from "./config";
+import { BUG_KINDS, ROBOT_RADIUS } from "./config";
 import type { Bug } from "./sim";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
@@ -31,6 +31,13 @@ export const BOMB_RING_GLOW_WIDTH = 22;
 export const BOMB_CHARGE = "rgba(232, 121, 249, 0.85)";
 export const BOMB_CHARGE_RADIUS = 21;
 export const BOMB_CHARGE_WIDTH = 2.5;
+/** The test shield's bubble: one colour, faded with globalAlpha so no string is built per frame. */
+export const SHIELD_COLOUR = "#7dd3fc";
+/** The bubble's radius, in arena units; a second ring inside it at 2 charges. */
+export const SHIELD_RADIUS = ROBOT_RADIUS * 1.9;
+export const SHIELD_INNER = 0.78;
+/** How far a popping bubble grows, as a multiple of its radius. */
+export const POP_GROWTH = 1.8;
 
 export const TEXT_FONT = "bold 26px system-ui, sans-serif";
 export const TEXT_FILL = "#ffffff";
