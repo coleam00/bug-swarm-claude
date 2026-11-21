@@ -1,8 +1,16 @@
-// The browser side of the game: the frame loop, input and drawing. The rules live in sim.ts;
-// this file only feeds it input and real time, and draws its state.
+// The browser side of the game: the frame loop and input. The rules live in sim.ts; this file
+// feeds it input and real time, turns what changed into effects (fx/), and has render.ts draw.
 import { arenaForViewport, type Arena } from "./arena";
+import { createChanges, detectChanges } from "./fx/changes";
+import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "./fx/particles";
+import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
+import { createTexts, spawnText, updateTexts } from "./fx/text";
+import { createTrail, updateTrail } from "./fx/trail";
 import { STEERING_KEYS, keysToInput } from "./keys";
-import { BUG_RADIUS, MAX_HITS, ROBOT_RADIUS, createState, score, step, type Input, type State } from "./sim";
+import { BUG_LOOKS, bugLookId } from "./look";
+import { createRenderer, type Fx } from "./render";
+import { createRng } from "./rng";
+import { createState, score, step, type Bug, type Input, type State } from "./sim";
 
 export type RunResult = { score: number; squashes: number; seconds: number; touch: boolean };
 
@@ -10,7 +18,8 @@ const STEP = 1 / 60;
 /** A frame longer than this (a hitch, a hidden tab) only advances the run this far. */
 const MAX_FRAME_SECONDS = 0.25;
 const MAX_STEPS_PER_FRAME = 8;
-const HUD_FONT = "bold 28px system-ui, sans-serif";
+/** Seeds fx's own generator. Effects never draw from the simulation's, so they can't change a run. */
+const FX_SEED = 0x5eed;
 const NONE: Input = { kind: "none" };
 
 /**
@@ -23,6 +32,7 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
   if (!ctx) throw new Error("no 2d canvas");
   const arena: Arena = arenaForViewport(window.innerWidth, window.innerHeight);
   const state: State = createState(Math.floor(Math.random() * 2 ** 32), arena);
+  const renderer = createRenderer(ctx, arena);
 
   // Layout: the arena scaled to fit the canvas and centered (letterboxed), in CSS px.
   let dpr = 1;
@@ -38,6 +48,7 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
     scale = Math.min(w / arena.w, h / arena.h);
     offX = (w - arena.w * scale) / 2;
     offY = (h - arena.h * scale) / 2;
+    renderer.resize(dpr, scale, offX, offY);
   };
   resize();
 
@@ -99,59 +110,20 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
   window.addEventListener("blur", onBlur);
   window.addEventListener("resize", resize);
 
-  // HUD text is rebuilt only when a value changes.
-  let hudScore = -1;
-  let hudHits = -1;
-  let hudSecond = -1;
-  let scoreText = "";
-  let hitsText = "";
-  let timeText = "";
-
-  const draw = () => {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#05070d";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offX, dpr * offY);
-    ctx.fillStyle = "#111827";
-    ctx.fillRect(0, 0, arena.w, arena.h);
-
-    ctx.fillStyle = "#f97316";
-    ctx.beginPath();
-    for (const b of state.bugs) {
-      ctx.moveTo(b.x + BUG_RADIUS, b.y);
-      ctx.arc(b.x, b.y, BUG_RADIUS, 0, Math.PI * 2);
-    }
-    ctx.fill();
-
-    ctx.fillStyle = "#fde047";
-    for (const s of state.shots) ctx.fillRect(s.x - 3, s.y - 3, 6, 6);
-
-    const flashing = state.invuln > 0 && Math.floor(state.invuln * 12) % 2 === 0;
-    ctx.fillStyle = flashing ? "#ffffff" : "#22d3ee";
-    ctx.beginPath();
-    ctx.arc(state.robot.x, state.robot.y, ROBOT_RADIUS, 0, Math.PI * 2);
-    ctx.fill();
-
-    const sc = score(state);
-    const hitsLeft = Math.max(0, MAX_HITS - state.hits);
-    const second = Math.floor(state.time);
-    if (sc !== hudScore) scoreText = `Score ${(hudScore = sc)}`;
-    if (hitsLeft !== hudHits) hitsText = "♥".repeat((hudHits = hitsLeft)) || "-";
-    if (second !== hudSecond) timeText = `${(hudSecond = second)}s`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.font = HUD_FONT;
-    ctx.textBaseline = "top";
-    ctx.fillStyle = "#f8fafc";
-    const w = canvas.width / dpr;
-    ctx.textAlign = "left";
-    ctx.fillText(scoreText, 16, 16);
-    ctx.textAlign = "center";
-    ctx.fillText(timeText, w / 2, 16);
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#f43f5e";
-    ctx.fillText(hitsText, w - 16, 16);
+  // Effects, all created once. The callbacks are made here so the frame loop allocates nothing.
+  const fxRng = createRng(FX_SEED);
+  const fx: Fx = {
+    changes: createChanges(fxRng),
+    particles: createParticles(),
+    texts: createTexts(),
+    trail: createTrail(),
+    shake: createShake(),
   };
+  const onSquash = (b: Bug) => {
+    spawnBurst(fx.particles, b.x, b.y, BURST_COUNT, BUG_LOOKS[bugLookId(b)].glow, fxRng);
+    spawnText(fx.texts, b.x, b.y);
+  };
+  const onHit = () => kick(fx.shake, HIT_SHAKE);
 
   let raf = 0;
   let last: number | null = null;
@@ -169,7 +141,12 @@ export function startGame(canvas: HTMLCanvasElement, opts: { onOver: (result: Ru
       steps++;
     }
     if (steps === MAX_STEPS_PER_FRAME) acc = 0; // fell behind: drop the rest rather than spiral
-    draw();
+    detectChanges(fx.changes, state, onSquash, onHit);
+    updateTrail(fx.trail, state.robot.x, state.robot.y, delta);
+    updateParticles(fx.particles, delta);
+    updateTexts(fx.texts, delta);
+    updateShake(fx.shake, delta, fxRng);
+    renderer.draw(state, fx);
     if (state.over) {
       stop();
       opts.onOver({ score: score(state), squashes: state.squashes, seconds: state.time, touch });
