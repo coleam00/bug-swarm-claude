@@ -12,6 +12,11 @@ import {
   GRID_SPACING,
   PALETTE,
   ROBOT_BODY,
+  ROBOT_MARK,
+  ROBOT_MARK_OUTLINE,
+  ROBOT_MARK_OUTLINE_WIDTH,
+  ROBOT_MARK_RADIUS,
+  ROBOT_MARK_WIDTH,
   ROBOT_RIM,
   VIGNETTE,
   type BugLook,
@@ -25,6 +30,8 @@ export const LEG_FRAMES = 4;
 export const BUG_SPRITE_HALF = 1.9;
 /** The robot sprite's half-size, in multiples of ROBOT_RADIUS (room for the halo). */
 export const ROBOT_SPRITE_HALF = 1.8;
+/** The robot marker sprite's half-size, in multiples of ROBOT_RADIUS: the ring and its outline. */
+export const ROBOT_MARK_HALF = (ROBOT_MARK_RADIUS + ROBOT_MARK_OUTLINE_WIDTH) / ROBOT_RADIUS;
 const GLOW_PX = 64;
 
 export type Sprites = {
@@ -35,6 +42,8 @@ export type Sprites = {
   bugs: Record<BugLookId, HTMLCanvasElement[]>;
   robot: HTMLCanvasElement;
   robotFlash: HTMLCanvasElement;
+  /** The ring drawn over the robot so it is found in a full swarm. */
+  robotMark: HTMLCanvasElement;
 };
 
 /** Builds every sprite for an arena drawn at `pxPerUnit` device pixels per arena unit. */
@@ -51,6 +60,7 @@ export function buildSprites(arena: Arena, pxPerUnit: number): Sprites {
     bugs,
     robot: robotSprite(pxPerUnit, false),
     robotFlash: robotSprite(pxPerUnit, true),
+    robotMark: robotMarkSprite(pxPerUnit),
   };
 }
 
@@ -224,6 +234,23 @@ function robotSprite(ppu: number, flash: boolean): HTMLCanvasElement {
   ctx.beginPath();
   ctx.arc(0, 0, R * 0.55, 0, Math.PI * 2);
   ctx.fill();
+  return c;
+}
+
+/** A white ring on a darker, wider one, so it reads over bugs, glows and the bare floor alike. */
+function robotMarkSprite(ppu: number): HTMLCanvasElement {
+  const half = ROBOT_RADIUS * ROBOT_MARK_HALF;
+  const [c, ctx] = canvas(half * 2 * ppu, half * 2 * ppu);
+  ctx.scale(c.width / (half * 2), c.height / (half * 2));
+  ctx.translate(half, half);
+  ctx.beginPath();
+  ctx.arc(0, 0, ROBOT_MARK_RADIUS, 0, Math.PI * 2);
+  ctx.lineWidth = ROBOT_MARK_OUTLINE_WIDTH;
+  ctx.strokeStyle = ROBOT_MARK_OUTLINE;
+  ctx.stroke();
+  ctx.lineWidth = ROBOT_MARK_WIDTH;
+  ctx.strokeStyle = ROBOT_MARK;
+  ctx.stroke();
   return c;
 }
 

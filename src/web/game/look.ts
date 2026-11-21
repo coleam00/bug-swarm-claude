@@ -22,27 +22,51 @@ export const VIGNETTE = "rgba(0, 0, 0, 0.6)";
 export const ROBOT_BODY = "#1e293b";
 export const ROBOT_RIM = "#22d3ee";
 export const ROBOT_GLOW = GLOW_CYAN;
+/**
+ * The "you are here" marker, drawn above everything in the arena so the robot is found in a full
+ * swarm and on a stream shown small: a white ring on a dark outline, in a soft cyan halo. White so
+ * it reads as neither the shield (sky blue) nor the robot's rim (cyan).
+ */
+export const ROBOT_MARK = "#ffffff";
+export const ROBOT_MARK_OUTLINE = "#05070d";
+export const ROBOT_MARK_RADIUS = ROBOT_RADIUS * 1.25;
+export const ROBOT_MARK_WIDTH = 2.5;
+export const ROBOT_MARK_OUTLINE_WIDTH = 5;
+export const ROBOT_HALO_RADIUS = ROBOT_RADIUS * 3.2;
+export const ROBOT_HALO_ALPHA = 0.55;
 export const SHOT_CORE = "#fffbe6";
 export const SHOT_GLOW = GLOW_SHOT;
 /** The refactor bomb's ring: a bright stroke, drawn again wide and faint for its glow. */
 export const BOMB_RING = "#e879f9";
-export const BOMB_RING_WIDTH = 6;
-export const BOMB_RING_GLOW_WIDTH = 22;
-/** The bomb's charge indicator: an arc around the robot that fills while it recharges. */
+export const BOMB_RING_WIDTH = 8;
+export const BOMB_RING_GLOW_WIDTH = 30;
+/** The bomb's charge indicator: an arc around the robot, just outside its marker, that fills while it recharges. */
 export const BOMB_CHARGE = "rgba(232, 121, 249, 0.85)";
-export const BOMB_CHARGE_RADIUS = 21;
+export const BOMB_CHARGE_RADIUS = 22;
 export const BOMB_CHARGE_WIDTH = 2.5;
 /** The test shield's bubble: one colour, faded with globalAlpha so no string is built per frame. */
 export const SHIELD_COLOUR = "#7dd3fc";
 /** The bubble's radius, in arena units; a second ring inside it at 2 charges. */
 export const SHIELD_RADIUS = ROBOT_RADIUS * 1.9;
 export const SHIELD_INNER = 0.78;
+/** The bubble: a faint fill, a wide faint stroke for its glow, then a bright edge (and inner ring). */
+export const SHIELD_FILL_ALPHA = 0.16;
+export const SHIELD_GLOW_WIDTH = 9;
+export const SHIELD_GLOW_ALPHA = 0.22;
+export const SHIELD_WIDTH = 3;
+export const SHIELD_INNER_WIDTH = 2.5;
+/** A blocked hit: the bubble flashes filled at this alpha, fading as its ring grows. */
+export const SHIELD_FLASH_ALPHA = 0.45;
+export const POP_WIDTH = 4;
 /** How far a popping bubble grows, as a multiple of its radius. */
 export const POP_GROWTH = 1.8;
-/** The CI drone: a small dark body in its own violet glow, and violet shots. */
+/** The CI drone: a dark body with a violet rim in its own violet glow, and violet shots. */
 export const DRONE_BODY = "#1e1b2e";
+export const DRONE_RIM = "#c084fc";
+export const DRONE_RIM_WIDTH = 2;
 export const DRONE_GLOW = GLOW_DRONE;
-export const DRONE_SHOT_CORE = "#f3e8ff";
+/** Saturated, so a drone's shot never reads as the gun's near-white one. */
+export const DRONE_SHOT_CORE = "#c084fc";
 
 export const TEXT_FONT = "bold 26px system-ui, sans-serif";
 export const TEXT_FILL = "#ffffff";

@@ -6,7 +6,7 @@ import type { Changes } from "./fx/changes";
 import type { Particles } from "./fx/particles";
 import { POP_SECONDS, type Pops } from "./fx/pop";
 import type { Shake } from "./fx/shake";
-import { SQUASH_LABEL, TEXT_SECONDS, type Texts } from "./fx/text";
+import { TEXT_LABELS, TEXT_SECONDS, type Texts } from "./fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "./fx/trail";
 import {
   BOMB_CHARGE,
@@ -18,15 +18,26 @@ import {
   BUG_LOOKS,
   DRONE_BODY,
   DRONE_GLOW,
+  DRONE_RIM,
+  DRONE_RIM_WIDTH,
   DRONE_SHOT_CORE,
   LETTERBOX,
   POP_GROWTH,
+  POP_WIDTH,
   ROBOT_GLOW,
+  ROBOT_HALO_ALPHA,
+  ROBOT_HALO_RADIUS,
   GLOW_WHITE,
   SHOT_CORE,
   SHIELD_COLOUR,
+  SHIELD_FILL_ALPHA,
+  SHIELD_FLASH_ALPHA,
+  SHIELD_GLOW_ALPHA,
+  SHIELD_GLOW_WIDTH,
   SHIELD_INNER,
+  SHIELD_INNER_WIDTH,
   SHIELD_RADIUS,
+  SHIELD_WIDTH,
   SHOT_GLOW,
   STICK_KNOB,
   STICK_KNOB_RADIUS,
@@ -41,7 +52,7 @@ import { REFACTOR_BOMB, REVIEW_LASER } from "../../server/rules";
 import { DRONE_RADIUS, LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
 import { bombCharge, bombRing, droneCount, droneX, droneY, score, type State } from "./sim";
 import { STICK_RANGE, stickKnob, type Stick } from "./stick";
-import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
+import { BUG_SPRITE_HALF, ROBOT_MARK_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake; pops: Pops };
 
@@ -60,8 +71,8 @@ const SHOT_GLOW_LENGTH = 34;
 const SHOT_GLOW_WIDTH = 14;
 const SHOT_CORE_LENGTH = 18;
 const SHOT_CORE_WIDTH = 2.4;
-/** A drone's shot is a smaller streak than the gun's, and the laser never lengthens it. */
-const DRONE_SHOT_SCALE = 0.6;
+/** A drone's shot is a shorter streak than the gun's, and the laser never lengthens it. */
+const DRONE_SHOT_SCALE = 0.8;
 
 export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
   const canvas = ctx.canvas;
@@ -156,7 +167,7 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     }
 
     // Shots: a glow stretched along the flight, with a bright core. The review laser draws the
-    // gun's longer, and its top level a little wider; a drone's are small and violet.
+    // gun's longer, and its top level a little wider; a drone's are shorter and violet.
     ctx.globalCompositeOperation = "lighter";
     const shotGlow = s.glows[SHOT_GLOW]!;
     const droneGlow = s.glows[DRONE_GLOW]!;
@@ -199,18 +210,20 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     }
 
     // The refactor bomb: a ring sweeping out from the robot to the farthest corner as it goes
-    // off, and while it recharges an arc around the robot that fills clockwise.
+    // off, bright and full width most of the way and fading only near the end, and while it
+    // recharges an arc around the robot that fills clockwise.
     const ring = bombRing(state);
     if (ring >= 0) {
       const far = Math.hypot(Math.max(rx, arena.w - rx), Math.max(ry, arena.h - ry));
+      const fade = 1 - ring * ring;
       ctx.strokeStyle = BOMB_RING;
       ctx.beginPath();
       ctx.arc(rx, ry, ring * far, 0, TAU);
-      ctx.globalAlpha = 0.25 * (1 - ring);
-      ctx.lineWidth = BOMB_RING_GLOW_WIDTH * (1 - 0.5 * ring);
+      ctx.globalAlpha = 0.35 * fade;
+      ctx.lineWidth = BOMB_RING_GLOW_WIDTH;
       ctx.stroke();
-      ctx.globalAlpha = 1 - ring;
-      ctx.lineWidth = BOMB_RING_WIDTH * (1 - 0.5 * ring);
+      ctx.globalAlpha = fade;
+      ctx.lineWidth = BOMB_RING_WIDTH;
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -223,47 +236,43 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
       ctx.stroke();
     }
 
-    // The robot: body, white while flashing after a hit, then its glowing core.
-    ctx.globalCompositeOperation = "source-over";
-    const flashing = state.invuln > 0 && Math.floor(state.invuln * 12) % 2 === 0;
-    const rh = ROBOT_RADIUS * ROBOT_SPRITE_HALF;
-    ctx.drawImage(flashing ? s.robotFlash : s.robot, rx - rh, ry - rh, rh * 2, rh * 2);
     ctx.globalCompositeOperation = "lighter";
-    const core = ROBOT_RADIUS * (1.05 + 0.12 * Math.sin(t * 8));
-    ctx.drawImage(robotGlow, rx - core, ry - core, core * 2, core * 2);
-    const hot = ROBOT_RADIUS * 0.45;
-    ctx.drawImage(s.glows[GLOW_WHITE]!, rx - hot, ry - hot, hot * 2, hot * 2);
-
-    // CI drones on their orbit: a small dark body, then its own pulsing violet glow.
+    // CI drones on their orbit: a dark body with a violet rim, then its own pulsing violet glow.
     const drones = droneCount(state);
     if (drones > 0) {
-      const glow = DRONE_RADIUS * (2.2 + 0.25 * Math.sin(t * 10));
+      const glow = DRONE_RADIUS * (3.2 + 0.3 * Math.sin(t * 10));
       ctx.globalCompositeOperation = "source-over";
       ctx.fillStyle = DRONE_BODY;
+      ctx.strokeStyle = DRONE_RIM;
+      ctx.lineWidth = DRONE_RIM_WIDTH;
       for (let i = 0; i < drones; i++) {
         ctx.beginPath();
         ctx.arc(droneX(state, i), droneY(state, i), DRONE_RADIUS, 0, TAU);
         ctx.fill();
+        ctx.stroke();
       }
       ctx.globalCompositeOperation = "lighter";
       for (let i = 0; i < drones; i++) {
         ctx.drawImage(droneGlow, droneX(state, i) - glow, droneY(state, i) - glow, glow * 2, glow * 2);
       }
     }
-    // The test shield: a bubble while it holds a charge (a second ring at 2), and a ring that
-    // grows and fades where it popped.
+    // The test shield: a glowing bubble while it holds a charge (a second ring at 2), and where
+    // it blocked a hit a filled flash and a ring that grows and fades.
     ctx.strokeStyle = SHIELD_COLOUR;
     ctx.fillStyle = SHIELD_COLOUR;
     if (state.shield > 0) {
-      ctx.globalAlpha = 0.08;
+      ctx.globalAlpha = SHIELD_FILL_ALPHA;
       ctx.beginPath();
       ctx.arc(rx, ry, SHIELD_RADIUS, 0, TAU);
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.55 + 0.15 * Math.sin(t * 4);
+      ctx.globalAlpha = SHIELD_GLOW_ALPHA;
+      ctx.lineWidth = SHIELD_GLOW_WIDTH;
+      ctx.stroke();
+      ctx.lineWidth = SHIELD_WIDTH;
+      ctx.globalAlpha = 0.8 + 0.15 * Math.sin(t * 4);
       ctx.stroke();
       if (state.shield > 1) {
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = SHIELD_INNER_WIDTH;
         ctx.beginPath();
         ctx.arc(rx, ry, SHIELD_RADIUS * SHIELD_INNER, 0, TAU);
         ctx.stroke();
@@ -271,11 +280,15 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     }
     const pops = fx.pops;
     if (pops.live > 0) {
-      ctx.lineWidth = 3;
+      ctx.lineWidth = POP_WIDTH;
       for (let i = 0; i < pops.life.length; i++) {
         const life = pops.life[i]!;
         if (life <= 0) continue;
         const f = 1 - life / POP_SECONDS;
+        ctx.globalAlpha = SHIELD_FLASH_ALPHA * (1 - f);
+        ctx.beginPath();
+        ctx.arc(pops.x[i]!, pops.y[i]!, SHIELD_RADIUS, 0, TAU);
+        ctx.fill();
         ctx.globalAlpha = 1 - f;
         ctx.beginPath();
         ctx.arc(pops.x[i]!, pops.y[i]!, SHIELD_RADIUS * (1 + (POP_GROWTH - 1) * f), 0, TAU);
@@ -285,7 +298,7 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
 
-    // Floating "+10"s, in screen pixels so they stay big on a phone.
+    // Floating "+10"s (merged: "+30"), in screen pixels so they stay big on a phone.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const texts = fx.texts;
     if (texts.live > 0) {
@@ -302,11 +315,34 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
         ctx.globalAlpha = Math.min(1, (2 * life) / TEXT_SECONDS);
         const x = offX + (texts.x[i]! + fx.shake.offsetX) * scale;
         const y = offY + (texts.y[i]! + fx.shake.offsetY) * scale;
-        ctx.strokeText(SQUASH_LABEL, x, y);
-        ctx.fillText(SQUASH_LABEL, x, y);
+        const label = TEXT_LABELS[texts.count[i]!]!;
+        ctx.strokeText(label, x, y);
+        ctx.fillText(label, x, y);
       }
       ctx.globalAlpha = 1;
     }
+
+    // The robot, last in the arena so nothing covers it: a soft halo, its body (white while
+    // flashing after a hit), its glowing core, then the marker ring. The halo and ring never
+    // blink, so the player keeps sight of it through a hit.
+    ctx.setTransform(k, 0, 0, k, ox, oy);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = ROBOT_HALO_ALPHA;
+    ctx.drawImage(robotGlow, rx - ROBOT_HALO_RADIUS, ry - ROBOT_HALO_RADIUS, ROBOT_HALO_RADIUS * 2, ROBOT_HALO_RADIUS * 2);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    const flashing = state.invuln > 0 && Math.floor(state.invuln * 12) % 2 === 0;
+    const rh = ROBOT_RADIUS * ROBOT_SPRITE_HALF;
+    ctx.drawImage(flashing ? s.robotFlash : s.robot, rx - rh, ry - rh, rh * 2, rh * 2);
+    ctx.globalCompositeOperation = "lighter";
+    const core = ROBOT_RADIUS * (1.05 + 0.12 * Math.sin(t * 8));
+    ctx.drawImage(robotGlow, rx - core, ry - core, core * 2, core * 2);
+    const hot = ROBOT_RADIUS * 0.45;
+    ctx.drawImage(s.glows[GLOW_WHITE]!, rx - hot, ry - hot, hot * 2, hot * 2);
+    ctx.globalCompositeOperation = "source-over";
+    const mh = ROBOT_RADIUS * ROBOT_MARK_HALF;
+    ctx.drawImage(s.robotMark, rx - mh, ry - mh, mh * 2, mh * 2);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // The touch joystick under the finger, in canvas CSS px like the pointer events it follows.
     if (stick.active) {

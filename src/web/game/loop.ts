@@ -5,7 +5,7 @@ import { createChanges, detectChanges } from "./fx/changes";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "./fx/particles";
 import { createPops, spawnPop, updatePops } from "./fx/pop";
 import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
-import { createTexts, spawnText, updateTexts } from "./fx/text";
+import { createTexts, setTextScale, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import { createFpsMeter, tickFps } from "./fps";
 import { createChoiceGate, pickChoice, showChoice } from "./guard";
@@ -100,6 +100,8 @@ export function startGame(
   let scale = 1;
   let offX = 0;
   let offY = 0;
+  // The floating labels merge within a CSS px distance, so they follow the layout too.
+  const texts = createTexts();
   const resize = () => {
     dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
@@ -110,6 +112,7 @@ export function startGame(
     offX = (w - arena.w * scale) / 2;
     offY = (h - arena.h * scale) / 2;
     renderer.resize(dpr, scale, offX, offY);
+    setTextScale(texts, scale);
   };
   resize();
 
@@ -227,7 +230,7 @@ export function startGame(
   const fx: Fx = {
     changes: createChanges(fxRng),
     particles: createParticles(),
-    texts: createTexts(),
+    texts,
     trail: createTrail(),
     shake: createShake(),
     pops: createPops(),
