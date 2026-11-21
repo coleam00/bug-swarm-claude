@@ -3,8 +3,8 @@ import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
 import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
-const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0];
-const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false });
+const row = (id: number, x: number, y: number, aim = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, 0];
+const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, prot: false });
 
 describe("sampling", () => {
   test("halfway between two snapshots is halfway between their positions", () => {
@@ -13,7 +13,7 @@ describe("sampling", () => {
     pushSnapshot(it, 11, [row(1, 110, 180)], 50);
     const o = out();
     expect(sample(it, 1, 10.5, o)).toBe(true);
-    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false });
+    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false, prot: false });
   });
 
   test("aim turns along the shorter arc, across the -pi/pi seam", () => {
@@ -87,13 +87,13 @@ describe("the tick clock", () => {
 describe("lives and bugs", () => {
   test("a respawn does not slide across the map: the out snapshot holds until the new one", () => {
     const it = createInterp();
-    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0]], 0);
-    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1]], 50);
+    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0, 0]], 0);
+    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1, 1]], 50);
     const o = out();
     sample(it, 1, 10.9, o);
     expect([o.x, o.alive]).toEqual([100, false]);
     sample(it, 1, 11, o);
-    expect([o.x, o.alive, o.inv]).toEqual([2000, true, true]);
+    expect([o.x, o.alive, o.inv, o.prot]).toEqual([2000, true, true, true]);
   });
 
   test("bugs are drawn from the snapshot at or before the drawing time, moving toward the next", () => {

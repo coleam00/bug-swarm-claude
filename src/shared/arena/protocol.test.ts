@@ -114,9 +114,9 @@ describe("parseClientMessage", () => {
 describe("server messages", () => {
   test("a snapshot is built from a shared part and your own numbers, and round-trips, quantized", () => {
     const players = [
-      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3 },
-      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0 },
-      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9 },
+      { id: 1, x: 10.123456, y: 20.5, vx: -3.004, vy: 0, aim: 1.23456, alive: true, invulnTicks: 3, protectTicks: 0 },
+      { id: 2, x: 2386, y: 14, vx: 300, vy: -299.999, aim: -3.14159, alive: true, invulnTicks: 0, protectTicks: 12 },
+      { id: 3, x: 5, y: 5, vx: 0, vy: 0, aim: 0, alive: false, invulnTicks: 9, protectTicks: 9 },
     ];
     const src = {
       tick: 9,
@@ -141,9 +141,9 @@ describe("server messages", () => {
       ack: 4,
       me: { ...me, he: 0.46 },
       p: [
-        [1, 10.12, 20.5, -3, 0, 1.235, 1, 1],
-        [2, 2386, 14, 300, -300, -3.142, 1, 0],
-        [3, 5, 5, 0, 0, 0, 0, 0],
+        [1, 10.12, 20.5, -3, 0, 1.235, 1, 1, 0],
+        [2, 2386, 14, 300, -300, -3.142, 1, 0, 1],
+        [3, 5, 5, 0, 0, 0, 0, 0, 0],
       ],
       b: [[7, 0, 100, 200.1]],
       s: [[11, 1, 30.12, 20.5, 0.123]],

@@ -74,10 +74,21 @@ export type Welcome = {
 };
 
 /**
- * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable (0/1). Positions and
- * velocities to 0.01, aim to 0.001. Fields are only ever appended, never reordered.
+ * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable after a hit (0/1),
+ * spawn-protected (0/1, #58). Positions and velocities to 0.01, aim to 0.001. Fields are only ever
+ * appended, never reordered.
  */
-export type SnapshotPlayer = [id: number, x: number, y: number, vx: number, vy: number, aim: number, alive: 0 | 1, invulnerable: 0 | 1];
+export type SnapshotPlayer = [
+  id: number,
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  aim: number,
+  alive: 0 | 1,
+  invulnerable: 0 | 1,
+  spawnProtected: 0 | 1,
+];
 /** One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number];
 /** A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001). It flies per shotTravelAt. */
@@ -211,15 +222,15 @@ const q1 = (v: number) => Math.round(v * 10) / 10;
 const q2 = (v: number) => Math.round(v * 100) / 100;
 const q3 = (v: number) => Math.round(v * 1000) / 1000;
 
-type PlayerRow = { id: number; x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; invulnTicks: number };
+type PlayerRow = { id: number; x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; invulnTicks: number; protectTicks: number };
 
-/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv],...]`, quantized. */
+/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,prot],...]`, quantized. */
 export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
   let s = "[";
   for (let i = 0; i < players.length; i++) {
     const p = players[i]!;
     if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0}]`;
+    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.protectTicks > 0 ? 1 : 0}]`;
   }
   return s + "]";
 }

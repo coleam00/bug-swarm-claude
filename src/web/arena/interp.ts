@@ -76,8 +76,8 @@ function lerpAngle(a: number, b: number, t: number): number {
   return a + d * t;
 }
 
-/** Where a player is drawn: position, aim, and whether they are in a life and untouchable then. */
-export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean };
+/** Where a player is drawn: position, aim, whether they are in a life, untouchable after a hit, and spawn-protected. */
+export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; prot: boolean };
 
 /**
  * Where player `id` is at server tick `at`, into `out`: between the two snapshots around it (aim
@@ -105,6 +105,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.aim = rb[5];
     out.alive = rb[6] === 1;
     out.inv = rb[7] === 1;
+    out.prot = rb[8] === 1;
     return true;
   }
   if (ra[6] !== rb[6]) {
@@ -113,6 +114,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.aim = ra[5];
     out.alive = ra[6] === 1;
     out.inv = ra[7] === 1;
+    out.prot = ra[8] === 1;
     return true;
   }
   const t = Math.min(1, Math.max(0, (at - fa.tick) / (fb.tick - fa.tick)));
@@ -121,6 +123,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
   out.aim = lerpAngle(ra[5], rb[5], t);
   out.alive = ra[6] === 1;
   out.inv = ra[7] === 1;
+  out.prot = ra[8] === 1;
   return true;
 }
 

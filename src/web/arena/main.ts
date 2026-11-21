@@ -96,7 +96,7 @@ function start(playerId: string, name: string, team: Team): void {
   const robotFor = (id: number, n: string, t: Team): Robot => {
     let r = roster.get(id);
     if (!r) {
-      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false };
+      r = { id, x: 0, y: 0, aim: 0, name: n, team: t, trail: createTrail(), inv: false, prot: false };
       roster.set(id, r);
     }
     r.name = n;
@@ -262,7 +262,7 @@ function start(playerId: string, name: string, team: Team): void {
 
   const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
   const self = { x: 0, y: 0 };
-  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false };
+  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, prot: false };
   const span: BugSpan = { from: null, to: null, t: 0 };
   const bugs: BugsView = {
     x: new Float32Array(MAX_BUGS_PER_ARENA),
@@ -382,12 +382,14 @@ function start(playerId: string, name: string, team: Team): void {
         r.y = self.y;
         r.aim = controls.aim;
         r.inv = row[7] === 1;
+        r.prot = row[8] === 1;
         selfIndex = drawn.length;
       } else if (sample(interp, row[0], rt, at) && at.alive) {
         r.x = at.x;
         r.y = at.y;
         r.aim = at.aim;
         r.inv = at.inv;
+        r.prot = at.prot;
       } else {
         r.trail.count = 0;
         continue;
