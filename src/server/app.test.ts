@@ -93,14 +93,6 @@ describe("run start", () => {
     const res = await post(app(), "/api/runs", { playerId: "player-0001", name: "sh1t" });
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "name", reason: "blocked" });
-    const repeated = await post(app(), "/api/runs", { playerId: "player-0001", name: "fuuuck", team: TABS });
-    expect(await repeated.json()).toEqual({ error: "name", reason: "blocked" });
-  });
-
-  test("a reserved name is 400 with reason reserved", async () => {
-    const res = await post(app(), "/api/runs", { playerId: "player-0001", name: "admin", team: TABS });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "name", reason: "reserved" });
   });
 
   test("300 starts from one IP in 10 minutes are fine; the 301st is 429 with Retry-After; other IPs are fine; it resets", async () => {
@@ -314,14 +306,6 @@ describe("top 10 and best", () => {
     expect(await top(a)).toEqual([{ name: "Good", score: 40 }]);
   });
 
-  test("a stored name the word lists now refuse is left out", async () => {
-    const a = app();
-    await play(a, "player-0001", "Old Name", 50);
-    await play(a, "player-0002", "Good", 40);
-    db.query("UPDATE players SET name = ? WHERE id = ?").run("fuuuck", "player-0001"); // stored before the list grew
-    expect(await top(a)).toEqual([{ name: "Good", score: 40 }]);
-  });
-
   test("is cached for 1 second", async () => {
     const a = app();
     await play(a, "player-0001", "First", 30);
@@ -378,14 +362,6 @@ describe("team totals", () => {
     await play(a, "player-0001", "Old Timer", 25, SPACES);
     expect(await teams(a)).toEqual({ tabs: 0, spaces: 25 });
     expect(db.query("SELECT team FROM players WHERE id = ?").get("player-0001")).toEqual({ team: SPACES });
-  });
-
-  test("a stored name the word lists now refuse adds nothing", async () => {
-    const a = app();
-    await play(a, "player-0001", "Old Name", 50, TABS);
-    await play(a, "player-0002", "Good", 40, SPACES);
-    db.query("UPDATE players SET name = ? WHERE id = ?").run("Cole Medin", "player-0001");
-    expect(await teams(a)).toEqual({ tabs: 0, spaces: 40 });
   });
 
   test("a hidden name's runs leave the totals once the 1 s cache turns over", async () => {

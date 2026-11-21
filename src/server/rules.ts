@@ -73,13 +73,12 @@ export function compactName(s: string): string {
 }
 
 /**
- * The ways to read a name: its compact form, and, when it ends in a number of two or more digits
- * after three or more other characters, also the compact form without that number (an age or a
- * year). A name is refused if either reading is, so "ass99" and "admin99" are caught while
- * "pen15" still reads "penis".
+ * The ways to read a name: its compact form, and, when it ends in a number, also the compact form
+ * without that number (an age, a year, a "2"). A name is refused if either reading is, so "ass2",
+ * "Cole Medin 2" and "admin99" are caught while "pen15" still reads "penis".
  */
 function readings(s: string): string[] {
-  const numbered = /^(.{2,}\D)\d{2,}$/.exec(s.replace(/[ _-]/g, ""));
+  const numbered = /^(.*\D)\d+$/.exec(s.replace(/[ _-]/g, ""));
   return numbered ? [compactName(s), compactName(numbered[1]!)] : [compactName(s)];
 }
 

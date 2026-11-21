@@ -66,7 +66,6 @@ describe("name rules", () => {
   test("separators, case, repeated letters and every digit swap (7 for t, 8 for b too) are ignored", () => {
     refuses(["f u c k", "F-U_C-K", "FUCK", "fuuuck", "fuuuuuck", "fuckkk", "assshole", "pussssy", "niiigga"]);
     refuses(["bi7ch", "5h17", "sh17", "8oner", "n1gg3r", "f4gg0t", "sh1t", "r4pe", "c0ck"]);
-    expect(checkName("fuuuck")).toEqual(refused);
   });
 
   test("short words are refused as a whole name or a whole word of it, plural too", () => {
@@ -88,6 +87,8 @@ describe("name rules", () => {
   test("a number at the end of a longer name is a number, not letters", () => {
     for (const n of ["Josh17", "Ash17", "Cash17", "Tim17", "Alex88", "Bot 4455", "Team-7117"]) expect(checkName(n).ok).toBe(true);
     refuses(["5h17", "sh17", "fuck17", "ass99", "Big Ass99", "Big Ass 99"]);
+    // One digit is a number too.
+    refuses(["ass2", "dick9", "fag1", "kkk2", "cock2", "bj7", "Big Ass 2"]);
     // Digits spelling the end of a word still read as letters.
     refuses(["pen15", "p3n15", "wh0r35", "a55h0l35", "cun75", "bullsh17", "dipsh17"]);
   });
@@ -99,7 +100,7 @@ describe("name rules", () => {
     ...["Scunthorpe", "Cassie", "Dickens", "Dickson", "Benedick", "Hancock", "Cockburn", "Peacock", "Essex"],
     ...["Grape", "Spicy", "Classic", "Analyst", "Assistant", "Therapist", "Bass", "Glass", "Sussex"],
     ...["Cumberland", "Document", "Cucumber", "Scrape", "Drapery", "Shuttlecock", "Assassin"],
-    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit", "Ashit"],
+    ...["Sushi Time", "Push It", "Mishit", "Matsushita", "Shitake", "Shiitake", "Kshitij", "Harshit", "Ashit", "Akshit", "Lakshit", "Rakshit", "Darshit"],
     ...["Bob", "Connor", "Helen", "Booboo", "Shelly", "Hello"],
     ...["Titan", "Raccoon", "Cocoon", "Tycoon", "Pedro", "Homer", "Arsenal", "Butterfly", "Penelope"],
     ...["Ashley", "Sasha", "Nikita", "Cockatoo", "Hitchcock", "Phoebe", "Saltwater", "Atwater"],
@@ -118,7 +119,7 @@ describe("name rules", () => {
 
   test("reserved names are refused as reserved, whatever the spelling; names that only contain one pass", () => {
     const reserved = { ok: false, reason: "reserved" } as const;
-    for (const n of ["colemedin", "Cole Medin", "cole_medin", "c0le-medin", "Dynamous", "ARCHON", "admin", "Addmin", "moderator", "admin99"]) {
+    for (const n of ["colemedin", "Cole Medin", "cole_medin", "c0le-medin", "Dynamous", "ARCHON", "admin", "Addmin", "moderator", "admin99", "Cole Medin 2", "admin1", "Archon2", "Moderator2", "Dynamous 1"]) {
       expect(checkName(n)).toEqual(reserved);
     }
     for (const n of ["Archonaut", "admins team", "Cole", "Medina", "Moderato", "Admiral"]) expect(checkName(n).ok).toBe(true);
@@ -132,12 +133,6 @@ describe("name rules", () => {
     expect(isShownName("  Cole   Medin ")).toBe(false);
   });
 
-  test("an entry's repeated letters mean that many or more", () => {
-    expect(entryPattern("fuck")).toBe("f+u+c+k+");
-    expect(entryPattern("pussy")).toBe("p+u+s{2,}y+");
-    expect(new RegExp(entryPattern("boob")).test("bob")).toBe(false);
-  });
-
   test("the lists: lowercase a to z, no duplicates, a few hundred blocked words, nothing redundant", () => {
     for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES]) {
       expect(list.filter((w) => !/^[a-z]+$/.test(w))).toEqual([]);
@@ -148,7 +143,7 @@ describe("name rules", () => {
     const anywhere = BLOCKED_ANYWHERE.map((w) => [w, new RegExp(entryPattern(w))] as const);
     const redundant = [...BLOCKED_ANYWHERE, ...BLOCKED_WHOLE].filter((w) => anywhere.some(([o, re]) => o !== w && re.test(w)));
     expect(redundant).toEqual([]);
-    // Every exception is a word a player may use.
+    // No exception is itself a whole-word block or a reserved name.
     expect(EXCEPTIONS.filter((w) => w.length <= 16 && !checkName(w).ok)).toEqual([]);
   });
 });

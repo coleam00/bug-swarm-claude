@@ -22,9 +22,9 @@
 // - EXCEPTIONS: real words cut out of the normalised name before BLOCKED_ANYWHERE is checked
 //   ("therapist" would otherwise be refused for "rapist", "Sushi Time" for "shit"). An exception
 //   is replaced by a separator, not deleted, so it can't be used to join two halves of a word.
-// Numbers: a name that ends in a number of two or more digits, after three or more other
-// characters, is also read without it (an age or a year), and refused if either reading is:
-// "ass99" is refused, and "pen15" still reads "penis". A word made only of digits inside a longer
+// Numbers: a name that ends in a number (one digit or more) is also read without it (an age, a
+// year, a "2"), and refused if either reading is: "ass2", "Cole Medin 2" and "admin99" are
+// refused, and "pen15" still reads "penis". A word made only of digits inside a longer
 // name ("load-4455") is a number, never a BLOCKED_WHOLE word. "Ash17" and "Josh17" read "ashit"
 // and "joshit", which EXCEPTIONS lets through.
 // Known false positives, accepted: "Wankel", "Snigger", "Dykes", "Retardant" and "Lesbos" are
@@ -422,7 +422,8 @@ export const EXCEPTIONS: readonly string[] = [
   "booboo",
   "phuket",
   "harshit",
-  "rakshit",
+  "darshit",
+  "akshit",
   "shitij",
   "shittu",
   "ashit",
