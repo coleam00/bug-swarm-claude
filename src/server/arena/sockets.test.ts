@@ -22,7 +22,7 @@ test("a hello that arrives after restart is answered restarting and joins nothin
   sockets.open!(ws);
   sockets.restart();
   expect(sockets.openCount).toBe(1);
-  sockets.message(ws, encodeHello(PROTOCOL_VERSION, "Late", "tabs", "d".repeat(32), false));
+  sockets.message!(ws, encodeHello(PROTOCOL_VERSION, "Late", "tabs", "d".repeat(32), false));
   expect(sent).toEqual(Array(2).fill(JSON.stringify({ t: "error", code: "restarting" })));
   expect(closes).toEqual([CLOSE_RESTARTING, CLOSE_RESTARTING]);
   expect(rooms.stats().arenas).toEqual([]);
