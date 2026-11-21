@@ -40,19 +40,24 @@ test("a player stored before teams loads with no team; a stored team that isn't 
   expect(loadPlayer().team).toBeNull();
 });
 
-test("the next screen: setup until there is a name and a team, so a player from before teams is asked once", () => {
+test("the next screen: every page load opens on the start screen; between runs, setup only until there is a name and a team", () => {
   const id = "0123456789abcdef0123456789abcdef";
-  expect(nextScreen({ id, name: null, team: null }, false)).toBe("setup"); // first visit: name and team
-  expect(nextScreen({ id, name: "Old Timer", team: null }, false)).toBe("setup"); // the one-time team ask
-  expect(nextScreen({ id, name: "Old Timer", team: TEAMS[0] }, false)).toBe("play");
-  expect(nextScreen({ id, name: null, team: TEAMS[0] }, false)).toBe("setup"); // a refused name keeps the team
-  expect(nextScreen({ id, name: null, team: null }, true)).toBe("play"); // a stress run needs neither
-  // Once the team is stored, every later visit plays straight away.
+  // Opening the page: the start screen for everyone, a returning player too ("Play as").
+  expect(nextScreen({ id, name: null, team: null }, false, true)).toBe("setup");
+  expect(nextScreen({ id, name: "Old Timer", team: TEAMS[0] }, false, true)).toBe("setup");
+  expect(nextScreen({ id, name: null, team: null }, true, true)).toBe("play"); // a stress run needs neither
+  // Between runs in the same page ("Play again"):
+  expect(nextScreen({ id, name: null, team: null }, false, false)).toBe("setup");
+  expect(nextScreen({ id, name: "Old Timer", team: null }, false, false)).toBe("setup"); // the one-time team ask
+  expect(nextScreen({ id, name: "Old Timer", team: TEAMS[0] }, false, false)).toBe("play");
+  expect(nextScreen({ id, name: null, team: TEAMS[0] }, false, false)).toBe("setup"); // a refused name keeps the team
+  expect(nextScreen({ id, name: null, team: null }, true, false)).toBe("play");
+  // Once the team is stored, every later run in the page plays straight away.
   store.set("bugswarm.player", JSON.stringify({ id, name: "Old Timer" }));
-  expect(nextScreen(loadPlayer(), false)).toBe("setup");
+  expect(nextScreen(loadPlayer(), false, false)).toBe("setup");
   setPlayerTeam(TEAMS[1]);
   forgetPlayerForTests();
-  expect(nextScreen(loadPlayer(), false)).toBe("play");
+  expect(nextScreen(loadPlayer(), false, false)).toBe("play");
 });
 
 test("a stored name that breaks the rules is dropped, so name entry asks again", () => {

@@ -44,12 +44,14 @@ export function setPlayerTeam(team: Team): Player {
 }
 
 /**
- * Where the next run begins: straight into play once the player has a name and a team, else
- * the setup screen. A player from before teams has a name, so setup asks only for the team,
- * once: one tap stores it. A stress run needs neither.
+ * Where a run begins. Opening the page always shows the start screen (a returning player gets
+ * one "Play as" button there). Between runs in the same page it is straight into play once the
+ * player has a name and a team, else the start screen. A stress run needs neither.
  */
-export function nextScreen(player: Player, stress: boolean): "setup" | "play" {
-  return stress || (player.name !== null && player.team !== null) ? "play" : "setup";
+export function nextScreen(player: Player, stress: boolean, pageLoad: boolean): "setup" | "play" {
+  if (stress) return "play";
+  if (pageLoad) return "setup";
+  return player.name !== null && player.team !== null ? "play" : "setup";
 }
 
 /** For tests: forget the player kept in memory, as a fresh page load would. */

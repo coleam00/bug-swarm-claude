@@ -48,20 +48,35 @@ export type Sprites = {
 
 /** Builds every sprite for an arena drawn at `pxPerUnit` device pixels per arena unit. */
 export function buildSprites(arena: Arena, pxPerUnit: number): Sprites {
+  return {
+    floor: floorSprite(arena, pxPerUnit),
+    glows: PALETTE.map(glowSprite),
+    bugs: buildBugSprites(pxPerUnit),
+    robot: robotSprite(pxPerUnit, ROBOT_RIM, false),
+    robotFlash: robotSprite(pxPerUnit, "#ffffff", true),
+    robotMark: robotMarkSprite(pxPerUnit),
+  };
+}
+
+/** Every bug look's leg frames at `pxPerUnit`; buildSprites' `bugs`. */
+export function buildBugSprites(pxPerUnit: number): Record<BugLookId, HTMLCanvasElement[]> {
   const bugs = {} as Record<BugLookId, HTMLCanvasElement[]>;
   for (const id of BUG_LOOK_IDS) {
     const look = BUG_LOOKS[id];
     bugs[id] = [];
     for (let f = 0; f < LEG_FRAMES; f++) bugs[id].push(bugSprite(look, f, pxPerUnit));
   }
-  return {
-    floor: floorSprite(arena, pxPerUnit),
-    glows: PALETTE.map(glowSprite),
-    bugs,
-    robot: robotSprite(pxPerUnit, false),
-    robotFlash: robotSprite(pxPerUnit, true),
-    robotMark: robotMarkSprite(pxPerUnit),
-  };
+  return bugs;
+}
+
+/** A soft glow in `colour` (a #rrggbb), like buildSprites' `glows`, for additive blending. */
+export function buildGlow(colour: string): HTMLCanvasElement {
+  return glowSprite(colour);
+}
+
+/** The robot's body with its rim and halo in `rim` (a #rrggbb): a team's robot. */
+export function buildRobot(pxPerUnit: number, rim: string): HTMLCanvasElement {
+  return robotSprite(pxPerUnit, rim, false);
 }
 
 function canvas(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
@@ -207,15 +222,14 @@ function bugSprite(look: BugLook, frame: number, ppu: number): HTMLCanvasElement
   return c;
 }
 
-/** The robot's rounded body, or its all-white flash when hit. Its core glow is drawn live. */
-function robotSprite(ppu: number, flash: boolean): HTMLCanvasElement {
+/** The robot's rounded body with a `rim` edge and halo, or its all-white flash when hit. Its core glow is drawn live. */
+function robotSprite(ppu: number, rim: string, flash: boolean): HTMLCanvasElement {
   const R = ROBOT_RADIUS;
   const half = R * ROBOT_SPRITE_HALF;
   const [c, ctx] = canvas(half * 2 * ppu, half * 2 * ppu);
   ctx.scale(c.width / (half * 2), c.height / (half * 2));
   ctx.translate(half, half);
 
-  const rim = flash ? "#ffffff" : ROBOT_RIM;
   const halo = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, half);
   halo.addColorStop(0, `${rim}66`);
   halo.addColorStop(1, `${rim}00`);

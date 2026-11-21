@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server/rules";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { NAME_MAX, TEAMS, type Team, type UpgradeId } from "../server/rules";
+import { startBackdrop } from "./backdrop";
 import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type Me, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
 import { restartIn } from "./game/guard";
@@ -7,13 +8,15 @@ import { HINT_MS, hintText, takeFirstRun } from "./hint";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { fmt, rankLines, saveNotice, upgradeLevels, type SaveState } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, takeRefusedName, type Player } from "./player";
+import { changeName, nameMessage, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type Press, type StartView } from "./start";
 import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
 
-/** Shown on name entry when a name the player already had is refused now. */
-const NAME_NOW_REFUSED = "Your name isn't allowed any more. Pick another.";
+/** Shown under the name field when a name the player already had is refused now. */
+const NAME_NOW_REFUSED = nameMessage("blocked");
 
-// The thin shell around the canvas: name and team entry, the run, and the game-over screen.
+// The thin shell around the canvas: the start screen (name and team, or "Play as" for a returning
+// player) on opening the page, the run, and the game-over screen.
 // No menus between runs: game over -> any key, a fresh tap or "Play again" -> the next run.
 // Game over ignores them for RESTART_DELAY_MS (800 ms, game/guard.ts) after death.
 // A stress run (`?stress`, dev and bench builds only) needs no name or team and is never
@@ -39,17 +42,18 @@ export function App() {
   const [player, setPlayer] = useState<Player>(() => loadPlayer());
   const [notice, setNotice] = useState<string | null>(() => (takeRefusedName() !== null ? NAME_NOW_REFUSED : null));
   const runs = useRef(1);
-  const phaseFor = (run: number): Phase => (nextScreen(loadPlayer(), STRESS > 0) === "play" ? { kind: "playing", run } : { kind: "setup" });
-  const [phase, setPhase] = useState<Phase>(() => phaseFor(1));
+  const phaseFor = (run: number, pageLoad: boolean): Phase =>
+    nextScreen(loadPlayer(), STRESS > 0, pageLoad) === "play" ? { kind: "playing", run } : { kind: "setup" };
+  const [phase, setPhase] = useState<Phase>(() => phaseFor(1, true));
 
   const play = () => {
     runs.current += 1;
-    setPhase(phaseFor(runs.current));
+    setPhase(phaseFor(runs.current, false));
   };
 
   if (phase.kind === "setup") {
     return (
-      <SetupScreen
+      <StartScreen
         player={player}
         notice={notice}
         onDone={(name, team) => {
@@ -79,101 +83,120 @@ export function App() {
 }
 
 /**
- * Before the first run: a name and a team, one tap each. A player from before teams already has
- * a name, so they see only the team buttons, once; a tap picks and plays. A name the server
- * refused comes back here with the team kept.
+ * The start screen: the backdrop, the title and either one "Play as <name>" button (a returning
+ * player) or the name field and a button per team. start.ts decides what each press does.
  */
-function SetupScreen(props: { player: Player; notice: string | null; onDone: (name: string, team: Team) => void }) {
-  const { player, onDone } = props;
-  const [value, setValue] = useState("");
-  const [team, setTeam] = useState<Team | null>(player.team);
-  const [message, setMessage] = useState<string | null>(props.notice);
-  const known = player.name;
+function StartScreen(props: { player: Player; notice: string | null; onDone: (name: string, team: Team) => void }) {
+  const { onDone } = props;
+  const [view, setView] = useState<StartView>(() => startView(props.player, props.notice));
+  const [value, setValue] = useState(view.name);
+  const teamButtons = useRef<Partial<Record<Team, HTMLButtonElement | null>>>({});
 
-  if (known !== null) {
-    return (
-      <main className="setup">
-        <h1>Pick your team</h1>
-        <TeamButtons selected={null} onPick={(t) => onDone(known, t)} />
-      </main>
-    );
-  }
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const checked = checkName(value);
-    if (!checked.ok) {
-      return setMessage(
-        checked.reason === "blocked"
-          ? "That name isn't allowed. Try another."
-          : checked.reason === "reserved"
-            ? "That name is reserved"
-            : checked.reason === "length"
-              ? `Use 2 to ${NAME_MAX} characters.`
-              : "Use letters, numbers, spaces, - and _ only.",
-      );
-    }
-    if (!team) return setMessage("Pick a team.");
-    onDone(checked.name, team);
+  const act = (press: Press) => {
+    if (press.kind === "start") onDone(press.name, press.team);
+    else if (press.kind === "message") setView((v) => showMessage(v, press.text));
+    else teamButtons.current[press.team]?.focus();
   };
+
+  // On "Play as", Enter plays even when nothing has focus (the button handles it when it has).
+  const returning = view.kind === "returning" ? view : null;
+  const latest = useRef(act);
+  latest.current = act;
+  useEffect(() => {
+    if (!returning) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !e.repeat && (document.activeElement === document.body || document.activeElement === null)) {
+        latest.current({ kind: "start", name: returning.name, team: returning.team });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [returning?.name, returning?.team]);
+
   return (
     <main className="setup">
-      <h1>Bug Swarm</h1>
-      <form onSubmit={submit}>
-        <label htmlFor="name">Your name on the board</label>
-        <input
-          id="name"
-          autoFocus
-          autoComplete="nickname"
-          maxLength={NAME_MAX}
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setMessage(null);
-          }}
-        />
-        <TeamButtons
-          selected={team}
-          onPick={(t) => {
-            setTeam(t);
-            setMessage(null);
-          }}
-        />
-        <p className="setup-hint">Phone: put your thumb down anywhere and drag to steer. Computer: WASD, arrow keys or the mouse.</p>
-        {message && (
-          <p role="alert" className="setup-alert">
-            {message}
-          </p>
-        )}
-        <button type="submit" className="setup-play">
-          Play
-        </button>
-      </form>
+      <BackdropCanvas />
+      <h1 className="start-title">BUG SWARM</h1>
+      <p className="start-tag">Aim. Dodge. Save your team.</p>
+      {view.kind === "returning" ? (
+        <div className="start-actions">
+          <button
+            type="button"
+            className="start-play"
+            autoFocus
+            style={{ background: TEAM_LOOK[view.team].color }}
+            onKeyDown={holdEnter}
+            onClick={() => act(pressEnter(view, value))}
+          >
+            Play as {view.name}
+          </button>
+          <button type="button" className="start-change" onClick={() => setView(changeName(view))}>
+            change name
+          </button>
+        </div>
+      ) : (
+        <div className="start-actions">
+          <input
+            aria-label="Your name"
+            placeholder="Your name"
+            autoFocus
+            autoComplete="nickname"
+            maxLength={NAME_MAX}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setView(typed);
+            }}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              if (!e.repeat) act(pressEnter(view, value));
+            }}
+          />
+          {view.message && (
+            <p role="alert" className="start-alert">
+              {view.message}
+            </p>
+          )}
+          <div className="start-teams" role="group" aria-label="Your team">
+            {TEAMS.map((t) => (
+              <button
+                key={t}
+                ref={(el) => (teamButtons.current[t] = el)}
+                type="button"
+                disabled={teamLocked(view, t)}
+                style={{ background: TEAM_LOOK[t].color }}
+                onKeyDown={holdEnter}
+                onClick={() => act(pressTeam(view, value, t))}
+              >
+                Join {TEAM_LOOK[t].label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
-/** Tabs and Spaces, side by side. `selected` shows the pick filled; null leaves both outlined. */
-function TeamButtons({ selected, onPick }: { selected: Team | null; onPick: (team: Team) => void }) {
-  return (
-    <div className="setup-teams" role="group" aria-label="Your team">
-      {TEAMS.map((t) => {
-        const { label, color } = TEAM_LOOK[t];
-        const on = selected === t;
-        return (
-          <button
-            key={t}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onPick(t)}
-            style={{ borderColor: color, background: on ? color : "transparent", color: on ? "#05070d" : color }}
-          >
-            {label}
-          </button>
-        );
-      })}
-    </div>
-  );
+/** A held Enter that moved focus onto a button (Enter in the name field) doesn't press it as it repeats. */
+function holdEnter(e: ReactKeyboardEvent) {
+  if (e.key === "Enter" && e.repeat) e.preventDefault();
+}
+
+/** The start screen's animated backdrop (backdrop/), behind everything and taking no input. */
+function BackdropCanvas() {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    try {
+      const backdrop = startBackdrop(canvas.current!);
+      return () => backdrop.stop();
+    } catch (err) {
+      // Decoration: without it the start screen still works on its plain background.
+      console.error("start screen backdrop failed", err);
+    }
+  }, []);
+  return <canvas ref={canvas} className="start-backdrop" aria-hidden="true" tabIndex={-1} />;
 }
 
 function Game(props: { player: Player; onNameRefused: () => void; onOver: (over: Over) => void }) {
