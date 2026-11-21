@@ -180,6 +180,52 @@ describe("fair drop-in: personal pacing", () => {
     expect(late[late.length - 1]).toBeGreaterThan(late[0]!);
   });
 
+  test("a newcomer joining at 10 minutes is sent as many bugs over 30 s as one joining at the start, or alone", () => {
+    // What is actually spawned for them: the bots' budgets are zeroed before each step, so every
+    // new bug in the step is the newcomer's, and the newcomer's own spawn loop runs as in play.
+    const spawned = (warmTicks: number, botCount = 3): number => {
+      const a = createArena(21);
+      const bots = Array.from({ length: botCount }, (_, i) => i).map((i) => ({
+        id: joinPlayer(a, `bot ${i}`, "tabs").id,
+        rng: createRng(100 + i),
+        mem: createMemory(),
+        obs: createObservation(),
+        out: { mx: 0, my: 0, aim: 0, fire: false, dash: false } as PolicyInput,
+      }));
+      const drive = () => {
+        for (const b of bots) {
+          observe(a, b.id, WORLD_W, WORLD_H, b.obs);
+          POLICIES.aimer(b.obs, b.mem, b.rng, b.out);
+          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out });
+        }
+      };
+      for (let t = 0; t < warmTicks; t++) {
+        drive();
+        stepArena(a);
+      }
+      const p = joinPlayer(a, "new", "tabs");
+      let count = 0;
+      for (let t = 0; t < 600; t++) {
+        drive();
+        for (const q of a.players) if (q.id !== p.id) q.budget = 0;
+        p.invulnTicks = 1e9;
+        const before = a.nextBugId;
+        stepArena(a);
+        count += a.nextBugId - before;
+      }
+      expect(p.alive).toBe(true);
+      return count;
+    };
+    // The curve's integral over 30 s of a first life: 10 s at the base rate, then 20 s rising.
+    let owed = 0;
+    for (let t = 0; t < 600; t++) owed += spawnRate(Math.max(0, (t + 1) * DT - ITEM_EASY_S)) * DT;
+    const early = spawned(0);
+    expect(early).toBeLessThanOrEqual(owed); // whole bugs only: the fraction stays in the budget
+    expect(early).toBeGreaterThan(owed - 2);
+    expect(spawned(Math.round(600 / DT))).toBe(early);
+    expect(spawned(0, 0)).toBe(early);
+  });
+
   test("bugs chasing someone else are not redirected at a protected newcomer, until protection ends", () => {
     const { a, ps } = arenaWith([300, 1200]);
     const A = ps[0]!;

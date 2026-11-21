@@ -396,6 +396,42 @@ describe("fair drop-in: safe spawns", () => {
     expect(missedByDraws).toBeGreaterThan(20);
   });
 
+  test("when every allowed spot is crowded, the search for room never leaves the 450 margin", () => {
+    // Bugs fill the allowed square and leave the wall band empty, so the spot farthest from any
+    // bug in the whole world is in the band: the grid search must not take it.
+    for (let seed = 0; seed < 10; seed++) {
+      const a = createArena(seed);
+      for (let x = 450; x <= WORLD_W - 450; x += 150) for (let y = 450; y <= WORLD_H - 450; y += 150) placeBug(a, x, y);
+      const p = joinPlayer(a, "new", "tabs");
+      const check = () => {
+        expect(Math.min(p.x, p.y, WORLD_W - p.x, WORLD_H - p.y)).toBeGreaterThanOrEqual(ITEM_WALL_MIN);
+      };
+      check();
+      p.alive = false;
+      p.outTick = -100;
+      hold(p, { dash: true });
+      p.budget = 0;
+      const bugsBefore = a.bugs.map((b) => ({ ...b }));
+      stepArena(a);
+      expect(p.alive).toBe(true);
+      check();
+      a.bugs = bugsBefore;
+    }
+  });
+
+  test("in a fresh arena a newcomer spawns within sight of the one other player", () => {
+    // No bugs: the undisputed case. 400 is half the 800-unit view.
+    const near: number[] = [];
+    for (let seed = 0; seed < 100; seed++) {
+      const a = createArena(seed);
+      const other = joinPlayer(a, "other", "spaces");
+      const p = joinPlayer(a, "new", "tabs");
+      near.push(Math.hypot(p.x - other.x, p.y - other.y));
+    }
+    near.sort((x, y) => x - y);
+    expect(near[50]!).toBeLessThan(400);
+  });
+
   test("with no one else alive and no bugs, a join takes the first spot", () => {
     const a = createArena(5);
     const spots = candidates(a);
