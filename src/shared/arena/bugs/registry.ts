@@ -2,9 +2,10 @@
 // constants.ts BUG_KINDS, so a kind cannot be named without being defined.
 import { BUG_KINDS, type BugKind } from "../constants";
 import { crawler } from "./crawler";
+import { dasher } from "./dasher";
 import type { BugKindDef } from "./kind";
 
-export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler };
+export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher };
 
 export function bugDef(kind: BugKind): BugKindDef {
   return BUG_DEFS[kind];

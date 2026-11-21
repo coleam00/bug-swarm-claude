@@ -3,13 +3,15 @@ import { BUG_KINDS, ROBOT_RADIUS } from "./config";
 import type { Bug } from "./sim";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
-export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc"] as const;
+export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95"] as const;
 export const GLOW_AMBER = 0;
 export const GLOW_LIME = 1;
 export const GLOW_CYAN = 2;
 export const GLOW_SHOT = 3;
 export const GLOW_WHITE = 4;
 export const GLOW_DRONE = 5;
+/** Hot pink: the arena's dasher (#65). */
+export const GLOW_PINK = 6;
 
 export const LETTERBOX = "#05070d";
 export const FLOOR = "#070a12";

@@ -2,6 +2,7 @@
 // entry for each id in BUG_KINDS, so no kind reaches the screen undrawn.
 import type { BugKind } from "../../../../shared/arena/constants";
 import { crawlerDraw } from "./crawler";
+import { dasherDraw } from "./dasher";
 import type { BugDraw } from "./kind";
 
-export const BUG_DRAW: Record<BugKind, BugDraw> = { crawler: crawlerDraw };
+export const BUG_DRAW: Record<BugKind, BugDraw> = { crawler: crawlerDraw, dasher: dasherDraw };
