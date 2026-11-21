@@ -1,20 +1,30 @@
 // The arena simulation (release 2): pure and deterministic. The server steps it as the authority;
 // the browser runs `stepPlayer` to predict its own robot. No clock, no Math.random, no DOM: time
-// comes in as the fixed step and randomness from the arena's seeded generator.
+// comes in as the fixed step and randomness from the arena's seeded generator. This file holds
+// the state, players and lives, and the step's order; shots, heat and the streak live in
+// combat.ts, crawlers and spawning in bugs.ts.
 import type { Team } from "../../server/rules";
+import { stepBugs } from "./bugs";
+import { stepFire, stepShots } from "./combat";
 import {
   ACCEL,
   DT,
   FRICTION,
+  HITS_PER_LIFE,
+  INVULN_S,
   MAX_SPEED,
   PLAYER_RADIUS,
+  RESPAWN_CLEAR,
+  RESPAWN_DELAY_S,
   SPAWN_MARGIN,
+  WAVE_S,
   WORLD_H,
   WORLD_W,
+  type BugKind,
 } from "./constants";
 import { createRng, nextRandom, type Rng } from "./rng";
 
-/** One player's input for one tick. `fire` and `dash` are carried but unused until later items. */
+/** One player's input for one tick. */
 export type Input = {
   /** Sequence number, rising by one per input; the server echoes the last one it applied. */
   seq: number;
@@ -23,7 +33,9 @@ export type Input = {
   my: number;
   /** Aim angle, radians, in (-pi, pi]. */
   aim: number;
+  /** Fire held. */
   fire: boolean;
+  /** Dash pressed (one press). While out, it respawns you; the dash itself comes with a later item. */
   dash: boolean;
 };
 
@@ -41,6 +53,71 @@ export type Player = {
   input: Input;
   /** Ticks since the last new input (the server zeroes a stale move). */
   idleTicks: number;
+  /** In a life (false: out, waiting for a respawn press). */
+  alive: boolean;
+  /** Hits taken this life. */
+  hits: number;
+  /** The tick this life began. */
+  lifeStartTick: number;
+  /** The tick this player went out (meaningful while !alive). */
+  outTick: number;
+  /** This life's score, kills and hit streak. */
+  score: number;
+  kills: number;
+  streak: number;
+  /** Gun heat, 0 to 1. */
+  heat: number;
+  /** Ticks the gun stays locked after overheating. */
+  lockTicks: number;
+  /** Seconds until the next shot may leave (negative: owed this tick). */
+  fireCooldown: number;
+  /** Ticks left untouchable. */
+  invulnTicks: number;
+  /** Bugs this player's pressure owes the arena (fractional). */
+  budget: number;
+};
+
+export type Bug = {
+  id: number;
+  kind: BugKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  hp: number;
+  /** The player it chases this tick (0: none). */
+  target: number;
+};
+
+export type Shot = {
+  id: number;
+  /** The player who fired it. */
+  owner: number;
+  x: number;
+  y: number;
+  /** Unit direction. */
+  dx: number;
+  dy: number;
+  /** Units flown so far. */
+  travelled: number;
+};
+
+/** A shot fired this tick: where it left the barrel and its angle (spread included). */
+export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number };
+/** A shot that ended this tick: on a bug (a hit) or at its range or a wall (a miss). */
+export type ShotEnded = { id: number; hit: boolean };
+export type Kill = { bug: number; by: number; x: number; y: number; points: number };
+/** A finished life, as the server saves it. */
+export type LifeEnd = { id: number; score: number; kills: number; ticks: number };
+
+/** What happened in the last stepArena. The arrays are reused: cleared at the start of each step. */
+export type ArenaEvents = {
+  shotsFired: ShotFired[];
+  shotsEnded: ShotEnded[];
+  kills: Kill[];
+  /** Ids of players who took a hit. */
+  hitsTaken: number[];
+  livesEnded: LifeEnd[];
 };
 
 export type ArenaState = {
@@ -48,6 +125,11 @@ export type ArenaState = {
   rng: Rng;
   players: Player[];
   nextId: number;
+  bugs: Bug[];
+  shots: Shot[];
+  nextBugId: number;
+  nextShotId: number;
+  events: ArenaEvents;
 };
 
 export function noInput(seq = 0): Input {
@@ -55,24 +137,129 @@ export function noInput(seq = 0): Input {
 }
 
 export function createArena(seed: number): ArenaState {
-  return { tick: 0, rng: createRng(seed), players: [], nextId: 1 };
+  return {
+    tick: 0,
+    rng: createRng(seed),
+    players: [],
+    nextId: 1,
+    bugs: [],
+    shots: [],
+    nextBugId: 1,
+    nextShotId: 1,
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], livesEnded: [] },
+  };
 }
 
-/** Adds a player at a random spot at least SPAWN_MARGIN from every wall. */
+/** The arena's wave number (1 up), every WAVE_S seconds. Shown only: it never changes spawn volume. */
+export function wave(tick: number): number {
+  return 1 + Math.floor((tick * DT) / WAVE_S);
+}
+
+/** Starts a fresh life for `p` at (x, y): every life field reset, with spawn protection. */
+function startLife(state: ArenaState, p: Player, x: number, y: number): void {
+  p.x = x;
+  p.y = y;
+  p.vx = 0;
+  p.vy = 0;
+  p.alive = true;
+  p.hits = 0;
+  p.lifeStartTick = state.tick;
+  p.score = 0;
+  p.kills = 0;
+  p.streak = 0;
+  p.heat = 0;
+  p.lockTicks = 0;
+  p.fireCooldown = 0;
+  p.invulnTicks = Math.round(INVULN_S / DT);
+  p.budget = 0;
+}
+
+const spot = { x: 0, y: 0 };
+
+/**
+ * Puts a random spot at least SPAWN_MARGIN from every wall in `spot`, retried up to 8 times to
+ * land at least RESPAWN_CLEAR from every bug (the last try stands).
+ */
+function safeSpot(state: ArenaState): void {
+  for (let i = 0; i < 8; i++) {
+    spot.x = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_W - 2 * SPAWN_MARGIN);
+    spot.y = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_H - 2 * SPAWN_MARGIN);
+    if (clearOfBugs(state, spot.x, spot.y)) return;
+  }
+}
+
+function clearOfBugs(state: ArenaState, x: number, y: number): boolean {
+  const r2 = RESPAWN_CLEAR * RESPAWN_CLEAR;
+  for (const b of state.bugs) {
+    const dx = b.x - x;
+    const dy = b.y - y;
+    if (dx * dx + dy * dy < r2) return false;
+  }
+  return true;
+}
+
+/** Adds a player, in a new life at a safe random spot. */
 export function joinPlayer(state: ArenaState, name: string, team: Team): Player {
-  const x = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_W - 2 * SPAWN_MARGIN);
-  const y = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_H - 2 * SPAWN_MARGIN);
-  const p: Player = { id: state.nextId++, name, team, x, y, vx: 0, vy: 0, aim: 0, input: noInput(), idleTicks: 0 };
+  safeSpot(state);
+  const p: Player = {
+    id: state.nextId++,
+    name,
+    team,
+    x: 0,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    aim: 0,
+    input: noInput(),
+    idleTicks: 0,
+    alive: true,
+    hits: 0,
+    lifeStartTick: 0,
+    outTick: 0,
+    score: 0,
+    kills: 0,
+    streak: 0,
+    heat: 0,
+    lockTicks: 0,
+    fireCooldown: 0,
+    invulnTicks: 0,
+    budget: 0,
+  };
+  startLife(state, p, spot.x, spot.y);
   state.players.push(p);
   return p;
 }
 
-/** Removes a player. False if there was none with that id. */
-export function leavePlayer(state: ArenaState, id: number): boolean {
+/** Ends `p`'s life now and returns its record. */
+function endLife(state: ArenaState, p: Player): LifeEnd {
+  p.alive = false;
+  p.outTick = state.tick;
+  p.vx = 0;
+  p.vy = 0;
+  return { id: p.id, score: p.score, kills: p.kills, ticks: state.tick - p.lifeStartTick };
+}
+
+/**
+ * Removes a player. Null if there was none with that id; else `life` is the life the leave ended
+ * (null if the player was already out), for the server to save. It is returned rather than put
+ * in `events.livesEnded`, because a leave happens between ticks and that list belongs to the
+ * last step.
+ */
+export function leavePlayer(state: ArenaState, id: number): { life: LifeEnd | null } | null {
   const i = state.players.findIndex((p) => p.id === id);
-  if (i < 0) return false;
+  if (i < 0) return null;
+  const p = state.players[i]!;
+  const life = p.alive ? endLife(state, p) : null;
   state.players.splice(i, 1);
-  return true;
+  return { life };
+}
+
+/** Takes a hit on `p` (the caller checked it can be hit): untouchable for a moment; the last hit ends the life. */
+export function hitPlayer(state: ArenaState, p: Player): void {
+  p.hits++;
+  p.invulnTicks = Math.round(INVULN_S / DT);
+  state.events.hitsTaken.push(p.id);
+  if (p.hits >= HITS_PER_LIFE) state.events.livesEnded.push(endLife(state, p));
 }
 
 /** Wraps an angle to (-pi, pi]. */
@@ -152,11 +339,38 @@ export function stepPlayer(
   }
 }
 
-/** Advances the arena one fixed step: every player moves with its current input. */
+const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
+
+/**
+ * Advances the arena one fixed step, in a fixed order (arrays in index order, every random draw
+ * from state.rng), so the same seed and inputs replay exactly:
+ * 1. players: the alive move; an out player whose input has dash, RESPAWN_DELAY_S or more after
+ *    going out, respawns at a safe spot;
+ * 2. fire and heat, alive players only (combat.ts);
+ * 3. bugs: personal spawn budgets, spawning out of view, chasing, contact hits (bugs.ts);
+ * 4. shots: travel, hits, kills, misses (combat.ts);
+ * 5. the tick counts.
+ * `state.events` reports what happened in this step.
+ */
 export function stepArena(state: ArenaState): void {
+  const ev = state.events;
+  ev.shotsFired.length = 0;
+  ev.shotsEnded.length = 0;
+  ev.kills.length = 0;
+  ev.hitsTaken.length = 0;
+  ev.livesEnded.length = 0;
   for (const p of state.players) {
-    stepPlayer(p, p.input.mx, p.input.my);
     p.aim = p.input.aim;
+    if (p.alive) {
+      stepPlayer(p, p.input.mx, p.input.my);
+      if (p.invulnTicks > 0) p.invulnTicks--;
+    } else if (p.input.dash && state.tick - p.outTick >= RESPAWN_DELAY_TICKS) {
+      safeSpot(state);
+      startLife(state, p, spot.x, spot.y);
+    }
   }
+  for (const p of state.players) if (p.alive) stepFire(state, p);
+  stepBugs(state);
+  stepShots(state);
   state.tick++;
 }

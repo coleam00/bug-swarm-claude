@@ -1,0 +1,173 @@
+import { describe, expect, test } from "bun:test";
+import { BARREL, DT, HEAT_LOCK_S, KILL_POINTS, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
+import { mult, segmentHit, shotTravelAt } from "./combat";
+import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
+
+const PER_TICK = SHOT_SPEED * DT;
+
+describe("shots", () => {
+  test("a held fire shoots from the barrel along the aim, and a shot flies 45 units a tick", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    hold(p, { aim: 0.5, fire: true });
+    stepQuiet(a);
+    const fired = a.events.shotsFired[0]!;
+    expect(fired.owner).toBe(p.id);
+    expect(fired.x).toBeCloseTo(1200 + Math.cos(0.5) * BARREL, 9);
+    expect(fired.y).toBeCloseTo(1200 + Math.sin(0.5) * BARREL, 9);
+    expect(Math.abs(fired.angle - 0.5)).toBeLessThanOrEqual(SHOT_SPREAD);
+    const s = a.shots[0]!;
+    expect(s.travelled).toBe(PER_TICK);
+    expect(s.x).toBeCloseTo(fired.x + Math.cos(fired.angle) * PER_TICK, 9);
+    hold(p, { aim: 0.5 });
+    stepQuiet(a);
+    expect(a.shots[0]!.travelled).toBe(2 * PER_TICK);
+    expect(shotTravelAt(1, 1)).toBe(PER_TICK);
+    expect(shotTravelAt(1, 2)).toBe(2 * PER_TICK);
+    expect(shotTravelAt(1, 100)).toBe(SHOT_RANGE);
+  });
+
+  test("a shot hits the nearer of two bugs in its line, which dies and scores; the farther lives", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    const near = placeBug(a, 1300, 1200);
+    const far = placeBug(a, 1340, 1200);
+    hold(p, { fire: true });
+    stepQuiet(a);
+    hold(p, {});
+    let ended = a.events.shotsEnded.slice();
+    for (let i = 0; i < 5 && ended.length === 0; i++) {
+      stepQuiet(a);
+      ended = a.events.shotsEnded.slice();
+    }
+    expect(ended).toEqual([{ id: 1, hit: true }]);
+    expect(a.events.kills).toEqual([expect.objectContaining({ bug: near.id, by: p.id, points: KILL_POINTS })]);
+    expect(a.bugs.map((b) => b.id)).toEqual([far.id]);
+    expect([p.score, p.kills, p.streak]).toEqual([KILL_POINTS, 1, 1]);
+  });
+
+  test("a bug already over the barrel is hit at once (the swept test counts a start inside)", () => {
+    expect(segmentHit(0, 0, 1, 0, 45, 5, 0, 15)).toBe(0);
+    expect(segmentHit(0, 0, 1, 0, 45, 50, 0, 15)).toBeCloseTo(35, 9);
+    expect(segmentHit(0, 0, 1, 0, 45, 70, 0, 15)).toBe(-1);
+    expect(segmentHit(0, 0, 1, 0, 45, -30, 0, 15)).toBe(-1);
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.invulnTicks = 100;
+    placeBug(a, 1200 + BARREL + 14, 1200);
+    hold(p, { fire: true });
+    stepQuiet(a);
+    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: true }]);
+    expect(a.bugs).toEqual([]);
+  });
+
+  test("a shot that reaches its range is a miss, and a miss resets the streak", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.streak = 7;
+    hold(p, { fire: true });
+    stepQuiet(a);
+    hold(p, {});
+    const ticks = Math.ceil(SHOT_RANGE / PER_TICK);
+    // The firing step was the first of `ticks`; the last one ends it.
+    for (let i = 2; i < ticks; i++) {
+      stepQuiet(a);
+      expect(a.events.shotsEnded).toEqual([]);
+    }
+    expect(p.streak).toBe(7);
+    stepQuiet(a);
+    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: false }]);
+    expect(a.shots).toEqual([]);
+    expect(p.streak).toBe(0);
+  });
+
+  test("a shot never hits a player (no friendly fire)", () => {
+    const { a, ps } = arenaWith([1000, 1200], [1100, 1200]);
+    const [p1, p2] = [ps[0]!, ps[1]!];
+    hold(p1, { fire: true });
+    let ended = 0;
+    for (let i = 0; i < 60; i++) {
+      stepQuiet(a);
+      for (const e of a.events.shotsEnded) {
+        expect(e.hit).toBe(false);
+        ended++;
+      }
+    }
+    expect(ended).toBeGreaterThan(0);
+    expect([p2.hits, p2.alive, p1.hits]).toEqual([0, true, 0]);
+  });
+});
+
+describe("heat", () => {
+  test("a held trigger locks after about 2.5 s, then cannot fire for HEAT_LOCK_S", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    hold(p, { fire: true });
+    let t = 0;
+    while (p.lockTicks === 0) {
+      stepQuiet(a);
+      t++;
+    }
+    expect(t * DT).toBeGreaterThanOrEqual(2.3);
+    expect(t * DT).toBeLessThanOrEqual(2.7);
+    expect(p.heat).toBe(1);
+    const lock = Math.round(HEAT_LOCK_S / DT);
+    for (let i = 0; i < lock; i++) {
+      stepQuiet(a);
+      expect(a.events.shotsFired).toEqual([]);
+    }
+    expect(p.heat).toBe(0);
+    stepQuiet(a);
+    expect(a.events.shotsFired.length).toBe(1);
+  });
+
+  test("bursts of 0.5 s on and 0.5 s off for 60 s never lock", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    let shots = 0;
+    for (let t = 0; t < 60 / DT; t++) {
+      hold(p, { fire: t % 20 < 10 });
+      stepQuiet(a);
+      shots += a.events.shotsFired.length;
+      expect(p.lockTicks).toBe(0);
+    }
+    expect(shots).toBeGreaterThan(150);
+  });
+
+  test("heat cools only while fire is released", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    hold(p, { fire: true });
+    stepQuiet(a, 10);
+    const hot = p.heat;
+    expect(hot).toBeGreaterThan(0);
+    hold(p, {});
+    stepQuiet(a, 5);
+    expect(p.heat).toBeLessThan(hot);
+  });
+});
+
+describe("streak", () => {
+  test("the multiplier steps at 5, 10 and 20 hits in a row", () => {
+    expect([0, 1, 4, 5, 9, 10, 19, 20, 99].map(mult)).toEqual([1, 1, 1, 1.5, 1.5, 2, 2, 3, 3]);
+  });
+
+  test("a kill scores 10, 15, 20 and 30 on the 1st, 5th, 10th and 20th hit in a row", () => {
+    for (const [before, points] of [
+      [0, 10],
+      [4, 15],
+      [9, 20],
+      [19, 30],
+    ] as const) {
+      const { a, ps } = arenaWith([1200, 1200]);
+      const p = ps[0]!;
+      p.streak = before;
+      placeBug(a, 1290, 1200);
+      hold(p, { fire: true });
+      stepQuiet(a);
+      hold(p, {});
+      stepQuiet(a, 3);
+      expect([p.score, p.streak]).toEqual([points, before + 1]);
+    }
+  });
+});

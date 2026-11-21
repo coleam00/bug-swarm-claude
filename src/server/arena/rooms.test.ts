@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { INPUT_BUFFER, INPUT_STALE_TICKS, MAX_PLAYERS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
+import { INPUT_BUFFER, INPUT_STALE_TICKS, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, TICK_MS } from "../../shared/arena/constants";
 import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import { Rooms } from "./rooms";
@@ -54,7 +54,7 @@ describe("joining", () => {
     const { welcome, entity } = rooms.join("Bob", "spaces", client().send);
     expect(welcome).toEqual({
       t: "welcome",
-      v: 1,
+      v: PROTOCOL_VERSION,
       you: entity,
       arena: 1,
       build: "test-build",
