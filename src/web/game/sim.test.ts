@@ -619,6 +619,19 @@ describe("refactor bomb", () => {
     expect(s.bugs).toHaveLength(0);
   });
 
+  test("it clears only bugs already on screen, never one in the step it spawns", () => {
+    const s = armed();
+    pickBomb(s);
+    s.spawnTimer = DT / 2; // a bug spawns during the next step, into an empty arena
+    step(s, NONE, DT);
+    expect(s.bugs).toHaveLength(1); // so a frame draws it, and its squash shows
+    expect(s.bombAt).toBe(-Infinity);
+    s.spawnTimer = Infinity;
+    step(s, NONE, DT);
+    expect(s.bugs).toHaveLength(0);
+    expect(s.squashes).toBe(1);
+  });
+
   test("its charge and ring, as render reads them", () => {
     const s = armed();
     expect(bombCharge(s)).toBe(0); // not taken

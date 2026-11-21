@@ -130,10 +130,11 @@ export function score(state: State): number {
  */
 export function step(state: State, input: Input, dt: number): void {
   if (state.over || state.choice) return;
+  // First, so it clears only bugs a frame has already drawn, never one spawned this step.
+  refactorBomb(state);
   const moved = moveRobot(state, input, dt);
   spawnBugs(state, dt);
   moveBugs(state, dt);
-  refactorBomb(state);
   fire(state, dt, moved);
   moveShots(state, dt);
   hitBugs(state);
@@ -259,8 +260,8 @@ function moveBugs(state: State, dt: number): void {
 }
 
 /**
- * The refactor bomb goes off on its own: once charged, on the first step with a bug in the
- * arena, it clears every bug (each one a squash) and starts recharging. It keeps its charge
+ * The refactor bomb goes off on its own: once charged, on the first step that starts with a
+ * bug in the arena, it clears every bug (each one a squash) and starts recharging. It keeps its charge
  * while the arena is empty. Taking it again shortens the recharge from the last blast.
  */
 function refactorBomb(state: State): void {
