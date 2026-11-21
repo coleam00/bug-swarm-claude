@@ -28,6 +28,10 @@ import {
   SHIELD_INNER,
   SHIELD_RADIUS,
   SHOT_GLOW,
+  STICK_KNOB,
+  STICK_KNOB_RADIUS,
+  STICK_RING,
+  STICK_RING_WIDTH,
   TEXT_FILL,
   TEXT_FONT,
   TEXT_STROKE,
@@ -36,6 +40,7 @@ import {
 import { REFACTOR_BOMB, REVIEW_LASER } from "../../server/rules";
 import { DRONE_RADIUS, LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
 import { bombCharge, bombRing, droneCount, droneX, droneY, score, type State } from "./sim";
+import { STICK_RANGE, stickKnob, type Stick } from "./stick";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake; pops: Pops };
@@ -90,7 +95,10 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     }
   }
 
-  function draw(state: State, fx: Fx, stats: Stats): void {
+  /** Where the touch joystick's knob is drawn, reused every frame. */
+  const knob = { x: 0, y: 0 };
+
+  function draw(state: State, fx: Fx, stats: Stats, stick: Stick): void {
     const s = sprites;
     if (!s) return;
     const k = dpr * scale;
@@ -298,6 +306,20 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
         ctx.fillText(SQUASH_LABEL, x, y);
       }
       ctx.globalAlpha = 1;
+    }
+
+    // The touch joystick under the finger, in canvas CSS px like the pointer events it follows.
+    if (stick.active) {
+      ctx.strokeStyle = STICK_RING;
+      ctx.lineWidth = STICK_RING_WIDTH;
+      ctx.beginPath();
+      ctx.arc(stick.cx, stick.cy, STICK_RANGE, 0, TAU);
+      ctx.stroke();
+      stickKnob(stick, knob);
+      ctx.fillStyle = STICK_KNOB;
+      ctx.beginPath();
+      ctx.arc(knob.x, knob.y, STICK_KNOB_RADIUS, 0, TAU);
+      ctx.fill();
     }
 
     // The HUD, steady while the arena shakes.
