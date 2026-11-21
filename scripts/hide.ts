@@ -2,8 +2,9 @@
 // totals. The server caches both for one second and the game polls them every 4, so the name
 // is gone from every screen within 5 seconds. A running server also checks its live arenas for
 // hidden names every 2 seconds (src/server/arena/sockets.ts), so a player with that name is kicked
-// back to the start screen within 3 seconds ("Pick a different name"). It says how many players
-// have the name, so a typo doesn't pass for a hide.
+// back to the start screen within 3 seconds ("Pick a different name"). It says how many saved players
+// have the name, so a typo doesn't pass for a hide; with none it still says that anyone playing
+// as that name now is kicked (the command can't see live arenas).
 // The logic is `hideCommand` in `admin-lib.ts`, which `bun test` covers.
 import { finish, hideCommand } from "./admin-lib";
 

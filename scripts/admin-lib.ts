@@ -72,7 +72,7 @@ export function hideCommand(argv: string[], dataDir: string, now: Date): Command
     const { key, players } = hideName(db, name, now);
     const line =
       players === 0
-        ? `hidden: ${key} (no player has this name yet; check the spelling)`
+        ? `hidden: ${key} (no saved player has this name yet; anyone playing as it now is kicked within 5 s; check the spelling if you expected a saved player)`
         : `hidden: ${key} (${players} player${players === 1 ? "" : "s"})`;
     return { code: 0, out: [line], err: [] };
   } finally {

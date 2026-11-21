@@ -9,7 +9,9 @@ import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, REVIVE_POINTS }
 import { placeBug } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
 import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
+import { TOP_CACHE_MS } from "../app";
 import { startServer, type RunningServer } from "../serve";
+import { HIDE_SWEEP_MS as REAL_HIDE_SWEEP_MS } from "./sockets";
 import type { ArenaStats } from "./rooms";
 
 const TIMEOUT = 15_000;
@@ -194,6 +196,10 @@ test(
   },
   TIMEOUT,
 );
+
+test("the real hide sweep and hidden-name cache together kick a hidden name within 5 s (#64)", () => {
+  expect(REAL_HIDE_SWEEP_MS + TOP_CACHE_MS).toBeLessThanOrEqual(5000);
+});
 
 test(
   "a name hidden mid-life is kicked from its arena within the sweep and the cache, and its peers see it leave",
