@@ -2,7 +2,7 @@
 import { BUG_KINDS, ROBOT_RADIUS } from "./config";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
-export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95"] as const;
+export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95", "#7cff3a", "#e8ff5a"] as const;
 export const GLOW_AMBER = 0;
 export const GLOW_LIME = 1;
 export const GLOW_CYAN = 2;
@@ -10,6 +10,10 @@ export const GLOW_SHOT = 3;
 export const GLOW_WHITE = 4;
 /** Hot pink: the arena's dasher (#65). */
 export const GLOW_PINK = 6;
+/** Acid green: the arena's spitter (#72). */
+export const GLOW_ACID = 7;
+/** Hot yellow-green: a spitter's glob (#72), bright so it reads in a swarm. */
+export const GLOW_GLOB = 8;
 
 export const LETTERBOX = "#05070d";
 export const FLOOR = "#070a12";
