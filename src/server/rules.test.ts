@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_UPGRADES, UPGRADE_IDS, UPGRADE_MAX_LEVEL, checkName, checkScore, isUpgradeId, nameKey, normalizeName } from "./rules";
+import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, checkName, checkScore, isUpgradeId, nameKey, normalizeName } from "./rules";
 
 describe("name rules", () => {
   test("a valid name passes and comes back normalized", () => {
@@ -84,6 +84,7 @@ describe("upgrades", () => {
 
   test("only the listed ids are upgrades", () => {
     for (const id of UPGRADE_IDS) expect(isUpgradeId(id)).toBe(true);
-    for (const v of ["", "Review-Laser", "laser", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
+    for (const id of [REVIEW_LASER, CI_DRONE]) expect(UPGRADE_IDS).toContain(id);
+    for (const v of ["", "Review-Laser", "laser", "CI-Drone", "drone", 1, null, undefined]) expect(isUpgradeId(v)).toBe(false);
   });
 });

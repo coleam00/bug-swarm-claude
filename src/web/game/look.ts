@@ -3,12 +3,13 @@ import { BUG_KINDS } from "./config";
 import type { Bug } from "./sim";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
-export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff"] as const;
+export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc"] as const;
 export const GLOW_AMBER = 0;
 export const GLOW_LIME = 1;
 export const GLOW_CYAN = 2;
 export const GLOW_SHOT = 3;
 export const GLOW_WHITE = 4;
+export const GLOW_DRONE = 5;
 
 export const LETTERBOX = "#05070d";
 export const FLOOR = "#070a12";
@@ -23,6 +24,10 @@ export const ROBOT_RIM = "#22d3ee";
 export const ROBOT_GLOW = GLOW_CYAN;
 export const SHOT_CORE = "#fffbe6";
 export const SHOT_GLOW = GLOW_SHOT;
+/** The CI drone: a small dark body in its own violet glow, and violet shots. */
+export const DRONE_BODY = "#1e1b2e";
+export const DRONE_GLOW = GLOW_DRONE;
+export const DRONE_SHOT_CORE = "#f3e8ff";
 
 export const TEXT_FONT = "bold 26px system-ui, sans-serif";
 export const TEXT_FILL = "#ffffff";

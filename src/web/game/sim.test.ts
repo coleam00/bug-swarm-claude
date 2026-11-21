@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { arenaForViewport, type Arena } from "./arena";
-import { MAX_SQUASHES_PER_SECOND, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { CI_DRONE, MAX_SQUASHES_PER_SECOND, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import {
   ARENA_AREA,
   BASE_BUG,
   BUG_KINDS,
   CHOICE_CARDS,
   CHOICE_EVERY,
+  DRONE_COUNT,
+  DRONE_FIRE_INTERVAL,
+  DRONE_ORBIT,
+  DRONE_RANGE,
   FIRE_INTERVAL,
   LASER_PIERCE,
   MOVING_FIRE_RATE,
@@ -16,7 +20,7 @@ import {
   SPAWN_START,
   spawnInterval,
 } from "./config";
-import { choose, createState, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
+import { choose, createState, droneCount, droneX, droneY, pickKind, runResult, score, step, type Bug, type Input, type State } from "./sim";
 
 const DT = 1 / 60;
 const TALL = { w: 450, h: 800 };
@@ -31,6 +35,13 @@ const NONE: Input = { kind: "none" };
 function advance(state: State, input: Input, pick = 0) {
   step(state, input, DT);
   if (state.choice) choose(state, Math.min(pick, state.choice.length - 1));
+}
+
+/** Takes the card for upgrade `id` from the choice on offer; fails the test if it isn't there. */
+function pickId(state: State, id: UpgradeId) {
+  const index = state.choice?.indexOf(id) ?? -1;
+  expect(index).toBeGreaterThanOrEqual(0);
+  expect(choose(state, index)).toBe(true);
 }
 
 function run(state: State, input: Input, steps: number) {
@@ -225,7 +236,7 @@ describe("the fast bug", () => {
     s.shots = [];
     s.spawnTimer = Infinity;
     s.fireTimer = 0;
-    s.levels[REVIEW_LASER] = 0; // a plain shot, so it ends on the bug
+    for (const id of UPGRADE_IDS) s.levels[id] = 0; // a plain shot, so it ends on the bug, and no drones
     fast!.x = s.robot.x;
     fast!.y = s.robot.y - 150;
     const squashes = s.squashes;
@@ -501,10 +512,9 @@ describe("review laser", () => {
     s.bugs.push({ x: 225, y: 50, hp: 1000, kind: BASE_BUG }); // far enough that a shot is still in flight
     s.nextChoiceAt = 0.1;
     while (!s.choice && s.time < 1) step(s, NONE, DT);
-    expect(s.choice).toEqual([REVIEW_LASER]);
     const inFlight = s.shots[0]!;
     expect(inFlight.pierce).toBe(0);
-    choose(s, 0);
+    pickId(s, REVIEW_LASER);
     expect(inFlight.pierce).toBe(0);
     const fired = s.shots.length;
     const limit = s.time + 1;
@@ -517,25 +527,148 @@ describe("review laser", () => {
 
 test("the run's finish carries the upgrades taken, in pick order", () => {
   const s = createState(2, TALL);
-  keepAlive(s, NONE, 45 * 60); // through the choices at 20 s and 40 s, taking card 0
-  expect(s.taken).toEqual([REVIEW_LASER, REVIEW_LASER]);
-  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: [REVIEW_LASER, REVIEW_LASER] });
+  const picked: UpgradeId[] = [];
+  while (s.time < 45) {
+    // Through the choices at 20 s and 40 s, taking card 0 each time.
+    step(s, NONE, DT);
+    s.hits = 0;
+    if (s.choice) {
+      picked.push(s.choice[0]!);
+      choose(s, 0);
+    }
+  }
+  expect(picked).toHaveLength(2);
+  expect(s.taken).toEqual(picked);
+  expect(runResult(s, true)).toEqual({ score: score(s), squashes: s.squashes, seconds: s.time, touch: true, upgrades: picked });
   expect(runResult(s, false).upgrades).not.toBe(s.taken); // a copy: the finish can't change with the state
 });
 
 describe("the server's squash cap", () => {
   test("squashes never outrun spawns, and spawns come no faster than the cap", () => {
     expect(1 / SPAWN_MIN).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
-    // Every pick the laser, and a robot that never dies: still under the cap for two minutes.
+    // Every upgrade at its top level from the start, and a robot that never dies: still under
+    // the cap for two minutes.
     for (const player of [circle, dodge]) {
       const s = createState(6, WIDE);
+      for (const id of UPGRADE_IDS) s.levels[id] = UPGRADE_MAX_LEVEL;
+      s.nextChoiceAt = Infinity;
       while (s.time < 120) {
         advance(s, player(s));
         s.hits = 0;
       }
-      expect(s.levels[REVIEW_LASER]).toBe(UPGRADE_MAX_LEVEL);
       expect(s.squashes).toBeLessThanOrEqual(s.spawned);
       expect(s.squashes).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND * s.time);
     }
+  });
+});
+
+describe("CI drone", () => {
+  const FAST = BUG_KINDS.find((k) => k.id === "fast")!;
+  const STILL_BASE = { ...BASE_BUG, speed: 0 };
+  const STILL_FAST = { ...FAST, speed: 0 };
+
+  /**
+   * A quiet run brought to `takes` real choices with every other upgrade maxed, so the draw can
+   * only offer the CI drone, taking it each time. The robot's gun is held after the picks.
+   */
+  function withDrone(takes: number): State {
+    const s = quiet();
+    for (const id of UPGRADE_IDS) if (id !== CI_DRONE) s.levels[id] = UPGRADE_MAX_LEVEL;
+    for (let n = 0; n < takes; n++) {
+      s.nextChoiceAt = s.time + 0.1;
+      const limit = s.time + 1;
+      while (!s.choice && s.time < limit) step(s, NONE, DT);
+      expect(s.choice).toContain(CI_DRONE);
+      pickId(s, CI_DRONE);
+    }
+    s.nextChoiceAt = Infinity;
+    s.fireTimer = Infinity;
+    return s;
+  }
+
+  /** Drone shots fired over `seconds` at a still bug in range that can't die, gun held. */
+  function droneShots(s: State, seconds: number): number {
+    s.bugs.push({ x: s.robot.x, y: s.robot.y - 120, hp: 1e9, kind: STILL_BASE });
+    run(s, NONE, Math.round(seconds * 60));
+    return s.shots.filter((shot) => shot.drone).length + (1e9 - s.bugs[0]!.hp);
+  }
+
+  test("without it there is no drone; a real choice offers it, and then a drone fires", () => {
+    const none = quiet();
+    none.fireTimer = Infinity;
+    expect(droneCount(none)).toBe(0);
+    expect(droneShots(none, 3)).toBe(0);
+
+    const s = withDrone(1);
+    expect(s.levels[CI_DRONE]).toBe(1);
+    expect(DRONE_COUNT[1]).toBe(1);
+    expect(droneCount(s)).toBe(1);
+    s.bugs.push({ x: s.robot.x, y: s.robot.y - 120, hp: 1e9, kind: STILL_BASE });
+    const limit = s.time + 2;
+    while (!s.shots.some((shot) => shot.drone) && s.time < limit) step(s, NONE, DT);
+    const shot = s.shots.find((shot) => shot.drone)!;
+    expect(shot.pierce).toBe(0);
+    // Fired from the orbit (it has flown one step since), aimed at the bug.
+    const fromX = shot.x - shot.vx * DT;
+    const fromY = shot.y - shot.vy * DT;
+    expect(Math.hypot(fromX - s.robot.x, fromY - s.robot.y)).toBeCloseTo(DRONE_ORBIT, 5);
+    const bug = s.bugs[0]!;
+    const offLine = Math.abs(shot.vx * (bug.y - fromY) - shot.vy * (bug.x - fromX)) / Math.hypot(shot.vx, shot.vy);
+    expect(offLine).toBeLessThan(1e-6);
+  });
+
+  test("the drone orbits the robot, and follows it", () => {
+    const s = withDrone(1);
+    const angles = new Set<number>();
+    for (let i = 0; i < 10; i++) {
+      step(s, { kind: "direction", dx: 1, dy: 0 }, DT);
+      expect(Math.hypot(droneX(s, 0) - s.robot.x, droneY(s, 0) - s.robot.y)).toBeCloseTo(DRONE_ORBIT, 5);
+      angles.add(Math.atan2(droneY(s, 0) - s.robot.y, droneX(s, 0) - s.robot.x));
+    }
+    expect(angles.size).toBe(10);
+  });
+
+  test("taken twice: a second drone, opposite the first, and twice the shots", () => {
+    const two = withDrone(2);
+    expect(two.levels[CI_DRONE]).toBe(UPGRADE_MAX_LEVEL);
+    expect(DRONE_COUNT[2]).toBe(2);
+    expect(droneCount(two)).toBe(2);
+    for (const i of [0, 1]) expect(Math.hypot(droneX(two, i) - two.robot.x, droneY(two, i) - two.robot.y)).toBeCloseTo(DRONE_ORBIT, 5);
+    expect(Math.hypot(droneX(two, 0) - droneX(two, 1), droneY(two, 0) - droneY(two, 1))).toBeCloseTo(2 * DRONE_ORBIT, 5);
+
+    const seconds = 6 * DRONE_FIRE_INTERVAL;
+    const single = droneShots(withDrone(1), seconds);
+    const double = droneShots(two, seconds);
+    expect(single).toBeGreaterThanOrEqual(6);
+    expect(Math.abs(double - 2 * single)).toBeLessThanOrEqual(1);
+  });
+
+  test("its shots squash bugs in range; it holds fire at a bug out of range", () => {
+    const s = withDrone(1);
+    s.bugs.push({ x: s.robot.x + 100, y: s.robot.y, hp: FAST.hp, kind: STILL_FAST });
+    run(s, NONE, 60);
+    expect(s.squashes).toBe(1);
+    expect(s.bugs).toHaveLength(0);
+
+    const far = withDrone(2);
+    far.bugs.push({ x: far.robot.x, y: far.robot.y - DRONE_ORBIT - DRONE_RANGE - 10, hp: FAST.hp, kind: STILL_FAST });
+    run(far, NONE, 3 * 60);
+    expect(far.shots.some((shot) => shot.drone)).toBe(false);
+    expect(far.squashes).toBe(0);
+  });
+
+  test("the drones never draw from the swarm's generator", () => {
+    const control = createState(9, TALL);
+    const drones = createState(9, TALL);
+    for (const s of [control, drones]) {
+      s.nextChoiceAt = Infinity;
+      s.fireTimer = Infinity; // only drones shoot
+    }
+    drones.levels[CI_DRONE] = UPGRADE_MAX_LEVEL;
+    keepAlive(control, NONE, 30 * 60);
+    keepAlive(drones, NONE, 30 * 60);
+    expect(drones.squashes).toBeGreaterThan(0);
+    expect(drones.spawned).toBe(control.spawned);
+    expect(drones.rng).toEqual(control.rng);
   });
 });

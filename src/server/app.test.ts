@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { createApp } from "./app";
 import { RUN_ENDED, computeStats, hideName, openDb } from "./db";
-import { MAX_UPGRADES, UPGRADE_IDS } from "./rules";
+import { CI_DRONE, MAX_UPGRADES, REVIEW_LASER, UPGRADE_IDS } from "./rules";
 
 let dir: string;
 let db: Database;
@@ -148,7 +148,7 @@ describe("run end", () => {
     const a = app();
     const runId = await startRun(a);
     clock += 45_000;
-    const upgrades = [UPGRADE_IDS[0], UPGRADE_IDS[0]];
+    const upgrades = [REVIEW_LASER, CI_DRONE, CI_DRONE];
     expect((await post(a, `/api/runs/${runId}/end`, { ...endBody(45, 0, 45), upgrades })).status).toBe(200);
     const row = db.query("SELECT upgrades FROM events WHERE type = ? AND run_id = ?").get(RUN_ENDED, runId) as { upgrades: string };
     expect(JSON.parse(row.upgrades)).toEqual(upgrades);

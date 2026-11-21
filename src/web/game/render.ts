@@ -9,6 +9,9 @@ import { SQUASH_LABEL, TEXT_SECONDS, type Texts } from "./fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "./fx/trail";
 import {
   BUG_LOOKS,
+  DRONE_BODY,
+  DRONE_GLOW,
+  DRONE_SHOT_CORE,
   LETTERBOX,
   ROBOT_GLOW,
   GLOW_WHITE,
@@ -20,8 +23,8 @@ import {
   bugLookId,
 } from "./look";
 import { REVIEW_LASER } from "../../server/rules";
-import { LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
-import { score, type State } from "./sim";
+import { DRONE_RADIUS, LASER_BEAM, MAX_HITS, ROBOT_RADIUS } from "./config";
+import { droneCount, droneX, droneY, score, type State } from "./sim";
 import { BUG_SPRITE_HALF, ROBOT_SPRITE_HALF, buildSprites, type Sprites } from "./sprites";
 
 export type Fx = { changes: Changes; particles: Particles; texts: Texts; trail: Trail; shake: Shake };
@@ -35,6 +38,8 @@ const SHOT_GLOW_LENGTH = 34;
 const SHOT_GLOW_WIDTH = 14;
 const SHOT_CORE_LENGTH = 18;
 const SHOT_CORE_WIDTH = 2.4;
+/** A drone's shot is a smaller streak than the gun's, and the laser never lengthens it. */
+const DRONE_SHOT_SCALE = 0.6;
 
 export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
   const canvas = ctx.canvas;
@@ -123,24 +128,32 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
       ctx.drawImage(s.bugs[id][frame]!, -half, -half, half * 2, half * 2);
     }
 
-    // Shots: a glow stretched along the flight, with a bright core. The review laser draws
-    // them longer, and its top level a little wider.
+    // Shots: a glow stretched along the flight, with a bright core. The review laser draws the
+    // gun's longer, and its top level a little wider; a drone's are small and violet.
     ctx.globalCompositeOperation = "lighter";
-    ctx.fillStyle = SHOT_CORE;
     const shotGlow = s.glows[SHOT_GLOW]!;
+    const droneGlow = s.glows[DRONE_GLOW]!;
     const laser = state.levels[REVIEW_LASER];
     const beam = LASER_BEAM[laser]!;
     const glowLength = SHOT_GLOW_LENGTH * beam;
     const coreLength = SHOT_CORE_LENGTH * beam;
     const glowWidth = laser > 1 ? SHOT_GLOW_WIDTH * 1.3 : SHOT_GLOW_WIDTH;
     const coreWidth = laser > 1 ? SHOT_CORE_WIDTH * 1.5 : SHOT_CORE_WIDTH;
+    const d = DRONE_SHOT_SCALE;
     for (const shot of state.shots) {
       const v = Math.hypot(shot.vx, shot.vy) || 1;
       const c = shot.vx / v;
       const sn = shot.vy / v;
       ctx.setTransform(k * c, k * sn, -k * sn, k * c, k * shot.x + ox, k * shot.y + oy);
-      ctx.drawImage(shotGlow, 6 - glowLength, -glowWidth / 2, glowLength, glowWidth);
-      ctx.fillRect(2 - coreLength, -coreWidth / 2, coreLength, coreWidth);
+      if (shot.drone) {
+        ctx.fillStyle = DRONE_SHOT_CORE;
+        ctx.drawImage(droneGlow, 6 * d - SHOT_GLOW_LENGTH * d, (-SHOT_GLOW_WIDTH * d) / 2, SHOT_GLOW_LENGTH * d, SHOT_GLOW_WIDTH * d);
+        ctx.fillRect(2 * d - SHOT_CORE_LENGTH * d, (-SHOT_CORE_WIDTH * d) / 2, SHOT_CORE_LENGTH * d, SHOT_CORE_WIDTH * d);
+      } else {
+        ctx.fillStyle = SHOT_CORE;
+        ctx.drawImage(shotGlow, 6 - glowLength, -glowWidth / 2, glowLength, glowWidth);
+        ctx.fillRect(2 - coreLength, -coreWidth / 2, coreLength, coreWidth);
+      }
     }
 
     // Squash particles.
@@ -168,6 +181,23 @@ export function createRenderer(ctx: CanvasRenderingContext2D, arena: Arena) {
     ctx.drawImage(robotGlow, rx - core, ry - core, core * 2, core * 2);
     const hot = ROBOT_RADIUS * 0.45;
     ctx.drawImage(s.glows[GLOW_WHITE]!, rx - hot, ry - hot, hot * 2, hot * 2);
+
+    // CI drones on their orbit: a small dark body, then its own pulsing violet glow.
+    const drones = droneCount(state);
+    if (drones > 0) {
+      const glow = DRONE_RADIUS * (2.2 + 0.25 * Math.sin(t * 10));
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = DRONE_BODY;
+      for (let i = 0; i < drones; i++) {
+        ctx.beginPath();
+        ctx.arc(droneX(state, i), droneY(state, i), DRONE_RADIUS, 0, TAU);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < drones; i++) {
+        ctx.drawImage(droneGlow, droneX(state, i) - glow, droneY(state, i) - glow, glow * 2, glow * 2);
+      }
+    }
     ctx.globalCompositeOperation = "source-over";
 
     // Floating "+10"s, in screen pixels so they stay big on a phone.

@@ -1,13 +1,19 @@
 // The game itself: pure and time-stepped. It never reads a clock, Math.random or the DOM; time
 // comes in as `dt` and randomness from the seeded generator in the state, so `bun test` can
 // play it with fixed inputs and the same seed always plays the same run.
-import { POINTS_PER_SECOND, POINTS_PER_SQUASH, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
+import { CI_DRONE, POINTS_PER_SECOND, POINTS_PER_SQUASH, REVIEW_LASER, UPGRADE_IDS, UPGRADE_MAX_LEVEL, type UpgradeId } from "../../server/rules";
 import type { Arena } from "./arena";
 import {
   BASE_BUG,
   BUG_KINDS,
   CHOICE_CARDS,
   CHOICE_EVERY,
+  DRONE_COUNT,
+  DRONE_FIRE_INTERVAL,
+  DRONE_ORBIT,
+  DRONE_RANGE,
+  DRONE_SHOT_LIFETIME,
+  DRONE_SPIN,
   FIRE_INTERVAL,
   INVULN_SECONDS,
   LASER_PIERCE,
@@ -27,7 +33,7 @@ import { createRng, nextRandom, type Rng } from "./rng";
 // squashes never exceed bugs spawned, and bugs spawn at most once every SPAWN_MIN seconds of run
 // time. Run time never runs ahead of the server's clock (a choice pauses the run, which only
 // adds real time), so a run squashes at most 1 / SPAWN_MIN bugs a second whatever shots
-// pierce. A test in sim.test.ts holds that under the cap.
+// pierce and however many drones fire. A test in sim.test.ts holds that under the cap.
 
 export type Input = { kind: "none" } | { kind: "direction"; dx: number; dy: number } | { kind: "target"; x: number; y: number };
 
@@ -42,6 +48,8 @@ export type Shot = {
   pierce: number;
   /** Bugs it already struck, so a piercing shot hits each bug once. */
   hit: Bug[];
+  /** Fired by a CI drone rather than the robot's gun (drawn in the drone's colour). */
+  drone: boolean;
 };
 
 export type State = {
@@ -64,6 +72,10 @@ export type State = {
   time: number;
   spawnTimer: number;
   fireTimer: number;
+  /** Where the drones are around their orbit, in radians (CI drone). */
+  droneAngle: number;
+  /** Each drone's reload, by drone; only the first DRONE_COUNT of them are in use. */
+  droneTimers: number[];
   /** Seconds of invulnerability left after a hit. */
   invuln: number;
   hits: number;
@@ -75,6 +87,7 @@ export type State = {
 
 /** Mixed into the run's seed for the card draw, so it isn't the swarm's sequence. */
 const DRAW_SEED_MIX = 0x9e3779b9;
+const TAU = Math.PI * 2;
 
 export function createState(seed: number, arena: Arena): State {
   return {
@@ -91,6 +104,9 @@ export function createState(seed: number, arena: Arena): State {
     time: 0,
     spawnTimer: spawnInterval(0),
     fireTimer: 0,
+    droneAngle: 0,
+    // Half an interval apart, so two drones take turns rather than fire as one.
+    droneTimers: [0, DRONE_FIRE_INTERVAL / 2],
     invuln: 0,
     hits: 0,
     squashes: 0,
@@ -129,6 +145,7 @@ export function step(state: State, input: Input, dt: number): void {
   spawnBugs(state, dt);
   moveBugs(state, dt);
   fire(state, dt, moved);
+  fireDrones(state, dt);
   moveShots(state, dt);
   hitBugs(state);
   hitRobot(state, dt);
@@ -274,8 +291,57 @@ function fire(state: State, dt: number, moved: boolean): void {
   const vx = ((nearest.x - rx) / dist) * SHOT_SPEED;
   const vy = ((nearest.y - ry) / dist) * SHOT_SPEED;
   const pierce = LASER_PIERCE[state.levels[REVIEW_LASER]]!;
-  state.shots.push({ x: rx, y: ry, vx, vy, life: SHOT_LIFETIME, pierce, hit: [] });
+  state.shots.push({ x: rx, y: ry, vx, vy, life: SHOT_LIFETIME, pierce, hit: [], drone: false });
   state.fireTimer += FIRE_INTERVAL;
+}
+
+/** How many drones orbit the robot: none until the CI drone is taken. */
+export function droneCount(state: State): number {
+  return DRONE_COUNT[state.levels[CI_DRONE]]!;
+}
+
+/** Drone `i`'s position: on its orbit around the robot, spaced evenly with the others. */
+export function droneX(state: State, i: number): number {
+  return state.robot.x + Math.cos(state.droneAngle + (i * TAU) / droneCount(state)) * DRONE_ORBIT;
+}
+
+export function droneY(state: State, i: number): number {
+  return state.robot.y + Math.sin(state.droneAngle + (i * TAU) / droneCount(state)) * DRONE_ORBIT;
+}
+
+/**
+ * CI drone: each drone turns on its orbit and, on its own reload, fires at the nearest bug
+ * within DRONE_RANGE of itself. Its shots never pierce: the review laser is the gun's.
+ */
+function fireDrones(state: State, dt: number): void {
+  const count = droneCount(state);
+  if (count === 0) return;
+  state.droneAngle = (state.droneAngle + DRONE_SPIN * dt) % TAU;
+  const timers = state.droneTimers;
+  for (let i = 0; i < count; i++) {
+    timers[i]! -= dt;
+    if (timers[i]! > 0) continue;
+    const x = droneX(state, i);
+    const y = droneY(state, i);
+    let nearest: Bug | undefined;
+    let best = DRONE_RANGE * DRONE_RANGE;
+    for (const b of state.bugs) {
+      const d = (b.x - x) ** 2 + (b.y - y) ** 2;
+      if (d <= best) {
+        best = d;
+        nearest = b;
+      }
+    }
+    if (!nearest) {
+      timers[i] = 0; // ready the moment a bug comes in range
+      continue;
+    }
+    const dist = Math.sqrt(best) || 1;
+    const vx = ((nearest.x - x) / dist) * SHOT_SPEED;
+    const vy = ((nearest.y - y) / dist) * SHOT_SPEED;
+    state.shots.push({ x, y, vx, vy, life: DRONE_SHOT_LIFETIME, pierce: 0, hit: [], drone: true });
+    timers[i]! += DRONE_FIRE_INTERVAL;
+  }
 }
 
 function moveShots(state: State, dt: number): void {
