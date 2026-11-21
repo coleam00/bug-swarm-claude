@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { crawler } from "./bugs/crawler";
 import { BARREL, DOWN_TICKS, DT, HEAT_LOCK_S, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
-
-const KILL_POINTS = crawler.points;
 import { mult, segmentHit, shotTravelAt } from "./combat";
 import { leavePlayer } from "./sim";
 import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
+
+const KILL_POINTS = crawler.points;
 
 const PER_TICK = SHOT_SPEED * DT;
 
