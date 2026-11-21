@@ -239,7 +239,7 @@ function bugSprite(look: BugLook, frame: number, ppu: number): HTMLCanvasElement
 }
 
 /**
- * The robot's rounded body, or its all-white flash when hit. Its core glow is drawn live. `rim`
+ * The robot's rounded body, or its all-white flash when hit. Its core glow is drawn live. `rimColour`
  * (a #rrggbb) colours the halo and the outline: the arena draws each team's robot in its colour.
  */
 export function robotSprite(ppu: number, flash: boolean, rimColour: string = ROBOT_RIM): HTMLCanvasElement {
