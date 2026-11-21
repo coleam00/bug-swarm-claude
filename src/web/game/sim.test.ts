@@ -589,11 +589,16 @@ describe("test shield", () => {
 
   test("a clump touching at once pops one charge; the next bug waits out the safe window", () => {
     const s = shielded(2);
-    s.bugs.push(touching(), touching());
+    // Three, so a block that went on to the next bug would meet one (removing a bug swaps the
+    // last one into its slot, which a loop moving on would skip).
+    s.bugs.push(touching(), touching(), touching());
     step(s, NONE, DT);
     expect(s.blocks).toBe(1);
     expect(s.shield).toBe(1);
-    expect(s.bugs).toHaveLength(1);
+    expect(s.bugs).toHaveLength(2);
+    step(s, NONE, DT); // inside the safe window: the bugs still touching pop nothing
+    expect(s.blocks).toBe(1);
+    expect(s.shield).toBe(1);
     waitOut(s);
     expect(s.blocks).toBe(2);
     expect(s.shield).toBe(0);
