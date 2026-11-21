@@ -4,7 +4,7 @@ import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, ty
 import { UPGRADES } from "./game/config";
 import { restartIn } from "./game/guard";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
-import { upgradeLevels } from "./over";
+import { saveNotice, upgradeLevels, type SaveState } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
 import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
@@ -17,7 +17,7 @@ import { TEAM_LOOK } from "./teams";
 
 type Over = {
   result: RunResult;
-  saved: "saving" | "saved" | "failed" | "not-saved";
+  saved: SaveState;
   best: number | null | "loading" | "failed";
   top: TopRow[] | "loading" | "failed";
   teams: Record<Team, number> | "loading" | "failed";
@@ -249,6 +249,7 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
   useEffect(() => setTeams(over.teams), [over.teams]);
 
   const upgrades = upgradeLevels(over.result.upgrades);
+  const notice = saveNotice(over.saved);
 
   // The live top 10 and team totals: poll while this screen shows. Both show only what the
   // server returned; this run's score is in the totals once the server has counted it.
@@ -307,9 +308,9 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
         ) : (
           over.best !== "failed" && <p>Best: {over.best === "loading" ? "..." : over.best === null ? "-" : over.best}</p>
         )}
-        {over.saved === "failed" && (
+        {notice && (
           <p role="alert" className="over-alert">
-            Couldn't save your score
+            {notice}
           </p>
         )}
         {/* Hidden, not absent, until restarting is possible, so the layout doesn't move. */}

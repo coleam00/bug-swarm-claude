@@ -11,6 +11,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, normalize, sep } from "node:path";
+import { saveNotice } from "../src/web/over";
 
 const BUGS = 150;
 const SKIP_MS = 5000;
@@ -169,7 +170,10 @@ async function setViewport(cdp: Session, v: Viewport) {
   });
 }
 
-/** The game-over screen at `v`, with the worst case shown: the "couldn't save" alert added. */
+/** The longest line the game-over screen can show about saving. */
+const LONGEST_NOTICE = saveNotice("rate-limited");
+
+/** The game-over screen at `v`, with the worst case shown: the longest save alert added. */
 async function measureLayout(cdp: Session, v: Viewport) {
   await setViewport(cdp, v);
   await wait(300);
@@ -183,7 +187,7 @@ async function measureLayout(cdp: Session, v: Viewport) {
       const alert = document.createElement("p");
       alert.setAttribute("role", "alert");
       alert.className = "over-alert";
-      alert.textContent = "Couldn't save your score";
+      alert.textContent = ${JSON.stringify(LONGEST_NOTICE)};
       summary.insertBefore(alert, again);
     }
     const rows = document.querySelectorAll(".over-board li").length;
@@ -305,7 +309,7 @@ try {
     console.log(`| ${r.label} | ${r.bugs} | ${f1(r.avg)} | ${r.worst} | ${r.slow} | ${r.fxMax} | ${f2(r.draw.avg)} / ${f1(r.draw.p99)} / ${f1(r.draw.max)} ms |`);
   }
   for (const r of rows) if (r.slowAt.length) console.log(`${r.label}: frames over 20 ms ended at ${r.slowAt.map((s) => `${s.toFixed(1)} s`).join(", ")}`);
-  console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the couldn't-save alert added):\n");
+  console.log("\nGame-over layout (4 upgrades at L2, 10 top-10 rows, the team race, the too-many-runs alert added):\n");
   console.log("| Viewport | Upgrade chips | Top-10 rows | Race bar height | Play again height | Hint bottom | Last row bottom | Page height | Fits |");
   console.log("|---|---|---|---|---|---|---|---|---|");
   // "Play again" is a touch target, so it must be at least 44 px tall.

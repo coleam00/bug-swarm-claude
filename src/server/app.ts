@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
+import { isIP } from "node:net";
 import {
   DuplicateRunEnd,
   findPlayer,
@@ -16,8 +17,13 @@ import {
 import { ASSET_PATHS, asset } from "./art";
 import { MAX_UPGRADES, checkName, checkScore, isTeam, isUpgradeId, type Team, type UpgradeId } from "./rules";
 
-/** At most this many run starts per IP per window (architecture.md, "Boundaries"). */
-export const RUN_STARTS_PER_WINDOW = 30;
+/**
+ * At most this many run starts per client IP per window (architecture.md, "Boundaries"). Sized
+ * for a livestream: phone carriers and offices put many viewers behind one public IP.
+ */
+export const RUN_STARTS_PER_WINDOW = 300;
+/** And at most this many per player id per window, so one player can't use up a shared IP's budget. */
+export const RUN_STARTS_PER_PLAYER = 40;
 export const RATE_WINDOW_MS = 10 * 60 * 1000;
 /** Hundreds of clients polling the top 10 cost one query a second. */
 export const TOP_CACHE_MS = 1000;
@@ -27,36 +33,65 @@ export const MAX_BODY_BYTES = 2048;
 /** Browsers and link-preview crawlers keep the icons and the preview for a day. */
 export const ASSET_MAX_AGE_S = 86400;
 const PLAYER_ID = /^[A-Za-z0-9-]{8,64}$/;
+/** How many accepted run starts after boot log their client address, so the operator can check the proxy setting. */
+export const LOGGED_STARTS = 20;
 
 export type AppOptions = {
   /** The server's clock, in ms. Tests inject one. */
   now?: () => number;
   /** The address the rate limit counts by. */
   clientIp?: (c: Context) => string;
-  /** Run starts allowed per IP per window. Defaults to the real limit; only `bun run load` raises it. */
+  /** Run starts allowed per client IP per window. Defaults to the real limit; only `bun run load` raises it. */
   runStartsPerWindow?: number;
+  /** Run starts allowed per player id per window. Defaults to the real limit; only `bun run load` raises it. */
+  runStartsPerPlayer?: number;
+  /** Where the client address of early starts and of every refused start is written. Defaults to nowhere. */
+  log?: (line: string) => void;
 };
 
 /**
- * Behind Railway the socket address is the proxy. Railway documents X-Real-IP as the client's
- * address (docs.railway.com, networking specs and limits), so that comes first. Otherwise the
- * rightmost X-Forwarded-For entry: the hop the last proxy appended (entries to its left are
- * whatever the client sent, and can be forged).
+ * The client's address, for the rate limit. Never throws: anything unexpected is the peer.
+ *
+ * `hops` 0 (the default): X-Real-IP, which Railway documents as the client's address
+ * (docs.railway.com, networking specs and limits), else the rightmost X-Forwarded-For entry
+ * (the hop the last proxy appended), else the peer.
+ *
+ * `hops` n >= 1 (TRUST_PROXY_HOPS): the n-th X-Forwarded-For entry from the right, when it is
+ * an IP address; else the peer. Each of the n trusted proxies appends one entry, so entries a
+ * client prepends sit to the left of the chosen one and can never be picked.
  */
-export function forwardedClientIp(c: Context): string {
-  const real = c.req.header("x-real-ip")?.trim();
-  if (real) return real;
-  const last = c.req.header("x-forwarded-for")?.split(",").pop()?.trim();
-  return last || "unknown";
+export function pickClientIp(header: (name: string) => string | undefined, peer: () => string, hops: number): string {
+  try {
+    if (hops === 0) {
+      const real = header("x-real-ip")?.trim();
+      if (real) return real;
+      const last = header("x-forwarded-for")?.split(",").pop()?.trim();
+      return last || peer();
+    }
+    const entries = (header("x-forwarded-for") ?? "").split(",").map((e) => e.trim());
+    const chosen = entries[entries.length - hops];
+    return chosen && isIP(chosen) !== 0 ? chosen : peer();
+  } catch {
+    return peer();
+  }
+}
+
+/** The `clientIp` option for `createApp`: `pickClientIp` on a request, with `peer` as the fallback. */
+export function clientIpResolver(hops: number, peer: (c: Context) => string): (c: Context) => string {
+  return (c) => pickClientIp((name) => c.req.header(name), () => peer(c), hops);
 }
 
 // The API. Every route the UI calls lives under /api. /health answers once the app can serve.
 // The icons and the link preview sit at the root, where browsers and crawlers look for them.
 export function createApp(db: Database, opts: AppOptions = {}): Hono {
   const now = opts.now ?? Date.now;
-  const clientIp = opts.clientIp ?? forwardedClientIp;
-  const startsPerWindow = opts.runStartsPerWindow ?? RUN_STARTS_PER_WINDOW;
-  const starts = new Map<string, number[]>();
+  const clientIp = opts.clientIp ?? clientIpResolver(0, () => "unknown");
+  const startsPerIp = opts.runStartsPerWindow ?? RUN_STARTS_PER_WINDOW;
+  const startsPerPlayer = opts.runStartsPerPlayer ?? RUN_STARTS_PER_PLAYER;
+  const ipStarts = new Map<string, number[]>();
+  const playerStarts = new Map<string, number[]>();
+  const log = opts.log ?? (() => {});
+  let loggedStarts = 0;
   let topCache: { at: number; top: TopRow[] } | null = null;
   let teamsCache: { at: number; teams: Record<Team, number> } | null = null;
 
@@ -94,15 +129,25 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const team = existing?.team ?? sentTeam;
 
     const t = now();
+    // Two budgets: the client IP's and the player's. A refused start spends neither.
     const ip = clientIp(c);
-    const recent = (starts.get(ip) ?? []).filter((at) => t - at < RATE_WINDOW_MS);
-    if (recent.length >= startsPerWindow) {
-      starts.set(ip, recent);
+    const byIp = inWindow(ipStarts, ip, t);
+    const byPlayer = inWindow(playerStarts, body.playerId, t);
+    const waits = [retryAfter(byIp, startsPerIp, t), retryAfter(byPlayer, startsPerPlayer, t)];
+    if (waits.some((w) => w > 0)) {
+      const cap = waits[0]! > 0 && waits[1]! > 0 ? "both caps" : waits[0]! > 0 ? "per-IP cap" : "per-player cap";
+      log(`run start refused (${cap}): client ${ip}`);
+      c.header("Retry-After", String(Math.max(...waits)));
       return c.json({ error: "rate" }, 429);
     }
-    recent.push(t);
-    starts.set(ip, recent);
-    pruneStarts(starts, t);
+    ipStarts.set(ip, [...byIp, t]);
+    playerStarts.set(body.playerId, [...byPlayer, t]);
+    pruneStarts(ipStarts, t);
+    pruneStarts(playerStarts, t);
+    if (loggedStarts < LOGGED_STARTS) {
+      loggedStarts++;
+      log(`run start ${loggedStarts}/${LOGGED_STARTS} after boot: client ${ip}`);
+    }
 
     const runId = crypto.randomUUID();
     const at = new Date(t);
@@ -186,10 +231,21 @@ function isUpgrades(v: unknown): v is UpgradeId[] {
   return Array.isArray(v) && v.length <= MAX_UPGRADES && v.every(isUpgradeId);
 }
 
-/** Drops IPs with no start inside the window, so the map doesn't grow without bound. */
+/** The starts under `key` still inside the window at `t`. Reads only: a refused start adds no key. */
+function inWindow(starts: Map<string, number[]>, key: string, t: number): number[] {
+  return (starts.get(key) ?? []).filter((at) => t - at < RATE_WINDOW_MS);
+}
+
+/** 0 when another start fits under `cap`; else the whole seconds until the oldest one leaves the window. */
+function retryAfter(recent: number[], cap: number, t: number): number {
+  if (recent.length < cap) return 0;
+  return Math.max(1, Math.ceil((recent[0]! + RATE_WINDOW_MS - t) / 1000));
+}
+
+/** Drops keys with no start inside the window, so the map doesn't grow without bound. */
 function pruneStarts(starts: Map<string, number[]>, t: number): void {
   if (starts.size < 1000) return;
-  for (const [ip, times] of starts) {
-    if (times.every((at) => t - at >= RATE_WINDOW_MS)) starts.delete(ip);
+  for (const [key, times] of starts) {
+    if (times.every((at) => t - at >= RATE_WINDOW_MS)) starts.delete(key);
   }
 }
