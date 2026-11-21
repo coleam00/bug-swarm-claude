@@ -1,0 +1,1135 @@
+{
+  "pack": "Wirasm.archon-software-factory",
+  "stages": [
+    {
+      "name": "Wirasm/archon-software-factory:build",
+      "returns": "build",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "built",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          },
+          {
+            "value": "stop",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "build",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:deliver",
+      "returns": "result",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "ready",
+            "startsNothing": true
+          },
+          {
+            "value": "returned",
+            "startsNothing": true
+          },
+          {
+            "value": "waiting",
+            "startsNothing": true
+          },
+          {
+            "value": "replan",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": true,
+      "nodes": [
+        {
+          "id": "build__build",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "rounds",
+          "kind": "loop_group",
+          "dependsOn": [
+            "build__build"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.fix",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": "rounds",
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.base",
+          "kind": "exec",
+          "dependsOn": [
+            "rounds.fix"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.checks",
+          "kind": "exec",
+          "dependsOn": [
+            "rounds.base"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.review__review",
+          "kind": "agent",
+          "dependsOn": [
+            "rounds.base"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [
+            {
+              "include": "rounds.review",
+              "workflow": "Wirasm/archon-software-factory:review"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.tests__tests",
+          "kind": "agent",
+          "dependsOn": [
+            "rounds.base"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [
+            {
+              "include": "rounds.tests",
+              "workflow": "Wirasm/archon-software-factory:tests"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.product__product",
+          "kind": "agent",
+          "dependsOn": [
+            "rounds.base"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [
+            {
+              "include": "rounds.product",
+              "workflow": "Wirasm/archon-software-factory:product"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.verdict__verdict",
+          "kind": "agent",
+          "dependsOn": [
+            "rounds.review__review",
+            "rounds.tests__tests",
+            "rounds.product__product"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [
+            {
+              "include": "rounds.verdict",
+              "workflow": "Wirasm/archon-software-factory:verdict"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "rounds.shown",
+          "kind": "exec",
+          "dependsOn": [
+            "rounds.verdict__verdict",
+            "rounds.checks"
+          ],
+          "loopGroup": "rounds",
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "exhausted",
+          "kind": "agent",
+          "dependsOn": [
+            "rounds"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "hostrounds",
+          "kind": "loop_group",
+          "dependsOn": [
+            "rounds"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "hostrounds.hostfix",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": "hostrounds",
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "hostrounds.host__host",
+          "kind": "agent",
+          "dependsOn": [
+            "hostrounds.hostfix"
+          ],
+          "loopGroup": "hostrounds",
+          "blocks": [
+            {
+              "include": "hostrounds.host",
+              "workflow": "Wirasm/archon-software-factory:host"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "result",
+          "kind": "exec",
+          "dependsOn": [
+            "rounds",
+            "hostrounds",
+            "exhausted"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "reported",
+          "kind": "exec",
+          "dependsOn": [
+            "result"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:discoveries",
+      "returns": "result",
+      "outcome": null,
+      "asks": false,
+      "nodes": [
+        {
+          "id": "intake",
+          "kind": "exec",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "drain",
+          "kind": "agent",
+          "dependsOn": [
+            "intake"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "result",
+          "kind": "exec",
+          "dependsOn": [
+            "drain"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:host",
+      "returns": "host",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "clear",
+            "startsNothing": true
+          },
+          {
+            "value": "return",
+            "startsNothing": true
+          },
+          {
+            "value": "waiting",
+            "startsNothing": true
+          },
+          {
+            "value": "none",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "host",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:inspect",
+      "returns": "report",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "approve",
+            "startsNothing": true
+          },
+          {
+            "value": "return",
+            "startsNothing": true
+          },
+          {
+            "value": "replan",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          },
+          {
+            "value": "refused",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "read",
+          "kind": "exec",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "base",
+          "kind": "exec",
+          "dependsOn": [
+            "read"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "review__review",
+          "kind": "agent",
+          "dependsOn": [
+            "base"
+          ],
+          "loopGroup": null,
+          "blocks": [
+            {
+              "include": "review",
+              "workflow": "Wirasm/archon-software-factory:review"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "tests__tests",
+          "kind": "agent",
+          "dependsOn": [
+            "base"
+          ],
+          "loopGroup": null,
+          "blocks": [
+            {
+              "include": "tests",
+              "workflow": "Wirasm/archon-software-factory:tests"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "verdict__verdict",
+          "kind": "agent",
+          "dependsOn": [
+            "review__review",
+            "tests__tests"
+          ],
+          "loopGroup": null,
+          "blocks": [
+            {
+              "include": "verdict",
+              "workflow": "Wirasm/archon-software-factory:verdict"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "report",
+          "kind": "exec",
+          "dependsOn": [
+            "verdict__verdict"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:investigate",
+      "returns": "investigate",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "caused",
+            "startsNothing": true
+          },
+          {
+            "value": "not_reproduced",
+            "startsNothing": true
+          },
+          {
+            "value": "not_a_bug",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "investigate",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:judge",
+      "returns": "judge",
+      "outcome": null,
+      "asks": false,
+      "nodes": [
+        {
+          "id": "judge",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:land",
+      "returns": "land",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "landed",
+            "startsNothing": true
+          },
+          {
+            "value": "returned",
+            "startsNothing": true
+          },
+          {
+            "value": "stop",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "land",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:landed",
+      "returns": "landed",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "clear",
+            "startsNothing": true
+          },
+          {
+            "value": "broken_here",
+            "startsNothing": true
+          },
+          {
+            "value": "broken_before",
+            "startsNothing": true
+          },
+          {
+            "value": "unclear",
+            "startsNothing": true
+          },
+          {
+            "value": "waiting",
+            "startsNothing": true
+          },
+          {
+            "value": "not_landed",
+            "startsNothing": true
+          },
+          {
+            "value": "none",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "landed",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:landgate",
+      "returns": "gate",
+      "outcome": null,
+      "asks": false,
+      "nodes": [
+        {
+          "id": "gate",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:link",
+      "returns": "link",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "place",
+            "startsNothing": true
+          },
+          {
+            "value": "fold",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "link",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:order",
+      "returns": "order",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "ready",
+            "startsNothing": true
+          },
+          {
+            "value": "refused",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "order",
+          "kind": "exec",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:plan",
+      "returns": "plan",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "planned",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          },
+          {
+            "value": "stop",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": true,
+      "nodes": [
+        {
+          "id": "plan",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:product",
+      "returns": "product",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "approve",
+            "startsNothing": true
+          },
+          {
+            "value": "return",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "product",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:review",
+      "returns": "review",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "approve",
+            "startsNothing": true
+          },
+          {
+            "value": "return",
+            "startsNothing": true
+          },
+          {
+            "value": "replan",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "review",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:split",
+      "returns": "orders",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "whole",
+            "startsNothing": true
+          },
+          {
+            "value": "split",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "cut",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "orders",
+          "kind": "exec",
+          "dependsOn": [
+            "cut"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:tests",
+      "returns": "tests",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "sound",
+            "startsNothing": true
+          },
+          {
+            "value": "return",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "tests",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:triage",
+      "returns": "judge__judge",
+      "outcome": {
+        "field": "recommend",
+        "form": "enum",
+        "values": [
+          {
+            "value": "build",
+            "startsNothing": true
+          },
+          {
+            "value": "narrow",
+            "startsNothing": true
+          },
+          {
+            "value": "recipe",
+            "startsNothing": true
+          },
+          {
+            "value": "native",
+            "startsNothing": true
+          },
+          {
+            "value": "fold",
+            "startsNothing": true
+          },
+          {
+            "value": "park",
+            "startsNothing": true
+          },
+          {
+            "value": "deprecate",
+            "startsNothing": true
+          },
+          {
+            "value": "decline",
+            "startsNothing": true
+          },
+          {
+            "value": "close",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "judge__judge",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "link__link",
+          "kind": "agent",
+          "dependsOn": [
+            "judge__judge"
+          ],
+          "loopGroup": null,
+          "blocks": [
+            {
+              "include": "link",
+              "workflow": "Wirasm/archon-software-factory:link"
+            }
+          ],
+          "fanOut": null
+        },
+        {
+          "id": "admit",
+          "kind": "agent",
+          "dependsOn": [
+            "judge__judge"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "split",
+          "kind": "agent",
+          "dependsOn": [
+            "judge__judge"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        },
+        {
+          "id": "admitted",
+          "kind": "exec",
+          "dependsOn": [
+            "admit"
+          ],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:validate",
+      "returns": "validate",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "passed",
+            "startsNothing": true
+          },
+          {
+            "value": "failed",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "validate",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    },
+    {
+      "name": "Wirasm/archon-software-factory:verdict",
+      "returns": "verdict",
+      "outcome": {
+        "field": "outcome",
+        "form": "enum",
+        "values": [
+          {
+            "value": "approve",
+            "startsNothing": true
+          },
+          {
+            "value": "return",
+            "startsNothing": true
+          },
+          {
+            "value": "replan",
+            "startsNothing": true
+          },
+          {
+            "value": "ask",
+            "startsNothing": true
+          }
+        ]
+      },
+      "asks": false,
+      "nodes": [
+        {
+          "id": "verdict",
+          "kind": "agent",
+          "dependsOn": [],
+          "loopGroup": null,
+          "blocks": [],
+          "fanOut": null
+        }
+      ]
+    }
+  ],
+  "arrows": [
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:order",
+        "outcome": "ready"
+      },
+      "to": "Wirasm/archon-software-factory:triage",
+      "active": false,
+      "declared": {
+        "binding": "triage-after-order",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:triage",
+        "outcome": "build"
+      },
+      "to": "Wirasm/archon-software-factory:plan",
+      "active": false,
+      "declared": {
+        "binding": "plan-after-triage",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:triage",
+        "outcome": "narrow"
+      },
+      "to": "Wirasm/archon-software-factory:plan",
+      "active": false,
+      "declared": {
+        "binding": "plan-after-triage",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:plan",
+        "outcome": "planned"
+      },
+      "to": "Wirasm/archon-software-factory:deliver",
+      "active": false,
+      "declared": {
+        "binding": "deliver-after-plan",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:landed",
+        "outcome": "broken_here"
+      },
+      "to": "Wirasm/archon-software-factory:order",
+      "active": false,
+      "declared": {
+        "binding": "order-after-landed",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:deliver",
+        "outcome": "ready"
+      },
+      "to": "Wirasm/archon-software-factory:landgate",
+      "active": false,
+      "declared": {
+        "binding": "landgate-after-deliver",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:deliver",
+        "outcome": "ready"
+      },
+      "to": "Wirasm/archon-software-factory:discoveries",
+      "active": false,
+      "declared": {
+        "binding": "discoveries-after-deliver",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:plan",
+        "settled": "answered"
+      },
+      "to": "Wirasm/archon-software-factory:plan",
+      "active": false,
+      "declared": {
+        "binding": "plan-after-answers",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:deliver",
+        "settled": "answered",
+        "option": "replan"
+      },
+      "to": "Wirasm/archon-software-factory:plan",
+      "active": false,
+      "declared": {
+        "binding": "plan-after-deliver-replan",
+        "problems": []
+      },
+      "installed": null
+    },
+    {
+      "from": {
+        "stage": "Wirasm/archon-software-factory:deliver",
+        "settled": "answered",
+        "option": "send-back"
+      },
+      "to": "Wirasm/archon-software-factory:deliver",
+      "active": false,
+      "declared": {
+        "binding": "deliver-after-answers",
+        "problems": []
+      },
+      "installed": null
+    }
+  ],
+  "fanOutBlocks": [],
+  "discoveryErrors": []
+}
