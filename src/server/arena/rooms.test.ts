@@ -183,6 +183,7 @@ describe("lives", () => {
     const p = room.state.players[0]!;
     tick(30);
     p.invulnTicks = 0;
+    p.protectTicks = 0;
     p.hits = HITS_PER_LIFE - 1;
     p.score = 120;
     p.kills = 9;

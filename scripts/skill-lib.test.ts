@@ -1,5 +1,54 @@
 import { describe, expect, test } from "bun:test";
-import { formatSkill, gatePasses, judge, parseSkillArgs, playLife, quantile, runSkill, USAGE } from "./skill-lib";
+import {
+  formatDropIn,
+  formatSkill,
+  gatePasses,
+  idleGate,
+  judge,
+  lateGate,
+  parseSkillArgs,
+  playLife,
+  playNewcomer,
+  quantile,
+  runDropIn,
+  runSkill,
+  USAGE,
+  warmArenas,
+} from "./skill-lib";
+
+describe("bun run skill: fair drop-in", () => {
+  test("the late gate is 0.8x and the idle gate 10 s, at their boundaries", () => {
+    expect(lateGate(79, 100)).toBe(false);
+    expect(lateGate(80, 100)).toBe(true);
+    expect(lateGate(0, 0)).toBe(false);
+    expect(idleGate([12, 9.9, 15])).toBe(false);
+    expect(idleGate([10, 10, 30])).toBe(true);
+    expect(idleGate([])).toBe(false);
+  });
+
+  test("a newcomer's life replays exactly from a warmed arena, which the play leaves untouched", () => {
+    const [aged] = warmArenas(2, [0.5]);
+    const before = JSON.stringify(aged);
+    expect(aged!.state.tick).toBe(600);
+    expect(playNewcomer(aged!, "mover", 2, 60)).toEqual(playNewcomer(aged!, "mover", 2, 60));
+    expect(JSON.stringify(aged)).toBe(before);
+  });
+
+  test("a reduced run produces lives and numbers at every join age", () => {
+    const r = runDropIn(3, 60, [0, 1], 1);
+    expect(r.idle.map((a) => a.lives)).toEqual([3, 3]);
+    expect(r.late.map((l) => [l.early.lives, l.late.lives])).toEqual([
+      [3, 3],
+      [3, 3],
+    ]);
+    for (const a of [...r.idle, ...r.late.flatMap((l) => [l.early, l.late])]) {
+      for (const v of [a.median, a.p25, a.p75, a.bugsAtJoin]) expect(Number.isFinite(v)).toBe(true);
+      expect(a.median).toBeGreaterThan(0);
+    }
+    const lines = formatDropIn(r);
+    expect(lines.filter((l) => l.startsWith("gate:"))).toHaveLength(3);
+  });
+});
 
 describe("bun run skill", () => {
   test("on 8 seeds the aimer out-scores the mover at least 2x, and neither median is degenerate", () => {

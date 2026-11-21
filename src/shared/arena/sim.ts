@@ -14,9 +14,12 @@ import {
   INVULN_S,
   MAX_SPEED,
   PLAYER_RADIUS,
-  RESPAWN_CLEAR,
   RESPAWN_DELAY_S,
+  SPAWN_BUG_CLEAR,
+  SPAWN_CANDIDATES,
   SPAWN_MARGIN,
+  SPAWN_NEAR_DIST,
+  SPAWN_PROTECT_S,
   WAVE_S,
   WORLD_H,
   WORLD_W,
@@ -71,8 +74,12 @@ export type Player = {
   lockTicks: number;
   /** Seconds until the next shot may leave (negative: owed this tick). */
   fireCooldown: number;
-  /** Ticks left untouchable. */
+  /** Ticks left untouchable after a hit. */
   invulnTicks: number;
+  /** Ticks left of spawn protection (bugs cannot hurt you); holding fire ends it. */
+  protectTicks: number;
+  /** In the first life of this session (a join): its pressure starts FIRST_LIFE_EASY_S late. */
+  firstLife: boolean;
   /** Bugs this player's pressure owes the arena (fractional). */
   budget: number;
 };
@@ -158,7 +165,7 @@ export function wave(tick: number): number {
   return 1 + Math.floor((tick * DT) / WAVE_S);
 }
 
-/** Starts a fresh life for `p` at (x, y): every life field reset, with spawn protection. */
+/** Starts a fresh life for `p` at (x, y): every life field reset, with SPAWN_PROTECT_S of spawn protection. */
 function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.x = x;
   p.y = y;
@@ -173,39 +180,88 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.heat = 0;
   p.lockTicks = 0;
   p.fireCooldown = 0;
-  p.invulnTicks = Math.round(INVULN_S / DT);
+  p.invulnTicks = 0;
+  p.protectTicks = Math.round(SPAWN_PROTECT_S / DT);
   p.budget = 0;
+}
+
+/** Whether a bug touching `p` costs a hit: alive, and neither just hit nor spawn-protected. */
+export function canBeHit(p: Player): boolean {
+  return p.alive && p.invulnTicks === 0 && p.protectTicks === 0;
 }
 
 const spot = { x: 0, y: 0 };
 
-/**
- * Puts a random spot at least SPAWN_MARGIN from every wall in `spot`, retried up to 8 times to
- * land at least RESPAWN_CLEAR from every bug (the last try stands).
- */
-function safeSpot(state: ArenaState): void {
-  for (let i = 0; i < 8; i++) {
-    spot.x = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_W - 2 * SPAWN_MARGIN);
-    spot.y = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_H - 2 * SPAWN_MARGIN);
-    if (clearOfBugs(state, spot.x, spot.y)) return;
-  }
-}
-
-function clearOfBugs(state: ArenaState, x: number, y: number): boolean {
-  const r2 = RESPAWN_CLEAR * RESPAWN_CLEAR;
+/** The squared distance from (x, y) to the nearest bug (Infinity with none). */
+function nearestBugD2(state: ArenaState, x: number, y: number): number {
+  let best = Infinity;
   for (const b of state.bugs) {
     const dx = b.x - x;
     const dy = b.y - y;
-    if (dx * dx + dy * dy < r2) return false;
+    const d = dx * dx + dy * dy;
+    if (d < best) best = d;
   }
-  return true;
+  return best;
+}
+
+/** The distance from (x, y) to the nearest alive player other than `selfId` (Infinity with none). */
+function nearestOtherD(state: ArenaState, selfId: number, x: number, y: number): number {
+  let best = Infinity;
+  for (const q of state.players) {
+    if (!q.alive || q.id === selfId) continue;
+    const d = Math.hypot(q.x - x, q.y - y);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/**
+ * Picks a spawn spot for player `selfId` and returns it (the module's one reused object).
+ * SPAWN_CANDIDATES spots are drawn, all of them every time so the generator's use is fixed,
+ * uniformly at least SPAWN_MARGIN from every wall. Among those at least SPAWN_BUG_CLEAR from every
+ * bug it takes the one whose nearest other alive player is closest to SPAWN_NEAR_DIST away (help
+ * nearby, not on top of them), or the first when no one else is alive. When none is clear, the one
+ * farthest from any bug. Ties go to the earlier spot.
+ */
+export function safeSpot(state: ArenaState, selfId: number): { x: number; y: number } {
+  const clear2 = SPAWN_BUG_CLEAR * SPAWN_BUG_CLEAR;
+  let haveClear = false;
+  let bestScore = Infinity; // |nearest other player - SPAWN_NEAR_DIST| of the best clear spot
+  let farthest = -1; // the fallback's nearest-bug distance, squared
+  let fx = 0;
+  let fy = 0;
+  for (let i = 0; i < SPAWN_CANDIDATES; i++) {
+    const x = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_W - 2 * SPAWN_MARGIN);
+    const y = SPAWN_MARGIN + nextRandom(state.rng) * (WORLD_H - 2 * SPAWN_MARGIN);
+    const dBug2 = nearestBugD2(state, x, y);
+    if (dBug2 >= clear2) {
+      const dp = nearestOtherD(state, selfId, x, y);
+      const score = dp === Infinity ? 0 : Math.abs(dp - SPAWN_NEAR_DIST);
+      if (!haveClear || score < bestScore) {
+        haveClear = true;
+        bestScore = score;
+        spot.x = x;
+        spot.y = y;
+      }
+    } else if (!haveClear && dBug2 > farthest) {
+      farthest = dBug2;
+      fx = x;
+      fy = y;
+    }
+  }
+  if (!haveClear) {
+    spot.x = fx;
+    spot.y = fy;
+  }
+  return spot;
 }
 
 /** Adds a player, in a new life at a safe random spot. */
 export function joinPlayer(state: ArenaState, name: string, team: Team): Player {
-  safeSpot(state);
+  const id = state.nextId++;
+  safeSpot(state, id);
   const p: Player = {
-    id: state.nextId++,
+    id,
     name,
     team,
     x: 0,
@@ -226,6 +282,8 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
     lockTicks: 0,
     fireCooldown: 0,
     invulnTicks: 0,
+    protectTicks: 0,
+    firstLife: true,
     budget: 0,
   };
   startLife(state, p, spot.x, spot.y);
@@ -257,7 +315,7 @@ export function leavePlayer(state: ArenaState, id: number): { life: LifeEnd | nu
   return { life };
 }
 
-/** Takes a hit on `p` (the caller checked it can be hit): untouchable for a moment; the last hit ends the life. */
+/** Takes a hit on `p` (the caller checked canBeHit): untouchable for INVULN_S; the last hit ends the life. */
 export function hitPlayer(state: ArenaState, p: Player): void {
   p.hits++;
   p.invulnTicks = Math.round(INVULN_S / DT);
@@ -348,11 +406,13 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  * Advances the arena one fixed step, in a fixed order (arrays in index order, every random draw
  * from state.rng), so the same seed and inputs replay exactly:
  * 1. players: the alive move; an out player whose input has dash, RESPAWN_DELAY_S or more after
- *    going out, respawns at a safe spot;
+ *    going out, respawns at a safeSpot in a life that is no longer their first; an alive player
+ *    holding fire loses any spawn protection left, before they fire;
  * 2. fire and heat, alive players only (combat.ts);
  * 3. bugs: personal spawn budgets, spawning out of view, chasing, contact hits (bugs.ts);
  * 4. shots: travel, hits, kills, misses (combat.ts);
- * 5. the tick counts.
+ * 5. spawn protection counts down (after contact, so a join and a respawn are both protected for
+ *    SPAWN_PROTECT_S of contact steps), and the tick counts.
  * `state.events` reports what happened in this step.
  */
 export function stepArena(state: ArenaState): void {
@@ -368,12 +428,15 @@ export function stepArena(state: ArenaState): void {
       stepPlayer(p, p.input.mx, p.input.my);
       if (p.invulnTicks > 0) p.invulnTicks--;
     } else if (p.input.dash && state.tick - p.outTick >= RESPAWN_DELAY_TICKS) {
-      safeSpot(state);
+      safeSpot(state, p.id);
+      p.firstLife = false;
       startLife(state, p, spot.x, spot.y);
     }
+    if (p.alive && p.input.fire) p.protectTicks = 0;
   }
   for (const p of state.players) if (p.alive) stepFire(state, p);
   stepBugs(state);
   stepShots(state);
+  for (const p of state.players) if (p.alive && p.protectTicks > 0) p.protectTicks--;
   state.tick++;
 }

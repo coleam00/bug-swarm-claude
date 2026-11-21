@@ -1,10 +1,22 @@
-// `bun run skill`'s pure half: plays one life per policy per seed in-process, on the real arena
-// simulation, and checks the skill gate (PRD.md, "Skill is measured"): the aimer's median score
-// at least 2x the mover's. Tested in skill-lib.test.ts on a few seeds.
+// `bun run skill`'s pure half: plays lives in-process on the real arena simulation and checks the
+// three skill gates (PRD.md, "Skill is measured"): the aimer's median score at least 2x the mover's
+// (one life per policy per seed, alone); late joiners living at least 0.8x as long as early ones;
+// and an idle newcomer living at least 10 s at every arena age (newcomers joining seeded arenas
+// that aimer bots have played in). Tested in skill-lib.test.ts on a few seeds.
 import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
-import { createRng } from "../src/shared/arena/rng";
-import { POLICIES, POLICY_NAMES, createMemory, createObservation, observe, type PolicyInput, type PolicyName } from "../src/shared/arena/policies";
-import { clampInput, createArena, joinPlayer, stepArena } from "../src/shared/arena/sim";
+import { createRng, type Rng } from "../src/shared/arena/rng";
+import {
+  POLICIES,
+  POLICY_NAMES,
+  createMemory,
+  createObservation,
+  observe,
+  type Observation,
+  type PolicyInput,
+  type PolicyMemory,
+  type PolicyName,
+} from "../src/shared/arena/policies";
+import { clampInput, createArena, joinPlayer, stepArena, type ArenaState } from "../src/shared/arena/sim";
 
 export type LifeResult = { score: number; kills: number; seconds: number; capped: boolean };
 
@@ -126,6 +138,184 @@ export function formatSkill(r: SkillReport): string[] {
   const ratio = Number.isFinite(r.ratio) ? `${r.ratio.toFixed(2)}x` : "infinite";
   lines.push(`gate: aimer median score >= ${GATE_RATIO}x mover: ${ratio} ${r.pass ? "PASS" : "FAIL"}`);
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");
+  return lines;
+}
+
+// ---- Fair drop-in (#58): newcomers joining an arena others have played in for a while. ----
+
+/** A late joiner's median life must be at least this fraction of an early joiner's. */
+export const LATE_RATIO = 0.8;
+/** An idle newcomer's median life must be at least this long, seconds, at every join age. */
+export const IDLE_MIN_S = 10;
+/** The arena ages a newcomer joins at, minutes. The late gate compares LATE_AGE_MIN with 0. */
+export const JOIN_AGES_MIN = [0, 5, 10, 20] as const;
+export const LATE_AGE_MIN = 10;
+/** The background: aimer bots that join the arena at tick 0 (PRD.md tops arenas up to 4). */
+export const BACKGROUND_BOTS = 3;
+/** The policies the late gate measures: every skill level joins late, so both are gated. */
+export const LATE_POLICIES = ["mover", "aimer"] as const satisfies readonly PolicyName[];
+
+/** The late gate: a late joiner's median life is at least LATE_RATIO of an early joiner's (above 0). */
+export function lateGate(late: number, early: number): boolean {
+  return early > 0 && late >= LATE_RATIO * early;
+}
+
+/** The idle gate: every join age's median life is at least IDLE_MIN_S. */
+export function idleGate(medians: readonly number[]): boolean {
+  return medians.length > 0 && medians.every((m) => m >= IDLE_MIN_S);
+}
+
+type Bot = { id: number; rng: Rng; mem: PolicyMemory; obs: Observation; out: PolicyInput; seq: number };
+
+/** An arena at some age with its background bots: plain data, so structuredClone replays it exactly. */
+export type AgedArena = { ageMin: number; state: ArenaState; bots: Bot[] };
+
+/** One tick of input for a player playing `policy` (dash as the policy says, so a bot respawns). */
+function drive(state: ArenaState, bot: Bot, act: (typeof POLICIES)[PolicyName], respawn: boolean): void {
+  const p = state.players.find((q) => q.id === bot.id);
+  if (!p) return;
+  observe(state, bot.id, WORLD_W, WORLD_H, bot.obs);
+  act(bot.obs, bot.mem, bot.rng, bot.out);
+  const o = bot.out;
+  p.input = clampInput({ seq: ++bot.seq, mx: o.mx, my: o.my, aim: o.aim, fire: o.fire, dash: respawn && o.dash });
+}
+
+function newBot(id: number, rngSeed: number): Bot {
+  return {
+    id,
+    rng: createRng(rngSeed),
+    mem: createMemory(),
+    obs: createObservation(),
+    out: { mx: 0, my: 0, aim: 0, fire: false, dash: false },
+    seq: 0,
+  };
+}
+
+/**
+ * Plays an arena seeded `seed` with BACKGROUND_BOTS aimer bots (generators `seed * 7 + i`) that
+ * join at tick 0 and respawn, and returns a copy of it at each age in `agesMin` (ascending).
+ */
+export function warmArenas(seed: number, agesMin: readonly number[]): AgedArena[] {
+  const state = createArena(seed);
+  const bots: Bot[] = [];
+  for (let i = 0; i < BACKGROUND_BOTS; i++) bots.push(newBot(joinPlayer(state, `bot ${i}`, i % 2 ? "spaces" : "tabs").id, seed * 7 + i));
+  const out: AgedArena[] = [];
+  for (const ageMin of agesMin) {
+    const until = Math.round((ageMin * 60) / DT);
+    while (state.tick < until) {
+      for (const b of bots) drive(state, b, POLICIES.aimer, true);
+      stepArena(state);
+    }
+    out.push(structuredClone({ ageMin, state, bots }));
+  }
+  return out;
+}
+
+/**
+ * Joins a newcomer playing `policy` into a copy of `aged` and steps it with the bots until the
+ * newcomer's first life ends or `maxSeconds` pass (reported capped). `aged` itself is untouched.
+ */
+export function playNewcomer(aged: AgedArena, policy: PolicyName, seed: number, maxSeconds: number): LifeResult {
+  const { state, bots } = structuredClone(aged);
+  const p = joinPlayer(state, "newcomer", "tabs");
+  const me = newBot(p.id, seed ^ 0x5bd1e995);
+  const act = POLICIES[policy];
+  const maxTicks = Math.round(maxSeconds / DT);
+  for (let t = 0; t < maxTicks; t++) {
+    for (const b of bots) drive(state, b, POLICIES.aimer, true);
+    drive(state, me, act, false);
+    stepArena(state);
+    for (const ended of state.events.livesEnded) {
+      if (ended.id === p.id) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false };
+    }
+  }
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true };
+}
+
+/** Life lengths at one join age: median, quartiles, how many hit the cap, and bugs alive at the join (median). */
+export type AgeSummary = { ageMin: number; lives: number; median: number; p25: number; p75: number; capped: number; bugsAtJoin: number };
+
+function summarizeAge(ageMin: number, lives: readonly LifeResult[], bugs: readonly number[]): AgeSummary {
+  const secs = lives.map((l) => l.seconds).sort((a, b) => a - b);
+  return {
+    ageMin,
+    lives: lives.length,
+    median: quantile(secs, 0.5),
+    p25: quantile(secs, 0.25),
+    p75: quantile(secs, 0.75),
+    capped: lives.filter((l) => l.capped).length,
+    bugsAtJoin: quantile([...bugs].sort((a, b) => a - b), 0.5),
+  };
+}
+
+export type LateRow = { policy: PolicyName; early: AgeSummary; late: AgeSummary; ratio: number; pass: boolean };
+
+export type DropInReport = {
+  seeds: number;
+  maxSeconds: number;
+  late: LateRow[];
+  latePass: boolean;
+  idle: AgeSummary[];
+  idlePass: boolean;
+};
+
+/**
+ * The drop-in gates on seeds 0 to seeds-1: each seed's arena is warmed once to the oldest age in
+ * `agesMin`, and newcomers join copies of it. Late: each LATE_POLICIES policy at `lateAgeMin` against
+ * 0. Idle: the idle policy at every age.
+ */
+export function runDropIn(
+  seeds: number,
+  maxSeconds: number,
+  agesMin: readonly number[] = JOIN_AGES_MIN,
+  lateAgeMin: number = LATE_AGE_MIN,
+): DropInReport {
+  const lives = new Map<string, LifeResult[]>();
+  const bugs = new Map<number, number[]>();
+  const add = (k: string, r: LifeResult) => {
+    const l = lives.get(k);
+    if (l) l.push(r);
+    else lives.set(k, [r]);
+  };
+  for (let s = 0; s < seeds; s++) {
+    for (const aged of warmArenas(s, agesMin)) {
+      const b = bugs.get(aged.ageMin) ?? [];
+      b.push(aged.state.bugs.length);
+      bugs.set(aged.ageMin, b);
+      add(`idle@${aged.ageMin}`, playNewcomer(aged, "idle", s, maxSeconds));
+      if (aged.ageMin === 0 || aged.ageMin === lateAgeMin) {
+        for (const pol of LATE_POLICIES) add(`${pol}@${aged.ageMin}`, playNewcomer(aged, pol, s, maxSeconds));
+      }
+    }
+  }
+  const at = (k: string, age: number) => summarizeAge(age, lives.get(`${k}@${age}`) ?? [], bugs.get(age) ?? []);
+  const late = LATE_POLICIES.map((policy): LateRow => {
+    const early = at(policy, 0);
+    const lateS = at(policy, lateAgeMin);
+    return { policy, early, late: lateS, ratio: early.median > 0 ? lateS.median / early.median : 0, pass: lateGate(lateS.median, early.median) };
+  });
+  const idle = agesMin.map((age) => at("idle", age));
+  return { seeds, maxSeconds, late, latePass: late.every((r) => r.pass), idle, idlePass: idleGate(idle.map((r) => r.median)) };
+}
+
+export function formatDropIn(r: DropInReport): string[] {
+  const lines = [
+    `drop-in: ${r.seeds} seeds, ${BACKGROUND_BOTS} aimer bots from tick 0, newcomer's first life, capped at ${r.maxSeconds} s`,
+    `${"late".padEnd(8)}${pad("join", 6)}${pad("bugs", 6)}${pad("life p25", 10)}${pad("median", 8)}${pad("p75", 7)}${pad("capped", 8)}`,
+  ];
+  const row = (label: string, a: AgeSummary) =>
+    `${label.padEnd(8)}${pad(`${a.ageMin}m`, 6)}${pad(Math.round(a.bugsAtJoin), 6)}${pad(a.p25.toFixed(1), 10)}${pad(a.median.toFixed(1), 8)}${pad(a.p75.toFixed(1), 7)}${pad(a.capped, 8)}`;
+  for (const l of r.late) {
+    lines.push(row(l.policy, l.early));
+    lines.push(row(l.policy, l.late));
+  }
+  for (const l of r.late) {
+    lines.push(`gate: ${l.policy} late (${l.late.ageMin}m) median life >= ${LATE_RATIO}x early (0m): ${l.ratio.toFixed(2)}x ${l.pass ? "PASS" : "FAIL"}`);
+  }
+  lines.push(`${"idle".padEnd(8)}${pad("join", 6)}${pad("bugs", 6)}${pad("life p25", 10)}${pad("median", 8)}${pad("p75", 7)}${pad("capped", 8)}`);
+  for (const a of r.idle) lines.push(row("idle", a));
+  const worst = Math.min(...r.idle.map((a) => a.median));
+  lines.push(`gate: idle newcomer median life >= ${IDLE_MIN_S} s at every join age: lowest ${worst.toFixed(1)} s ${r.idlePass ? "PASS" : "FAIL"}`);
   return lines;
 }
 
