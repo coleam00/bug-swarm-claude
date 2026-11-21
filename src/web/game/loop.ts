@@ -8,6 +8,7 @@ import { HIT_SHAKE, createShake, kick, updateShake } from "./fx/shake";
 import { createTexts, spawnText, updateTexts } from "./fx/text";
 import { createTrail, updateTrail } from "./fx/trail";
 import { createFpsMeter, tickFps } from "./fps";
+import { CHOICE_DELAY_MS, inputReady } from "./guard";
 import type { UpgradeId } from "../../server/rules";
 import { CHOICE_KEYS, STATS_KEY, STEERING_KEYS, keysToInput } from "./keys";
 import { BUG_LOOKS, GLOW_CYAN, bugLookId } from "./look";
@@ -22,7 +23,10 @@ export type { RunResult };
 export type Game = {
   /** Cancels the loop and removes every listener. */
   stop: () => void;
-  /** Takes card `index` of the choice on offer; false if there is no such card. */
+  /**
+   * Takes card `index` of the choice on offer; false if there is no such card, or if the choice
+   * opened less than CHOICE_DELAY_MS ago (guard.ts), so a reflexive re-touch can't pick unseen.
+   */
   pick: (index: number) => boolean;
 };
 
@@ -72,7 +76,8 @@ function effectsAlive(fx: Fx): number {
  * Plays one run on `canvas` and calls `onOver` once when it ends. The simulation advances in
  * fixed steps by real elapsed time, so its clock tracks the server's on 60, 120 or 144 Hz
  * screens. While an upgrade choice waits it doesn't advance: `onChoice` gets the cards when one
- * comes up and null once `pick` (or keys 1-3) takes one.
+ * comes up and null once `pick` (or keys 1-3) takes one. Both ignore the first CHOICE_DELAY_MS
+ * (350 ms, guard.ts) after the choice opens.
  */
 export function startGame(
   canvas: HTMLCanvasElement,
@@ -172,7 +177,10 @@ export function startGame(
     updateInput();
   };
   const pick = (index: number): boolean => {
-    if (stopped || !choose(state, index)) return false;
+    if (stopped || !state.choice) return false;
+    // Too soon after the choice opened: refused before choose(), so nothing changes.
+    if (!inputReady(choiceAt, performance.now(), CHOICE_DELAY_MS)) return false;
+    if (!choose(state, index)) return false;
     // The mouse that picked steers again once it moves; a finger, once it touches down again.
     pointerSteers = false;
     stickReset(stick);
@@ -260,6 +268,8 @@ export function startGame(
   let stopped = false;
   /** The choice last reported to `onChoice`, so it is reported once. */
   let shown: readonly UpgradeId[] | null = null;
+  /** When `shown` was reported (performance.now()), for pick()'s guard. */
+  let choiceAt = -Infinity;
   const frame = (ts: number) => {
     if (stopped) return;
     const real = last === null ? 0 : (ts - last) / 1000;
@@ -282,7 +292,10 @@ export function startGame(
     if (steps === MAX_STEPS_PER_FRAME) acc = 0; // fell behind: drop the rest rather than spiral
     if (state.choice) {
       acc = 0; // the pause isn't owed back as a burst of steps when play resumes
-      if (state.choice !== shown) opts.onChoice((shown = state.choice));
+      if (state.choice !== shown) {
+        choiceAt = performance.now();
+        opts.onChoice((shown = state.choice));
+      }
     }
     detectChanges(fx.changes, state, onSquash, onHit, onBlock);
     updateTrail(fx.trail, state.robot.x, state.robot.y, delta);

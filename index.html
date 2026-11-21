@@ -53,6 +53,11 @@
       .over-score { font-size: 56px; font-weight: 800; }
       .over-alert { color: #fda4af; font-size: 22px; }
       .over-hint { font-size: 22px; }
+      /* "Play again" and the hint: hidden (space kept) until 800 ms after death (RESTART_DELAY_MS, guard.ts). */
+      .over-again { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+      .over-again button { min-height: 48px; padding: 8px 24px; font: inherit; font-size: 22px; font-weight: 700; border: 0;
+        border-radius: 8px; background: #22d3ee; color: #05070d; cursor: pointer; }
+      .over-again button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
       /* How the run was built: one chip per upgrade, with its level. */
       .over-upgrades { font-size: 20px; max-width: 420px; }
       ul.over-upgrades { list-style: none; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 8px; }
@@ -73,7 +78,9 @@
         justify-content: center; gap: 16px; padding: 16px; background: rgba(5, 7, 13, 0.72); font-family: system-ui, sans-serif;
         text-align: center; touch-action: manipulation; }
       .choice h2 { margin: 0; font-size: 30px; }
-      .choice-cards { display: flex; flex-direction: column; gap: 12px; width: min(100%, 360px); }
+      .choice-cards { display: flex; flex-direction: column; gap: 12px; width: min(100%, 360px); animation: choice-in 350ms ease-out both; }
+      /* As long as CHOICE_DELAY_MS (guard.ts): pick() refuses cards and 1-3 until the fade ends. */
+      @keyframes choice-in { from { opacity: 0; transform: translateY(8px); } }
       .choice button { min-height: 64px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 16px;
         border-radius: 12px; border: 2px solid #22d3ee; background: #0f172a; color: #f8fafc; font: inherit; cursor: pointer; }
       .choice button:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
@@ -90,6 +97,8 @@
         .over h1 { font-size: 30px; }
         .over-score { font-size: 44px; }
         .over-alert, .over-hint, .over-upgrades { font-size: 18px; }
+        .over-again { gap: 4px; }
+        .over-again button { min-height: 44px; padding: 6px 20px; font-size: 18px; }
         .over-board { flex: 1 1 0; max-width: 420px; font-size: 18px; }
         .over h2 { font-size: 20px; margin-bottom: 4px; }
         .over ol { line-height: 1.3; }

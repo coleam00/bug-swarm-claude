@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { NAME_MAX, TEAMS, checkName, type Team, type UpgradeId } from "../server/rules";
 import { fetchBest, fetchTeams, fetchTop, finishRun, startRun, type RunStart, type TopRow } from "./api";
 import { UPGRADES } from "./game/config";
+import { RESTART_DELAY_MS, inputReady } from "./game/guard";
 import { startGame, type Game as Running, type RunResult } from "./game/loop";
 import { upgradeLevels } from "./over";
 import { loadPlayer, nextScreen, setPlayerName, setPlayerTeam, type Player } from "./player";
@@ -9,7 +10,8 @@ import { STRESS } from "./stress";
 import { TEAM_LOOK } from "./teams";
 
 // The thin shell around the canvas: name and team entry, the run, and the game-over screen.
-// No menus between runs: game over -> any key or a fresh tap -> the next run.
+// No menus between runs: game over -> any key, a fresh tap or "Play again" -> the next run.
+// Game over ignores them for RESTART_DELAY_MS (800 ms, game/guard.ts) after death.
 // A stress run (`?stress`, dev and bench builds only) needs no name or team and is never
 // submitted: it starts no run on the server, saves nothing and fetches no best.
 
@@ -19,12 +21,12 @@ type Over = {
   best: number | null | "loading" | "failed";
   top: TopRow[] | "loading" | "failed";
   teams: Record<Team, number> | "loading" | "failed";
+  /** When the run ended (performance.now()): restart input is ignored until RESTART_DELAY_MS after it. */
+  diedAt: number;
 };
 
 type Phase = { kind: "setup" } | { kind: "playing"; run: number } | { kind: "over"; run: number; over: Over };
 
-/** Game over ignores input this long, so the finger still steering doesn't restart at once. */
-const RESTART_DELAY_MS = 750;
 // Every 4 s: with the server's 1 s cache, a hidden name leaves this screen within 5 s.
 const TOP_POLL_MS = 4000;
 
@@ -183,12 +185,14 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
       stress: STRESS,
       onChoice: setCards,
       onOver: (result) => {
+        // Stamped once: the second report (once saved) keeps the same restart window.
+        const diedAt = performance.now();
         const report = (over: Over) => latest.current.onOver(over);
-        report({ result, saved: "saving", best: "loading", top: "loading", teams: "loading" });
+        report({ result, saved: "saving", best: "loading", top: "loading", teams: "loading", diedAt });
         void (async () => {
           const saved = await finishRun(runStart, result);
           const [best, top, teams] = await Promise.all([STRESS ? null : fetchBest(player.id), fetchTop(), fetchTeams()]);
-          report({ result, saved, best, top, teams });
+          report({ result, saved, best, top, teams, diedAt });
         })();
       },
     });
@@ -207,7 +211,10 @@ function Game(props: { player: Player; onNameRefused: () => void; onOver: (over:
   );
 }
 
-/** The upgrade choice, over the paused run: a big card per upgrade, tap one or press 1-3. No timer. */
+/**
+ * The upgrade choice, over the paused run: a big card per upgrade, tap one or press 1-3. No
+ * countdown. The cards fade in over CHOICE_DELAY_MS (350 ms), the time pick() refuses them in.
+ */
 function ChoiceScreen({ cards, onPick }: { cards: readonly UpgradeId[]; onPick: (index: number) => void }) {
   // Layout and sizes live in index.html (.choice). It covers the canvas, so a tap here never steers.
   return (
@@ -246,29 +253,30 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
     return () => clearInterval(id);
   }, [over.saved]);
 
-  // Any key or a fresh tap starts the next run, after a short pause.
+  // Any key, a fresh tap or "Play again" starts the next run, once RESTART_DELAY_MS has passed
+  // since death. The guard decides; the timer only reveals "Play again" and the hint at that moment.
   const restart = useRef(onRestart);
   restart.current = onRestart;
+  const restarted = useRef(false);
+  const diedAt = over.diedAt;
+  const tryRestart = useCallback(() => {
+    if (restarted.current || !inputReady(diedAt, performance.now(), RESTART_DELAY_MS)) return;
+    restarted.current = true;
+    restart.current();
+  }, [diedAt]);
   useEffect(() => {
-    let armed = false;
-    const timer = setTimeout(() => {
-      armed = true;
-      setReady(true);
-    }, RESTART_DELAY_MS);
+    const timer = setTimeout(() => setReady(true), Math.max(0, diedAt + RESTART_DELAY_MS - performance.now()));
     const onKey = (e: KeyboardEvent) => {
-      if (armed && !e.repeat) restart.current();
-    };
-    const onPointer = () => {
-      if (armed) restart.current();
+      if (!e.repeat) tryRestart();
     };
     window.addEventListener("keydown", onKey);
-    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("pointerdown", tryRestart);
     return () => {
       clearTimeout(timer);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("pointerdown", tryRestart);
     };
-  }, []);
+  }, [diedAt, tryRestart]);
 
   // Layout and sizes live in index.html (.over): on a phone held sideways the score and the
   // top 10 sit side by side, so all of it fits a 390 px tall screen with nothing to scroll.
@@ -299,9 +307,13 @@ function OverScreen({ over, team, onRestart }: { over: Over; team: Team | null; 
             Couldn't save your score
           </p>
         )}
-        <p className="over-hint" style={{ opacity: ready ? 1 : 0.3 }}>
-          Tap or press any key to play again
-        </p>
+        {/* Hidden, not absent, until restarting is possible, so the layout doesn't move. */}
+        <div className="over-again" style={{ visibility: ready ? "visible" : "hidden" }}>
+          <button type="button" onClick={tryRestart}>
+            Play again
+          </button>
+          <p className="over-hint">Tap or press any key to play again</p>
+        </div>
       </div>
       <section className="over-board">
         <h2>Top 10</h2>
