@@ -16,20 +16,23 @@
 //   where the nearest bug within AIM_RANGE will be (leading it with SHOT_SPEED from the barrel)
 //   and fires in bursts: while heat is under BURST_HEAT and fewer than BURST_SHOTS have left,
 //   then it releases for BURST_REST_S. It never fires while locked or with no bug in range.
+// - dasher (#60): the aimer, plus the dash. When its dash is ready and a bug is about to touch it
+//   (within DASH_CONTACT of touching, now or after one more tick of the bug's velocity), it
+//   presses dash along the evasion (its aim when there is none), on that tick only.
 //
-// Every policy presses dash while out, so it respawns.
-import { BARREL, DT, SHOT_SPEED } from "./constants";
+// Every policy presses dash while out, so it respawns; only the dasher presses it in a life.
+import { BARREL, CRAWLER_RADIUS, DT, PLAYER_RADIUS, SHOT_SPEED } from "./constants";
 import { nextRandom, type Rng } from "./rng";
 import type { ArenaState } from "./sim";
 
-export const POLICY_NAMES = ["idle", "mover", "aimer"] as const;
+export const POLICY_NAMES = ["idle", "mover", "aimer", "dasher"] as const;
 export type PolicyName = (typeof POLICY_NAMES)[number];
-export const [IDLE, MOVER, AIMER] = POLICY_NAMES;
+export const [IDLE, MOVER, AIMER, DASHER] = POLICY_NAMES;
 
 export type ObservedBug = { x: number; y: number; vx: number; vy: number };
 
 export type Observation = {
-  self: { x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; heat: number; locked: boolean };
+  self: { x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; heat: number; locked: boolean; dashReady: boolean };
   /** Every bug the policy knows about. Only the first `bugCount` entries are current. */
   bugs: ObservedBug[];
   bugCount: number;
@@ -72,6 +75,8 @@ export const BURST_HEAT = 0.7;
 export const BURST_REST_S = 0.3;
 /** The aimer's strafe speed, a fraction of full speed. */
 export const STRAFE = 0.35;
+/** The dasher dashes when a bug is this close to touching it, units (centre gap minus both radii). */
+export const DASH_CONTACT = 30;
 
 export function createMemory(): PolicyMemory {
   return { aim: 0, burst: 0, rest: 0, lastHeat: 0, strafe: 1, strafeFor: 0 };
@@ -79,7 +84,7 @@ export function createMemory(): PolicyMemory {
 
 export function createObservation(): Observation {
   return {
-    self: { x: 0, y: 0, vx: 0, vy: 0, aim: 0, alive: false, heat: 0, locked: false },
+    self: { x: 0, y: 0, vx: 0, vy: 0, aim: 0, alive: false, heat: 0, locked: false, dashReady: false },
     bugs: [],
     bugCount: 0,
     world: { w: 0, h: 0 },
@@ -110,7 +115,11 @@ export function observe(state: ArenaState, playerId: number, w: number, h: numbe
     s.alive = p.alive;
     s.heat = p.heat;
     s.locked = p.lockTicks > 0;
-  } else s.alive = false;
+    s.dashReady = p.alive && p.dashCooldown === 0 && p.dashTicks === 0;
+  } else {
+    s.alive = false;
+    s.dashReady = false;
+  }
   out.bugCount = state.bugs.length;
   for (let i = 0; i < state.bugs.length; i++) {
     const b = state.bugs[i]!;
@@ -288,4 +297,25 @@ export const aimer: Policy = (obs, mem, rng, out) => {
   }
 };
 
-export const POLICIES: Record<PolicyName, Policy> = { idle, mover, aimer };
+/** Whether a bug is within DASH_CONTACT of touching the policy's robot, now or one tick on. */
+function aboutToTouch(obs: Observation): boolean {
+  const { x, y } = obs.self;
+  const reach = PLAYER_RADIUS + CRAWLER_RADIUS + DASH_CONTACT;
+  const r2 = reach * reach;
+  for (let i = 0; i < obs.bugCount; i++) {
+    const b = obs.bugs[i]!;
+    if ((b.x - x) ** 2 + (b.y - y) ** 2 < r2) return true;
+    if ((b.x + b.vx * DT - x) ** 2 + (b.y + b.vy * DT - y) ** 2 < r2) return true;
+  }
+  return false;
+}
+
+export const dasher: Policy = (obs, mem, rng, out) => {
+  aimer(obs, mem, rng, out);
+  if (!obs.self.alive || !obs.self.dashReady || !aboutToTouch(obs)) return;
+  evasion(obs);
+  moveAlong(out, evade.x, evade.y, 1);
+  out.dash = true;
+};
+
+export const POLICIES: Record<PolicyName, Policy> = { idle, mover, aimer, dasher };

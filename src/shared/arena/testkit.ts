@@ -11,6 +11,7 @@ export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Pl
     p.x = x;
     p.y = y;
     p.invulnTicks = 0;
+    p.dashCooldown = 0;
     return p;
   });
   return { a, ps };

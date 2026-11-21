@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { INPUT_BUFFER, INPUT_STALE_TICKS, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, TICK_MS } from "../../shared/arena/constants";
+import {
+  DASH_COOLDOWN_TICKS,
+  DASH_SPAWN_LOCK_TICKS,
+  DASH_TICKS,
+  INPUT_BUFFER,
+  INPUT_STALE_TICKS,
+  MAX_PLAYERS_PER_ARENA,
+  PROTOCOL_VERSION,
+  TICK_MS,
+} from "../../shared/arena/constants";
 import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import { DOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
@@ -133,6 +142,26 @@ describe("ticking", () => {
     for (let seq = 1; seq <= INPUT_BUFFER + 2; seq++) rooms.input(j.room, j.entity, input(seq));
     tick(INPUT_BUFFER);
     expect(snapshots(a.got).map((s) => s.ack)).toEqual([3, 4, 5, 6]);
+  });
+
+  test("a dash press dropped with the oldest input is carried onto the next, and the snapshot shows the dash", () => {
+    const { rooms, tick } = setup();
+    const a = client();
+    const b = client();
+    const j = rooms.join("Ada", "tabs", INFO, a.send);
+    rooms.join("Bob", "spaces", INFO, b.send);
+    tick(DASH_SPAWN_LOCK_TICKS); // past the spawn lock
+    let seq = 0;
+    rooms.input(j.room, j.entity, { ...input(++seq), dash: true });
+    for (let i = 0; i < INPUT_BUFFER; i++) rooms.input(j.room, j.entity, input(++seq));
+    tick();
+    const p = rooms.room(j.room)!.state.players[0]!;
+    expect(p.dashTicks).toBe(DASH_TICKS);
+    const mine = snapshots(a.got).at(-1)!;
+    expect(mine.ack).toBe(2);
+    expect([mine.me.dk, mine.me.dc]).toEqual([DASH_TICKS, DASH_COOLDOWN_TICKS]);
+    // Everyone sees the dash in Ada's row.
+    expect(snapshots(b.got).at(-1)!.p.find((r) => r[0] === j.entity)![8]).toBe(1);
   });
 
   test("a held input repeats, and its move stops after INPUT_STALE_TICKS with nothing new", () => {
@@ -284,7 +313,7 @@ describe("lives", () => {
   });
 });
 
-test("your own numbers in each snapshot: score, kills, streak and its multiplier, heat, lock, hits left", () => {
+test("your own numbers in each snapshot: score, kills, streak and its multiplier, heat, lock, hits left, dash", () => {
   const { rooms } = setup();
   const p = rooms.room(rooms.join("Ada", "tabs", INFO, client().send).room)!.state.players[0]!;
   p.score = 125;
@@ -293,8 +322,10 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.heat = 0.42;
   p.lockTicks = 3;
   p.hits = 1;
-  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dn: 0 as 0 | 1 };
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dn: 0 });
+  p.dashTicks = 2;
+  p.dashCooldown = 27;
+  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1 };
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0 });
   p.lockTicks = 0;
   p.streak = 20;
   expect(meOf(p, me)).toMatchObject({ mu: 3, lk: 0 });

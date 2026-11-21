@@ -16,7 +16,7 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 
 /**
  * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
- * going down, and a revive (who, by whom, the points). Hits, kills and shots travel in snapshots,
+ * going down, and a revive (who, by whom, the points; both v4). Hits, kills and shots travel in snapshots,
  * and so does who is down now (`d`), for a late joiner. A later item appends pickup.
  */
 export const EVENT_KINDS = ["join", "leave", "over", "down", "revive"] as const;
@@ -75,10 +75,21 @@ export type Welcome = {
 };
 
 /**
- * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable (0/1). Positions and
- * velocities to 0.01, aim to 0.001. Fields are only ever appended, never reordered.
+ * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable by a hit or spawn
+ * protection (0/1), dashing (0/1, v3). Positions and velocities to 0.01, aim to 0.001. Fields are
+ * only ever appended, never reordered.
  */
-export type SnapshotPlayer = [id: number, x: number, y: number, vx: number, vy: number, aim: number, alive: 0 | 1, invulnerable: 0 | 1];
+export type SnapshotPlayer = [
+  id: number,
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  aim: number,
+  alive: 0 | 1,
+  invulnerable: 0 | 1,
+  dashing: 0 | 1,
+];
 /** One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number];
 /** A shot fired this tick: id, owner, where it left the barrel, its angle (to 0.001). It flies per shotTravelAt. */
@@ -88,7 +99,7 @@ export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
 /** A bug killed this tick: bug id, by (0: nobody scores), x, y, points. */
 export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number];
 /**
- * A downed player: id, seconds left before bleeding out (to 0.01), the player holding revive
+ * A downed player (v4): id, seconds left before bleeding out (to 0.01), the player holding revive
  * progress (0: none), and that progress, 0 to 1 (to 0.01). Only downed players have a row.
  */
 export type SnapshotDown = [id: number, secondsLeft: number, reviver: number, progress: number];
@@ -107,7 +118,10 @@ export type SnapshotMe = {
   hl: number;
   /** In a life (1) or out (0). Still 1 while down. */
   al: 0 | 1;
-  /** Down (1): waiting for a revive. */
+  /** Dash ticks left (above 0: dashing) and ticks until a dash press is accepted (v3). */
+  dk: number;
+  dc: number;
+  /** Down (1): waiting for a revive (v4). */
   dn: 0 | 1;
 };
 
@@ -234,19 +248,20 @@ type PlayerRow = {
   aim: number;
   alive: boolean;
   invulnTicks: number;
+  dashTicks: number;
   down: boolean;
   downTick: number;
   reviver: number;
   reviveTicks: number;
 };
 
-/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv],...]`, quantized. */
+/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash],...]`, quantized. */
 export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
   let s = "[";
   for (let i = 0; i < players.length; i++) {
     const p = players[i]!;
     if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0}]`;
+    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0}]`;
   }
   return s + "]";
 }
@@ -314,7 +329,7 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
 
 /** One socket's snapshot: its own ack and numbers around the shared part. */
 export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared: string): string {
-  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dn":${me.dn}},${shared}}`;
+  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dk":${me.dk},"dc":${me.dc},"dn":${me.dn}},${shared}}`;
 }
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean): string {

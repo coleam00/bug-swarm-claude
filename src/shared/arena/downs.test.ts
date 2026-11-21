@@ -126,6 +126,23 @@ describe("reviving", () => {
     expect(p.vx).toBeGreaterThan(0);
   });
 
+  test("a dash held through the revive is not a press: the first fresh press after it dashes", () => {
+    const { a, ps } = arenaWith([1200, 1200], [1400, 1400]);
+    const [p, h] = [ps[0]!, ps[1]!];
+    downNow(a, p);
+    p.dashCooldown = 0;
+    hold(p, { mx: 1, dash: true });
+    beside(p, h, 30);
+    expect(revivesOver(a, REVIVE_TICKS).length).toBe(1);
+    stepQuiet(a, 2);
+    expect(p.dashTicks).toBe(0);
+    hold(p, { mx: 1 });
+    stepQuiet(a);
+    hold(p, { mx: 1, dash: true });
+    stepQuiet(a);
+    expect(p.dashTicks).toBeGreaterThan(0);
+  });
+
   test("the range is inclusive: 60 units counts, 60.5 does not", () => {
     for (const [d, revived] of [
       [60, true],

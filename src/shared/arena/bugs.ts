@@ -24,7 +24,7 @@ import {
   WORLD_W,
 } from "./constants";
 import { nextRandom } from "./rng";
-import { canAct, hitPlayer, type ArenaState, type Player } from "./sim";
+import { canAct, canBeHit, hitPlayer, type ArenaState, type Player } from "./sim";
 
 /**
  * A player's spawn rate, bugs per second, for a life `ageSeconds` old: SPAWN_BASE_PER_S rising by
@@ -138,7 +138,7 @@ export function stepBugs(state: ArenaState): void {
     const b = bugs[i]!;
     let gone = false;
     for (const p of state.players) {
-      if (!canAct(p) || p.invulnTicks > 0) continue;
+      if (!canBeHit(p)) continue;
       const dx = p.x - b.x;
       const dy = p.y - b.y;
       if (dx * dx + dy * dy < TOUCH * TOUCH) {

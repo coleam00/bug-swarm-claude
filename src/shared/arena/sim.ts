@@ -1,5 +1,5 @@
 // The arena simulation (release 2): pure and deterministic. The server steps it as the authority;
-// the browser runs `stepPlayer` to predict its own robot. No clock, no Math.random, no DOM: time
+// the browser runs `stepMover` to predict its own robot. No clock, no Math.random, no DOM: time
 // comes in as the fixed step and randomness from the arena's seeded generator. This file holds
 // the state, players and lives, and the step's order; shots, heat and the streak live in
 // combat.ts, crawlers and spawning in bugs.ts, down, revive and bleed-out in downs.ts.
@@ -9,6 +9,10 @@ import { stepFire, stepShots } from "./combat";
 import { stepDowns } from "./downs";
 import {
   ACCEL,
+  DASH_COOLDOWN_TICKS,
+  DASH_SPAWN_LOCK_TICKS,
+  DASH_SPEED,
+  DASH_TICKS,
   DT,
   FRICTION,
   HITS_PER_LIFE,
@@ -36,19 +40,35 @@ export type Input = {
   aim: number;
   /** Fire held. */
   fire: boolean;
-  /** Dash pressed (one press). While out, it respawns you; the dash itself comes with a later item. */
+  /**
+   * Dash pressed. Edge-triggered: a dash starts on a tick whose input has it after one that did
+   * not, so holding it dashes once. While out, it respawns you (held is enough).
+   */
   dash: boolean;
 };
 
-export type Player = {
-  /** Entity id, unique within its arena. */
-  id: number;
-  name: string;
-  team: Team;
+/**
+ * What the movement step reads and writes: a player, or the browser's prediction of one. The dash
+ * state lives here so the server and the predictor step it the same way (stepMover).
+ */
+export type Mover = {
   x: number;
   y: number;
   vx: number;
   vy: number;
+  /** Dash ticks left, this one included; above 0 means dashing (and untouchable). */
+  dashTicks: number;
+  /** Ticks until a dash press is accepted. */
+  dashCooldown: number;
+  /** Last tick's `input.dash`, for the edge. */
+  dashWas: boolean;
+};
+
+export type Player = Mover & {
+  /** Entity id, unique within its arena. */
+  id: number;
+  name: string;
+  team: Team;
   aim: number;
   /** The input applied each tick until a newer one arrives. */
   input: Input;
@@ -190,6 +210,8 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.fireCooldown = 0;
   p.invulnTicks = Math.round(INVULN_S / DT);
   p.budget = 0;
+  p.dashTicks = 0;
+  p.dashCooldown = DASH_SPAWN_LOCK_TICKS;
 }
 
 function clearDown(p: Player): void {
@@ -258,6 +280,9 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
     fireCooldown: 0,
     invulnTicks: 0,
     budget: 0,
+    dashTicks: 0,
+    dashCooldown: 0,
+    dashWas: false,
   };
   startLife(state, p, spot.x, spot.y);
   state.players.push(p);
@@ -271,6 +296,7 @@ export function endLife(state: ArenaState, p: Player): LifeEnd {
   p.outTick = state.tick;
   p.vx = 0;
   p.vy = 0;
+  p.dashTicks = 0;
   return { id: p.id, score: p.score, kills: p.kills, ticks: state.tick - p.lifeStartTick };
 }
 
@@ -287,6 +313,14 @@ export function leavePlayer(state: ArenaState, id: number): { life: LifeEnd | nu
   const life = p.alive ? endLife(state, p) : null;
   state.players.splice(i, 1);
   return { life };
+}
+
+/**
+ * Whether a bug touching `p` costs it a hit: up (in a life and not down), past any hit or spawn
+ * protection, and not dashing.
+ */
+export function canBeHit(p: Player): boolean {
+  return canAct(p) && p.invulnTicks === 0 && p.dashTicks === 0;
 }
 
 /**
@@ -309,6 +343,7 @@ function downPlayer(state: ArenaState, p: Player): void {
   p.vx = 0;
   p.vy = 0;
   p.invulnTicks = 0;
+  p.dashTicks = 0;
   state.events.downs.push(p.id);
 }
 
@@ -370,6 +405,11 @@ export function stepPlayer(
   else approach(p.vx, p.vy, 0, 0, FRICTION * dt, scratch);
   p.vx = scratch.x;
   p.vy = scratch.y;
+  moveAndWall(p, dt);
+}
+
+/** Moves by the velocity, then the walls hold the player inside and stop the velocity pushing into them. */
+function moveAndWall(p: { x: number; y: number; vx: number; vy: number }, dt: number): void {
   p.x += p.vx * dt;
   p.y += p.vy * dt;
   const R = PLAYER_RADIUS;
@@ -389,13 +429,65 @@ export function stepPlayer(
   }
 }
 
+/**
+ * THE step of a robot in a life, dash included: used by the server (stepArena) and by the
+ * browser's prediction, so both move you the same way. `input` must be clamped (clampInput).
+ * - The dash and its cooldown count down a tick.
+ * - A dash press (input.dash after a tick without it), with the cooldown run out and no dash
+ *   going, starts a dash: DASH_SPEED along the move direction (a half-pushed stick dashes as
+ *   far), or along the aim when no move is held, for DASH_TICKS ticks, this one included. A press
+ *   too early is dropped, not kept for later.
+ * - While dashing the move input is ignored: the robot flies on, and the walls stop the part of
+ *   the velocity pushing into them (a slanted dash slides along a wall).
+ * - On the tick after a dash, the speed is cut to MAX_SPEED before the normal step, so a dash
+ *   carries DASH_DISTANCE and does not slide on.
+ * - Otherwise it is exactly stepPlayer.
+ * Draws no randomness.
+ */
+export function stepMover(m: Mover, input: Input): void {
+  const wasDashing = m.dashTicks > 0;
+  if (m.dashTicks > 0) m.dashTicks--;
+  if (m.dashCooldown > 0) m.dashCooldown--;
+  const pressed = input.dash && !m.dashWas;
+  m.dashWas = input.dash;
+  if (pressed && m.dashCooldown === 0 && m.dashTicks === 0) {
+    let dx = input.mx;
+    let dy = input.my;
+    const len = Math.hypot(dx, dy);
+    if (len > 0) {
+      dx /= len;
+      dy /= len;
+    } else {
+      dx = Math.cos(input.aim);
+      dy = Math.sin(input.aim);
+    }
+    m.vx = dx * DASH_SPEED;
+    m.vy = dy * DASH_SPEED;
+    m.dashTicks = DASH_TICKS;
+    m.dashCooldown = DASH_COOLDOWN_TICKS;
+  }
+  if (m.dashTicks > 0) {
+    moveAndWall(m, DT);
+    return;
+  }
+  if (wasDashing) {
+    const speed = Math.hypot(m.vx, m.vy);
+    if (speed > MAX_SPEED) {
+      m.vx *= MAX_SPEED / speed;
+      m.vy *= MAX_SPEED / speed;
+    }
+  }
+  stepPlayer(m, input.mx, input.my, DT);
+}
+
 const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
 
 /**
  * Advances the arena one fixed step, in a fixed order (arrays in index order, every random draw
  * from state.rng), so the same seed and inputs replay exactly:
- * 1. players: those up move; a downed player stands still, its aim frozen; an out player whose
- *    input has dash, RESPAWN_DELAY_S or more after going out, respawns at a safe spot;
+ * 1. players: those up move and dash (stepMover); a downed player stands still, its aim frozen
+ *    and its dash ignored; an out player whose input has dash, RESPAWN_DELAY_S or more after
+ *    going out, respawns at a safe spot;
  * 2. fire and heat, players who are up only (combat.ts);
  * 3. bugs: personal spawn budgets, spawning out of view, chasing, contact hits; the last hit
  *    puts a player down (bugs.ts);
@@ -420,9 +512,14 @@ export function stepArena(state: ArenaState): void {
         safeSpot(state);
         startLife(state, p, spot.x, spot.y);
       }
-    } else if (!p.down) {
+      // The edge is tracked while out too, so the press that respawned you is not also a dash.
+      p.dashWas = p.input.dash;
+    } else if (p.down) {
+      // Tracked while down too, so a dash held through the revive is not a press on the way up.
+      p.dashWas = p.input.dash;
+    } else {
       p.aim = p.input.aim;
-      stepPlayer(p, p.input.mx, p.input.my);
+      stepMover(p, p.input);
       if (p.invulnTicks > 0) p.invulnTicks--;
     }
   }
