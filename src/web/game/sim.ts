@@ -13,7 +13,7 @@ import {
   ROBOT_SPEED,
   SHOT_LIFETIME,
   SHOT_SPEED,
-  SPAWN_INTERVAL,
+  spawnInterval,
   type BugKind,
 } from "./config";
 import { createRng, nextRandom, type Rng } from "./rng";
@@ -54,7 +54,7 @@ export function createState(seed: number, arena: Arena): State {
     bugs: [],
     shots: [],
     time: 0,
-    spawnTimer: SPAWN_INTERVAL,
+    spawnTimer: spawnInterval(0),
     fireTimer: 0,
     invuln: 0,
     hits: 0,
@@ -110,7 +110,7 @@ function moveRobot(state: State, input: Input, dt: number): void {
 function spawnBugs(state: State, dt: number): void {
   state.spawnTimer -= dt;
   while (state.spawnTimer <= 0) {
-    state.spawnTimer += SPAWN_INTERVAL;
+    state.spawnTimer += spawnInterval(state.time);
     if (state.bugs.length >= MAX_BUGS) continue;
     const { w, h } = state.arena;
     const edge = Math.floor(nextRandom(state.rng) * 4);

@@ -19,7 +19,17 @@ export const MAX_HITS = 3;
 // The swarm.
 /** A safety cap for the frame budget, not part of the difficulty: an idle run ends long before it. */
 export const MAX_BUGS = 200;
-export const SPAWN_INTERVAL = 0.48;
+/** Seconds between spawns at the start of a run, */
+export const SPAWN_START = 0.62;
+/** the seconds it loses for every second survived, */
+export const SPAWN_RAMP = 0.007;
+/** and the shortest it gets. */
+export const SPAWN_MIN = 0.42;
+
+/** Seconds between spawns `time` seconds into a run: shorter as the run goes on, down to a floor. */
+export function spawnInterval(time: number): number {
+  return Math.max(SPAWN_MIN, SPAWN_START - SPAWN_RAMP * time);
+}
 
 /**
  * A kind of bug. `from` is the second of the run it starts appearing at; `share` is the part

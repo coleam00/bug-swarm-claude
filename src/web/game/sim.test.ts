@@ -1,16 +1,72 @@
 import { describe, expect, test } from "bun:test";
 import { arenaForViewport } from "./arena";
 import { MAX_SQUASHES_PER_SECOND } from "../../server/rules";
-import { ARENA_AREA, BASE_BUG, FIRE_INTERVAL } from "./config";
+import {
+  ARENA_AREA,
+  BASE_BUG,
+  FIRE_INTERVAL,
+  ROBOT_RADIUS,
+  ROBOT_SPEED,
+  SPAWN_MIN,
+  SPAWN_START,
+  spawnInterval,
+} from "./config";
 import { createState, score, step, type Bug, type Input, type State } from "./sim";
 
 const DT = 1 / 60;
 const TALL = { w: 450, h: 800 };
 const WIDE = { w: 800, h: 450 };
+const FOUR_THREE = { w: 693, h: 520 };
 const NONE: Input = { kind: "none" };
 
 function run(state: State, input: Input, steps: number) {
   for (let i = 0; i < steps; i++) step(state, input, DT);
+}
+
+/** Steps a run whose robot never takes a hit, to watch the swarm past where a player would lose. */
+function keepAlive(state: State, input: Input, steps: number) {
+  for (let i = 0; i < steps; i++) {
+    step(state, input, DT);
+    state.hits = 0;
+  }
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * A scripted player that keeps moving: of 24 headings it takes the one that stays clearest of
+ * the bugs (each assumed to come straight at it) and the walls over the next 0.8 s.
+ */
+function dodge(s: State): Input {
+  const { x, y } = s.robot;
+  const { w, h } = s.arena;
+  let best = -Infinity;
+  let dx = 0;
+  let dy = 0;
+  for (let k = 0; k < 24; k++) {
+    const a = (k * Math.PI) / 12;
+    let worst = Infinity;
+    for (const t of [0.1, 0.25, 0.5, 0.8]) {
+      const px = Math.min(Math.max(x + Math.cos(a) * ROBOT_SPEED * t, ROBOT_RADIUS), w - ROBOT_RADIUS);
+      const py = Math.min(Math.max(y + Math.sin(a) * ROBOT_SPEED * t, ROBOT_RADIUS), h - ROBOT_RADIUS);
+      for (const b of s.bugs) {
+        const gap = Math.hypot(px - b.x, py - b.y) - b.kind.speed * t - ROBOT_RADIUS - b.kind.radius;
+        worst = Math.min(worst, gap / (t + 0.2));
+      }
+      const wall = Math.min(px, py, w - px, h - py) - ROBOT_RADIUS;
+      worst = Math.min(worst, wall / (t + 0.2) + 60);
+    }
+    if (worst > best) {
+      best = worst;
+      dx = Math.cos(a);
+      dy = Math.sin(a);
+    }
+  }
+  return { kind: "direction", dx, dy };
 }
 
 /** A state with spawning switched off, for tests that place their own bugs. */
@@ -47,12 +103,12 @@ describe("steering", () => {
 });
 
 describe("bugs", () => {
-  test("spawn at a steady rate, just outside an edge", () => {
+  test("spawn just outside an edge, at the rate the ramp sets", () => {
     const s = createState(3, WIDE);
     let seen = new Set<Bug>();
     let checked = 0;
-    for (let i = 0; i < 294; i++) {
-      step(s, NONE, DT); // 4.9 s: one bug every 0.48 s is 10
+    while (s.time < 10) {
+      step(s, NONE, DT);
       for (const b of s.bugs) {
         if (seen.has(b)) continue;
         checked++;
@@ -60,10 +116,27 @@ describe("bugs", () => {
       }
       seen = new Set(s.bugs);
     }
-    expect(s.spawned).toBe(10);
-    expect(checked).toBe(10);
-    run(s, NONE, 288); // 4.8 s more
-    expect(s.spawned).toBe(20);
+    expect(checked).toBe(s.spawned);
+    // The interval shrinks over these 10 s, so the count sits between the start's rate and the 10th second's.
+    expect(s.spawned).toBeGreaterThanOrEqual(Math.floor(10 / spawnInterval(0)));
+    expect(s.spawned).toBeLessThanOrEqual(Math.ceil(10 / spawnInterval(10)));
+  });
+
+  test("the swarm ramps: spawns come faster as the run goes on, down to a floor", () => {
+    for (let t = 1; t <= 120; t++) expect(spawnInterval(t)).toBeLessThanOrEqual(spawnInterval(t - 1));
+    expect(spawnInterval(0)).toBe(SPAWN_START);
+    expect(spawnInterval(120)).toBe(SPAWN_MIN);
+    for (let seed = 1; seed <= 5; seed++) {
+      const s = createState(seed, TALL);
+      const spawnedAt: number[] = [];
+      for (let second = 0; second < 30; second++) {
+        spawnedAt.push(s.spawned);
+        keepAlive(s, NONE, 60);
+      }
+      const early = spawnedAt[10]! - spawnedAt[0]!;
+      const late = s.spawned - spawnedAt[20]!;
+      expect(late).toBeGreaterThan(early);
+    }
   });
 
   test("chase the robot", () => {
@@ -157,8 +230,8 @@ test("the same seed plays the same run; another seed doesn't", () => {
   expect(play(7)).not.toEqual(play(8));
 });
 
-test("an idle player loses within 30 to 60 seconds, portrait and landscape", () => {
-  for (const arena of [TALL, WIDE]) {
+test("an idle player loses within 30 to 60 seconds, portrait, landscape and 4:3", () => {
+  for (const arena of [TALL, WIDE, FOUR_THREE]) {
     for (let seed = 1; seed <= 10; seed++) {
       const s = createState(seed, arena);
       while (!s.over && s.time < 120) step(s, NONE, DT);
@@ -166,6 +239,24 @@ test("an idle player loses within 30 to 60 seconds, portrait and landscape", () 
       expect(s.time).toBeGreaterThanOrEqual(30);
       expect(s.time).toBeLessThanOrEqual(60);
     }
+  }
+});
+
+test("a player who keeps moving outlasts an idle one", () => {
+  // A scripted player is no human, so this only checks that moving pays, not the 1 to 3 minute
+  // target: that is checked by playing.
+  for (const arena of [TALL, WIDE]) {
+    const idle: number[] = [];
+    const moving: number[] = [];
+    for (let seed = 1; seed <= 10; seed++) {
+      const a = createState(seed, arena);
+      while (!a.over && a.time < 300) step(a, NONE, DT);
+      idle.push(a.time);
+      const b = createState(seed, arena);
+      while (!b.over && b.time < 300) step(b, dodge(b), DT);
+      moving.push(b.time);
+    }
+    expect(median(moving)).toBeGreaterThanOrEqual(median(idle) + 10);
   }
 });
 
@@ -189,5 +280,13 @@ test("the arena keeps 360,000 units² and the screen's ratio, clamped to 9:16..1
 describe("the server's squash cap", () => {
   test("a shot squashes at most one bug, so the fire rate bounds squashes under the cap", () => {
     expect(1 / FIRE_INTERVAL).toBeLessThanOrEqual(MAX_SQUASHES_PER_SECOND);
+  });
+
+  test("a robot that never dies, deep in the ramp, squashes no faster than it fires", () => {
+    for (let seed = 1; seed <= 3; seed++) {
+      const s = createState(seed, TALL);
+      keepAlive(s, NONE, 120 * 60);
+      expect(s.squashes / s.time).toBeLessThanOrEqual(1 / FIRE_INTERVAL);
+    }
   });
 });
