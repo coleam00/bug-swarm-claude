@@ -148,7 +148,7 @@ describe("run end", () => {
     const a = app();
     const runId = await startRun(a);
     clock += 45_000;
-    const upgrades = [REVIEW_LASER, TEST_SHIELD, CI_DRONE, REVIEW_LASER, CI_DRONE];
+    const upgrades = [...UPGRADE_IDS, UPGRADE_IDS[UPGRADE_IDS.length - 1]]; // every id, and a repeat
     expect((await post(a, `/api/runs/${runId}/end`, { ...endBody(45, 0, 45), upgrades })).status).toBe(200);
     const row = db.query("SELECT upgrades FROM events WHERE type = ? AND run_id = ?").get(RUN_ENDED, runId) as { upgrades: string };
     expect(JSON.parse(row.upgrades)).toEqual(upgrades);
