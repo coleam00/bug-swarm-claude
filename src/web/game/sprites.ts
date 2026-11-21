@@ -110,7 +110,8 @@ function floorSprite(arena: Arena, ppu: number): HTMLCanvasElement {
   return c;
 }
 
-function glowSprite(colour: string): HTMLCanvasElement {
+/** A soft round glow in `colour` (a #rrggbb), for additive blending. The arena (src/web/arena) uses it too. */
+export function glowSprite(colour: string): HTMLCanvasElement {
   const [c, ctx] = canvas(GLOW_PX, GLOW_PX);
   const r = GLOW_PX / 2;
   const g = ctx.createRadialGradient(r, r, 0, r, r, r);
@@ -120,6 +121,36 @@ function glowSprite(colour: string): HTMLCanvasElement {
   g.addColorStop(1, `${colour}00`);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, GLOW_PX, GLOW_PX);
+  return c;
+}
+
+/**
+ * One tile of release 1's floor grid, `tileUnits` square (a multiple of GRID_SPACING), for the
+ * arena's world, which is too big to pre-render whole. The same three passes as the floor, with
+ * lines at 0, GRID_SPACING, ... tileUnits: a line on the tile's edge is half in each tile, so
+ * tiles laid edge to edge draw it once, at full width. No edge and no vignette: the arena draws
+ * its own walls.
+ */
+export function floorTile(ppu: number, tileUnits = 240): HTMLCanvasElement {
+  const [c, ctx] = canvas(tileUnits * ppu, tileUnits * ppu);
+  ctx.scale(c.width / tileUnits, c.height / tileUnits);
+  ctx.fillStyle = FLOOR;
+  ctx.fillRect(0, 0, tileUnits, tileUnits);
+  const grid = (width: number, alpha: number) => {
+    ctx.lineWidth = width;
+    ctx.strokeStyle = `rgba(${GRID_RGB}, ${alpha})`;
+    ctx.beginPath();
+    for (let v = 0; v <= tileUnits; v += GRID_SPACING) {
+      ctx.moveTo(v, -width);
+      ctx.lineTo(v, tileUnits + width);
+      ctx.moveTo(-width, v);
+      ctx.lineTo(tileUnits + width, v);
+    }
+    ctx.stroke();
+  };
+  grid(5, 0.035);
+  grid(2.5, 0.05);
+  grid(1, 0.13);
   return c;
 }
 
@@ -207,15 +238,18 @@ function bugSprite(look: BugLook, frame: number, ppu: number): HTMLCanvasElement
   return c;
 }
 
-/** The robot's rounded body, or its all-white flash when hit. Its core glow is drawn live. */
-function robotSprite(ppu: number, flash: boolean): HTMLCanvasElement {
+/**
+ * The robot's rounded body, or its all-white flash when hit. Its core glow is drawn live. `rim`
+ * (a #rrggbb) colours the halo and the outline: the arena draws each team's robot in its colour.
+ */
+export function robotSprite(ppu: number, flash: boolean, rimColour: string = ROBOT_RIM): HTMLCanvasElement {
   const R = ROBOT_RADIUS;
   const half = R * ROBOT_SPRITE_HALF;
   const [c, ctx] = canvas(half * 2 * ppu, half * 2 * ppu);
   ctx.scale(c.width / (half * 2), c.height / (half * 2));
   ctx.translate(half, half);
 
-  const rim = flash ? "#ffffff" : ROBOT_RIM;
+  const rim = flash ? "#ffffff" : rimColour;
   const halo = ctx.createRadialGradient(0, 0, R * 0.8, 0, 0, half);
   halo.addColorStop(0, `${rim}66`);
   halo.addColorStop(1, `${rim}00`);
@@ -238,7 +272,7 @@ function robotSprite(ppu: number, flash: boolean): HTMLCanvasElement {
 }
 
 /** A white ring on a darker, wider one, so it reads over bugs, glows and the bare floor alike. */
-function robotMarkSprite(ppu: number): HTMLCanvasElement {
+export function robotMarkSprite(ppu: number): HTMLCanvasElement {
   const half = ROBOT_RADIUS * ROBOT_MARK_HALF;
   const [c, ctx] = canvas(half * 2 * ppu, half * 2 * ppu);
   ctx.scale(c.width / (half * 2), c.height / (half * 2));
