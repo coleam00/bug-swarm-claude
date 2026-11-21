@@ -1,7 +1,8 @@
 // The dasher policy (#60), called directly on a hand-built observation: it dashes only when ready
 // and a bug is about to touch it, and then away from the bug.
 import { describe, expect, test } from "bun:test";
-import { CRAWLER_RADIUS, PLAYER_RADIUS } from "./constants";
+import { MAX_BUG_RADIUS } from "./bugs/registry";
+import { PLAYER_RADIUS } from "./constants";
 import { DASH_CONTACT, createMemory, createObservation, dasher, setObservedBug, type PolicyInput } from "./policies";
 import { createRng } from "./rng";
 
@@ -22,7 +23,7 @@ function decide(gap: number, ready = true): PolicyInput {
 }
 
 describe("dasher", () => {
-  const touching = PLAYER_RADIUS + CRAWLER_RADIUS;
+  const touching = PLAYER_RADIUS + MAX_BUG_RADIUS;
 
   test("a bug about to touch it: it dashes, away from the bug", () => {
     const out = decide(touching + DASH_CONTACT - 5);
