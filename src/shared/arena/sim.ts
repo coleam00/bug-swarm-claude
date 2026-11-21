@@ -223,7 +223,7 @@ function nearestOtherD(state: ArenaState, selfId: number, x: number, y: number):
  * nearby, not on top of them), or the first when no one else is alive. When none is clear, the one
  * farthest from any bug. Ties go to the earlier spot.
  */
-export function safeSpot(state: ArenaState, selfId: number): { x: number; y: number } {
+function safeSpot(state: ArenaState, selfId: number): { x: number; y: number } {
   const clear2 = SPAWN_BUG_CLEAR * SPAWN_BUG_CLEAR;
   let haveClear = false;
   let bestScore = Infinity; // |nearest other player - SPAWN_NEAR_DIST| of the best clear spot

@@ -83,12 +83,16 @@ const HEAT_WARN_ON = "#f87171";
 const HEAT_WARN_OFF = "#ffffff";
 /** A robot that can't be hit blinks this fast, cycles a second. */
 const BLINK_HZ = 8;
-/** A spawn-protected robot's shimmer: a white glow swelling between these radii (robot radii) and alphas, this many times a second. */
+/**
+ * A spawn-protected robot's shimmer: two white glows, half a cycle apart, each swelling between
+ * these radii (robot radii) and alphas this many times a second, so the halo ripples outward
+ * instead of blinking.
+ */
 const SHIMMER_HZ = 1.5;
-const SHIMMER_MIN = 2;
-const SHIMMER_MAX = 2.8;
-const SHIMMER_ALPHA_MIN = 0.25;
-const SHIMMER_ALPHA_MAX = 0.55;
+const SHIMMER_MIN = 2.2;
+const SHIMMER_MAX = 4;
+const SHIMMER_ALPHA_MIN = 0.35;
+const SHIMMER_ALPHA_MAX = 0.9;
 // The HUD.
 const SCORE_FONT = "bold 30px system-ui, sans-serif";
 const MULT_FONT = "bold 22px system-ui, sans-serif";
@@ -237,13 +241,15 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 0.45 * life;
       ctx.drawImage(ts.glow, trail.x[i]! - size, trail.y[i]! - size, size * 2, size * 2);
     }
-    // Spawn protection: a soft white shimmer swelling around the body, drawn under it. It never
+    // Spawn protection: a soft white shimmer rippling around the body, drawn under it. It never
     // blinks the body, so it reads apart from the hit blink below.
     if (r.prot) {
-      const k = 0.5 + 0.5 * Math.sin(t * TAU * SHIMMER_HZ + r.id);
-      const size = PLAYER_RADIUS * (SHIMMER_MIN + (SHIMMER_MAX - SHIMMER_MIN) * k);
-      ctx.globalAlpha = SHIMMER_ALPHA_MIN + (SHIMMER_ALPHA_MAX - SHIMMER_ALPHA_MIN) * k;
-      ctx.drawImage(white!, r.x - size, r.y - size, size * 2, size * 2);
+      for (let w = 0; w < 2; w++) {
+        const k = 0.5 + 0.5 * Math.sin(t * TAU * SHIMMER_HZ + r.id + w * Math.PI);
+        const size = PLAYER_RADIUS * (SHIMMER_MIN + (SHIMMER_MAX - SHIMMER_MIN) * k);
+        ctx.globalAlpha = SHIMMER_ALPHA_MAX - (SHIMMER_ALPHA_MAX - SHIMMER_ALPHA_MIN) * k;
+        ctx.drawImage(white!, r.x - size, r.y - size, size * 2, size * 2);
+      }
     }
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
