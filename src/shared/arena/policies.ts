@@ -33,8 +33,8 @@
 //   (within DASH_CONTACT of touching, now or after one more tick of the bug's velocity), it
 //   presses dash along the evasion (its aim when there is none), on that tick only.
 //
-// - fillBot (#66): the server's fill bots. The aimer, flanking too, without going for pickups (aimerBase, so
-//   viewers get them; it still takes one it walks over), with a human layer on top: when its target
+// - fillBot (#66): the server's fill bots. The aimer (flanking too, #80) without going for pickups
+//   (aimerBase, so viewers get them; it still takes one it walks over), with a human layer on top: when its target
 //   changes (its aim jumps by more than FILL_RETARGET) or a bug comes inside KEEP_DIST, it reacts
 //   only after FILL_REACT_MIN_TICKS to FILL_REACT_MAX_TICKS (drawn per reaction), keeping its last
 //   move and holding fire meanwhile; its aim turns at most FILL_TURN_RATE toward the aimer's plus a
