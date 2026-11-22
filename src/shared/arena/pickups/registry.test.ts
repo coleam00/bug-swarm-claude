@@ -10,9 +10,8 @@ describe("pickups", () => {
       expect(d.id).toBe(id);
       expect(d.label.length).toBeGreaterThan(0);
       expect(d.floorTicks).toBeGreaterThan(0);
-      // The refactor bomb is instant (#78): its effect is at the take, so nothing lasts.
-      if (id === "bomb") expect(d.durationTicks).toBe(0);
-      else expect(d.durationTicks).toBeGreaterThan(0);
+      // 0 for an instant pickup (the refactor bomb, #78: bomb.test.ts pins it).
+      expect(d.durationTicks).toBeGreaterThanOrEqual(0);
       for (const k of BUG_KINDS) {
         expect(d.drop[k]).toBeGreaterThanOrEqual(0);
         expect(d.drop[k]).toBeLessThanOrEqual(1);

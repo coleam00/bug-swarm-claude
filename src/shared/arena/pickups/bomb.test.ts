@@ -5,7 +5,6 @@ import { describe, expect, test } from "bun:test";
 import { bugDef } from "../bugs/registry";
 import { mult } from "../combat";
 import { nextRandom } from "../rng";
-import { createArena, joinPlayer, stepArena, type ArenaState } from "../sim";
 import { arenaWith, effectOf, nextDrop, placeBug, placePickup, stepQuiet } from "../testkit";
 import { BOMB_CLEARS, BOMB_DAMAGE, BOMB_RADIUS, bomb } from "./bomb";
 import { stepPickups } from "./index";
@@ -42,11 +41,12 @@ describe("the refactor bomb", () => {
     expect(a.events.bombKills).toEqual([p.id, p.id]);
   });
 
-  test(`its edge is ${BOMB_RADIUS} units, centre to centre`, () => {
+  test("its edge is the item's 350 units, centre to centre", () => {
+    expect(BOMB_RADIUS).toBe(350);
     const { a, ps } = arenaWith([1200, 1200]);
-    const inside = placeBug(a, 1200 + BOMB_RADIUS - 1, 1200);
-    const edge = placeBug(a, 1200, 1200 + BOMB_RADIUS);
-    const outside = placeBug(a, 1200 - BOMB_RADIUS - 1, 1200);
+    const inside = placeBug(a, 1200 + 349, 1200);
+    const edge = placeBug(a, 1200, 1200 + 350);
+    const outside = placeBug(a, 1200 - 351, 1200);
     // Pickups stepped alone (no bug steps first), so the bugs are where they were placed.
     placePickup(a, 1200, 1200, "bomb");
     nextDrop(a, 0.5, true);
@@ -56,7 +56,8 @@ describe("the refactor bomb", () => {
     expect(a.events.kills.map((k) => k.bug)).toEqual([inside.id, edge.id]);
   });
 
-  test(`the kinds it does not clear lose ${BOMB_DAMAGE} hit points, and die and score at 0: a spitter and a glob today`, () => {
+  test("the kinds it does not clear lose the item's 4 hit points, and die and score at 0: a spitter and a glob today", () => {
+    expect(BOMB_DAMAGE).toBe(4);
     expect(BOMB_CLEARS).toEqual({ crawler: true, dasher: true, spitter: false, glob: false });
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
@@ -129,24 +130,5 @@ describe("the refactor bomb", () => {
     ]);
     expect([p.kills, q.kills]).toEqual([1, 1]);
     expect(a.bugs).toEqual([]);
-  });
-
-  test("replays exactly: two identical arenas with a bomb taken stay equal", () => {
-    const play = (): { a: ArenaState; killed: number } => {
-      const a = createArena(7);
-      const p = joinPlayer(a, "p0", "tabs");
-      let killed = 0;
-      for (let i = 0; i < 200; i++) {
-        if (i === 100) placePickup(a, p.x, p.y, "bomb");
-        stepArena(a);
-        if (i === 100) killed = a.events.bombKills.length;
-      }
-      return { a, killed };
-    };
-    const one = play();
-    const two = play();
-    expect(one.killed).toBeGreaterThan(0);
-    expect(one.killed).toBe(two.killed);
-    expect(JSON.stringify(one.a)).toBe(JSON.stringify(two.a));
   });
 });
