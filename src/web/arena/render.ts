@@ -18,12 +18,17 @@ import { pickupDef } from "../../shared/arena/pickups/registry";
 import type { SnapshotMe } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
+import { ringAt, type RingAt, type Rings } from "../game/fx/rings";
 import type { Shake } from "../game/fx/shake";
 import { TEXT_SECONDS, textLabel, type Texts } from "../game/fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "../game/fx/trail";
 import type { Insets } from "../game/hud";
 import { hudLayout } from "../game/hud";
 import {
+  BOMB_RING,
+  BOMB_RING_GLOW_ALPHA,
+  BOMB_RING_GLOW_WIDTH,
+  BOMB_RING_WIDTH,
   GLOW_LASER,
   GLOW_SHOT,
   GLOW_WHITE,
@@ -283,6 +288,8 @@ export type Scene = {
   othersAt: number;
   you: number | null;
   particles: Particles;
+  /** Refactor bombs going off (#78). */
+  rings: Rings;
   texts: Texts;
   /** Shots a beetle's shell blocked, ringing (#80). */
   tings: Tings;
@@ -295,6 +302,11 @@ export type Scene = {
   players: number;
   /** Your life is over (the life-over screen is up): no HUD, no dash button. */
   out: boolean;
+  /**
+   * Watching behind the start screen (#79): the arena and its effects only, nothing on top: no
+   * hit flash, HUD line, minimap, sticks, dash button, edge arrows or F readout.
+   */
+  watch: boolean;
   sticks: readonly Stick[];
   stats: string | null;
   /** The dash button, CSS px, while you are in a life; else null. */
@@ -753,6 +765,33 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalAlpha = 1;
   }
 
+  const ring: RingAt = { radius: 0, alpha: 0 };
+
+  /**
+   * Refactor bombs going off (#78), release 1's ring: a stroke in the bomb's colour sweeping out
+   * to the bomb's reach, drawn wide and faint for its glow, then bright, fading near the end.
+   */
+  function drawRings(r: Rings): void {
+    if (r.live === 0) return;
+    ctx.strokeStyle = BOMB_RING;
+    for (let i = 0; i < r.age.length; i++) {
+      if (!ringAt(r.age[i]!, r.radius[i]!, ring)) continue;
+      const x = r.x[i]!;
+      const y = r.y[i]!;
+      const reach = ring.radius + BOMB_RING_GLOW_WIDTH;
+      if (x + reach < vl || x - reach > vr || y + reach < vt || y - reach > vb) continue;
+      ctx.beginPath();
+      ctx.arc(x, y, ring.radius, 0, TAU);
+      ctx.globalAlpha = BOMB_RING_GLOW_ALPHA * ring.alpha;
+      ctx.lineWidth = BOMB_RING_GLOW_WIDTH;
+      ctx.stroke();
+      ctx.globalAlpha = ring.alpha;
+      ctx.lineWidth = BOMB_RING_WIDTH;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   /** Your gun's heat: an arc around your robot, open at the bottom, flashing near the lock. */
   function drawHeat(me: Robot, sm: SnapshotMe, t: number): void {
     const locked = sm.lk === 1;
@@ -1001,6 +1040,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.setTransform(k, 0, 0, k, ox, oy);
     drawParticles(sc.particles);
     drawTingRings(sc.tings);
+    drawRings(sc.rings);
 
     // Revive rings under the robots, then the robots in view, yours last.
     for (let i = 0; i < count; i++) {
@@ -1060,7 +1100,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (vignette) ctx.drawImage(vignette, 0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (sc.hud.hit > 0) {
+    if (sc.hud.hit > 0 && !sc.watch) {
       ctx.globalAlpha = 0.28 * (sc.hud.hit / HIT_FLASH_S);
       ctx.strokeStyle = HIT_EDGE;
       ctx.lineWidth = 24;
@@ -1109,6 +1149,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
       ctx.globalAlpha = 1;
     }
+    if (sc.watch) return;
     if (sc.dashButton && !sc.out) drawDashButton(sc.dashButton, sc.dashReady);
     for (const s of sc.sticks) drawStick(s);
 

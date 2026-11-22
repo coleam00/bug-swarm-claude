@@ -18,11 +18,11 @@ export const LASER_PIERCE = 3;
 export const laser: PickupDef = {
   id: "laser",
   label: "Review laser!",
-  // Each kind's pickup chance (crawler 1.5%, dasher 3%: half the item's starting 3% and 6%, set by the
-  // late-joiner gate, #73), split evenly over the pickups. The spitter (#72) drops as the dasher does;
-  // a glob is a shot in flight and drops nothing. A beetle (#80) takes 8 shots and drops twice what a
-  // dasher does.
-  drop: { crawler: 0.0075, dasher: 0.015, spitter: 0.015, glob: 0, beetle: 0.03 },
+  // Each kind's pickup chance, split evenly over the 3 pickups (#78): crawler 1.5%, dasher and spitter
+  // 3% in all (half the item's starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72,
+  // drops as the dasher does). A glob is a shot in flight and drops nothing. A beetle (#80) takes 8
+  // shots and drops twice what a dasher does: 6% in all.
+  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0, beetle: 0.02 },
   floorTicks: Math.round(LASER_FLOOR_S / DT),
   durationTicks: Math.round(LASER_S / DT),
 };

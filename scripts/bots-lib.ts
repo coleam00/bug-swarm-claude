@@ -8,7 +8,7 @@ import type { Snapshot } from "../src/shared/arena/protocol";
 import { nextRandom, type Rng } from "../src/shared/arena/rng";
 import { TEAMS, type Team } from "../src/server/rules";
 
-export const USAGE = "usage: bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer|dasher]";
+export const USAGE = "usage: bun run bots -- --url <base url> [--count 18] [--seconds 60] [--policy wander|mover|aimer|dasher] [--watchers 0]";
 
 /** How bots play: `wander` (#52's walk and aim sweep, never firing) or a policy from policies.ts. */
 export const BOT_POLICIES = ["wander", "mover", "aimer", "dasher"] as const;
@@ -16,16 +16,21 @@ export type BotPolicy = (typeof BOT_POLICIES)[number];
 /** Bots aim and fire with the aimer unless told otherwise (#55). */
 export const DEFAULT_BOT_POLICY: BotPolicy = "aimer";
 
-export type BotsArgs = { url: string; count: number; seconds: number; policy: BotPolicy };
+/** `watchers`: start-screen watch sockets opened after the bots join (#79), to measure what each costs. */
+export type BotsArgs = { url: string; count: number; seconds: number; policy: BotPolicy; watchers: number };
 
 const INT_FLAGS = {
-  count: { def: 18, min: 1, max: 1000 },
+  count: { def: 18, min: 0, max: 1000 },
   seconds: { def: 60, min: 1, max: 3600 },
+  watchers: { def: 0, min: 0, max: 1000 },
 } as const;
 type IntFlag = keyof typeof INT_FLAGS;
 const INT_FLAG_NAMES = Object.keys(INT_FLAGS) as IntFlag[];
 
-/** Parses `--url`, `--count` and `--seconds`, as `--x v` or `--x=v`. Throws a message on anything else. */
+/**
+ * Parses `--url`, `--count`, `--seconds`, `--policy` and `--watchers`, as `--x v` or `--x=v`. Throws
+ * a message on anything else. `--count 0` is allowed with watchers (an empty server's demo arena).
+ */
 export function parseBotsArgs(argv: string[]): BotsArgs {
   const seen: Record<string, string> = {};
   const args = argv.filter((a) => a !== "--");
@@ -52,7 +57,7 @@ export function parseBotsArgs(argv: string[]): BotsArgs {
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("--url must be http or https");
   const policy = seen.policy ?? DEFAULT_BOT_POLICY;
   if (!(BOT_POLICIES as readonly string[]).includes(policy)) throw new Error(`--policy must be one of ${BOT_POLICIES.join(", ")}`);
-  const out: BotsArgs = { url: url.href.replace(/\/+$/, ""), count: 0, seconds: 0, policy: policy as BotPolicy };
+  const out: BotsArgs = { url: url.href.replace(/\/+$/, ""), count: 0, seconds: 0, policy: policy as BotPolicy, watchers: 0 };
   for (const key of INT_FLAG_NAMES) {
     const { def, min, max } = INT_FLAGS[key];
     const raw = seen[key];
@@ -60,6 +65,7 @@ export function parseBotsArgs(argv: string[]): BotsArgs {
     if (!Number.isInteger(n) || n < min || n > max) throw new Error(`--${key} must be a whole number from ${min} to ${max}`);
     out[key] = n;
   }
+  if (out.count === 0 && out.watchers === 0) throw new Error("--count must be at least 1 without --watchers");
   return out;
 }
 
@@ -189,10 +195,19 @@ export type Tally = {
   errors: string[];
   /** The score of every life the server ended (its "over" events). */
   lives: number[];
+  /** Each watcher's bandwidth: UTF-8 bytes received, over the seconds since its welcome. */
+  watchers: { bytes: number; seconds: number }[];
 };
 
 export function createTally(): Tally {
-  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [] };
+  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watchers: [] };
+}
+
+/** Watchers' received KB/s (1 KB = 1000 bytes): mean and max, or null with none measured. */
+export function watcherRates(watchers: readonly { bytes: number; seconds: number }[]): { mean: number; max: number } | null {
+  const rates = watchers.filter((w) => w.seconds > 0).map((w) => w.bytes / 1000 / w.seconds);
+  if (rates.length === 0) return null;
+  return { mean: rates.reduce((a, b) => a + b, 0) / rates.length, max: Math.max(...rates) };
 }
 
 function median(values: number[]): number | null {
@@ -220,5 +235,9 @@ export function formatSummary(args: BotsArgs, tally: Tally, seconds: number, tic
     `errors: ${tally.errors.length}${errorKinds.size ? ` (${[...errorKinds].map(([k, n]) => `${k} x${n}`).join(", ")})` : ""}`,
     `server tick: p50 ${ms(tick?.p50)}, p95 ${ms(tick?.p95)}${tick ? "" : " (stats unavailable)"}`,
   ];
+  if (args.watchers > 0) {
+    const r = watcherRates(tally.watchers);
+    lines.push(`watchers: ${tally.watchers.length} of ${args.watchers} watching, ${r ? `${r.mean.toFixed(1)} KB/s each on average, ${r.max.toFixed(1)} KB/s max` : "no bandwidth measured"}`);
+  }
   return lines;
 }

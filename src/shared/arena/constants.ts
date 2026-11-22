@@ -51,6 +51,20 @@ export const FIRST_LIFE_EASY_S = 10;
 export const MAX_PLAYERS_PER_ARENA = 20;
 /** An arena with people in it is topped up with server fill bots to this many players (#66). */
 export const FILL_TARGET = 4;
+/** A people-less arena that someone is watching (the start screen's demo arena, #79) runs this many bots. */
+export const DEMO_BOTS = FILL_TARGET;
+/**
+ * A new demo arena is run this far forward before its first watcher sees it, seconds: a fresh
+ * arena's bots meet their first bugs about 40 s in (first-life pacing, spawns out of view), and
+ * the start screen should show the fight at once. Nobody ever joins a demo arena, so this skips no
+ * one's gentle opening.
+ */
+export const DEMO_WARM_S = 45;
+export const DEMO_WARM_TICKS = Math.round((DEMO_WARM_S * 1000) / TICK_MS);
+/** The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79). */
+export const MAX_WATCHERS = 40;
+/** How often watchers of a people-less arena are moved to the busiest arena with people, ms. */
+export const WATCH_SWEEP_MS = 5000;
 /** Inputs the server queues per player; one is applied each tick, the oldest dropped past this. */
 export const INPUT_BUFFER = 4;
 /** Ticks with no new input after which a player's move is zeroed (500 ms). */
@@ -59,8 +73,8 @@ export const INPUT_STALE_TICKS = 10;
 export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
-/** The protocol version. A hello with another one is refused with error "version". v8 (#80): a shot end's hit 2, blocked by a shell. */
-export const PROTOCOL_VERSION = 8;
+/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell. */
+export const PROTOCOL_VERSION = 9;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
@@ -128,7 +142,7 @@ export type BugKind = (typeof BUG_KINDS)[number];
  * Every pickup id, in protocol order (a snapshot carries a pickup's index in this list, and a
  * player's active effects as a bitmask over it).
  */
-export const PICKUP_IDS = ["shield", "laser"] as const;
+export const PICKUP_IDS = ["shield", "laser", "bomb"] as const;
 export type PickupId = (typeof PICKUP_IDS)[number];
 /** The most pickups lying on the floor of one arena; a drop past it is lost, never queued. */
 export const MAX_PICKUPS_PER_ARENA = 6;

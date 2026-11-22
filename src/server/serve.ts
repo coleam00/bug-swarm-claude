@@ -24,6 +24,10 @@ export type ServerOptions = {
   liveness?: Liveness;
   /** People plus fill bots per arena; defaults to FILL_TARGET (tests that count players pass 0). */
   arenaFill?: number;
+  /** Sockets that may watch arenas at once; defaults to MAX_WATCHERS (tests shrink it). */
+  arenaWatchers?: number;
+  /** Bots a watched arena with no people runs; defaults to DEMO_BOTS. */
+  arenaDemo?: number;
   /** How often live arenas are checked for hidden names, ms; defaults to the real one (tests shorten it). */
   hideSweepMs?: number;
 };
@@ -114,7 +118,7 @@ export function hiddenNames(db: Database, now: () => number = Date.now): (name: 
 export function startServer(opts: ServerOptions): RunningServer {
   // Finished lives are saved as runs, off the tick (lives.ts).
   const lives = createLifeSaver(opts.db);
-  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill });
+  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo });
   // The board reads the open arenas live from the rooms.
   const app = createApp(opts.db, { ...opts.appOptions, live: () => rooms.live() });
   // Before servePages: its catch-all answers every path it reaches.

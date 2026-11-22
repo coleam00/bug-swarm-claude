@@ -5,12 +5,14 @@
 // and sweeps its aim without firing. Then it prints joins, the arenas used, messages received per
 // second, lives ended and their median score, errors (error messages, failed connects, unexpected
 // closes) and the server's tick p50/p95 from /api/arena/stats, closes every socket, and exits 1 on
-// any error. Every bot life is saved like a person's: point it only at a server with a scratch
+// any error. `--watchers <n>` (#79) then opens n start-screen watch sockets, which send nothing,
+// and prints the KB/s each receives (mean and max); `--count 0 --watchers <n>` measures an empty
+// server's demo arena. Every bot life is saved like a person's: point it only at a server with a scratch
 // DATA_DIR. Not part of `bun run check`: it needs a running server. bots-lib.ts is tested.
 import { PROTOCOL_VERSION, TICK_MS } from "../src/shared/arena/constants";
 import { POLICIES, createMemory, type PolicyInput, type PolicyMemory } from "../src/shared/arena/policies";
 import { createRng } from "../src/shared/arena/rng";
-import { ERROR, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, parseServerMessage } from "../src/shared/arena/protocol";
+import { ERROR, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
 import type { ArenaStats } from "../src/server/arena/rooms";
 import {
   USAGE,
@@ -105,9 +107,43 @@ function open(i: number): void {
   });
 }
 
+/** The watch sockets: each counts the bytes it receives from its first welcome. */
+const watchers: { ws: WebSocket; closing: boolean; closed: Promise<void>; bytes: number; since: number | null }[] = [];
+
+function openWatcher(): void {
+  const ws = new WebSocket(url);
+  let resolveClosed: () => void = () => {};
+  const w = { ws, closing: false, closed: new Promise<void>((r) => (resolveClosed = r)), bytes: 0, since: null as number | null };
+  watchers.push(w);
+  let opened = false;
+  ws.addEventListener("open", () => {
+    opened = true;
+    ws.send(encodeWatch(PROTOCOL_VERSION));
+  });
+  ws.addEventListener("message", (e) => {
+    const raw = String(e.data);
+    const m = parseServerMessage(raw);
+    if (m?.t === WELCOME && w.since === null) {
+      w.since = performance.now();
+      console.log(`watcher ${watchers.indexOf(w) + 1} watching arena ${m.arena}`);
+      return;
+    }
+    if (w.since !== null) w.bytes += utf8Bytes(raw);
+    if (m?.t === ERROR) tally.errors.push(`watcher error ${m.code}`);
+  });
+  ws.addEventListener("close", (e) => {
+    if (!w.closing) tally.errors.push(opened ? `watcher close ${e.code}` : "watcher connect failed");
+    resolveClosed();
+  });
+}
+
 const started = performance.now();
 for (let i = 1; i <= args.count; i++) {
   open(i);
+  await Bun.sleep(JOIN_GAP_MS);
+}
+for (let i = 0; i < args.watchers; i++) {
+  openWatcher();
   await Bun.sleep(JOIN_GAP_MS);
 }
 
@@ -133,18 +169,26 @@ try {
   if (res.ok) {
     const stats = (await res.json()) as ArenaStats;
     tick = stats.tick;
-    console.log(`server: ${stats.players} players in ${stats.arenas.length} arena(s): ${stats.arenas.map((a) => `#${a.id} ${a.players}`).join(", ")}`);
+    console.log(
+      `server: ${stats.players} players, ${stats.bots} fill bots and ${stats.watchers} watchers in ${stats.arenas.length} arena(s): ${stats.arenas.map((a) => `#${a.id} ${a.players}+${a.bots} bots, ${a.watchers} watching`).join("; ")}`,
+    );
   } else tally.errors.push(`stats ${res.status}`);
 } catch {
   tally.errors.push("stats unreachable");
 }
 
 clearInterval(inputs);
+const ended = performance.now();
+for (const w of watchers) if (w.since !== null) tally.watchers.push({ bytes: w.bytes, seconds: (ended - w.since) / 1000 });
 for (const bot of bots) {
   bot.closing = true;
   bot.ws.close();
 }
-await Promise.race([Promise.all(bots.map((b) => b.closed)), Bun.sleep(5000)]);
+for (const w of watchers) {
+  w.closing = true;
+  w.ws.close();
+}
+await Promise.race([Promise.all([...bots.map((b) => b.closed), ...watchers.map((w) => w.closed)]), Bun.sleep(5000)]);
 
 for (const line of formatSummary(args, tally, seconds, tick)) console.log(line);
 process.exit(tally.errors.length > 0 ? 1 : 0);
