@@ -30,9 +30,10 @@ const INFO = { playerKey: "0".repeat(32), touch: false };
 
 /**
  * Rooms on a fake clock and fake timers: `tick()` fires every running timer once. No fill bots
- * unless `fillTo` is given, so the counts below are people only.
+ * unless `fillTo` is given, so the counts below are people only. `startTick` is each new arena's
+ * first tick (BUG_SWARM_START_WAVE's, serve.ts).
  */
-function setup(saveLife?: (r: LifeRecord) => void, fillTo = 0) {
+function setup(saveLife?: (r: LifeRecord) => void, fillTo = 0, startTick = 0) {
   let now = 1_000_000;
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
@@ -42,6 +43,7 @@ function setup(saveLife?: (r: LifeRecord) => void, fillTo = 0) {
     buildId: "test-build",
     saveLife,
     fillTo,
+    startTick,
     startTimer: (fn) => {
       const id = nextTimer++;
       timers.set(id, fn);
@@ -625,9 +627,9 @@ describe("the stream board's live read (#74)", () => {
     rooms.join("Ada", "tabs", INFO, client().send);
     tick();
     expect(rooms.stats().bots).toBe(FILL_TARGET - 1);
-    expect(rooms.live()).toEqual({ playing: 1, arenas: [{ id: 1, players: 1, wave: 1 }] });
+    expect(rooms.live()).toEqual({ playing: 1, arenas: [{ id: 1, players: 1, wave: 1, queen: null }] });
     tick(Math.round((WAVE_S * 1000) / TICK_MS));
-    expect(rooms.live()).toEqual({ playing: 1, arenas: [{ id: 1, players: 1, wave: 2 }] });
+    expect(rooms.live()).toEqual({ playing: 1, arenas: [{ id: 1, players: 1, wave: 2, queen: null }] });
   });
 
   test("21 people make two arenas, by id; an arena whose last person leaves is gone", () => {
@@ -636,13 +638,24 @@ describe("the stream board's live read (#74)", () => {
     expect(rooms.live()).toEqual({
       playing: MAX_PLAYERS_PER_ARENA + 1,
       arenas: [
-        { id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1 },
-        { id: 2, players: 1, wave: 1 },
+        { id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1, queen: null },
+        { id: 2, players: 1, wave: 1, queen: null },
       ],
     });
     const last = joined[MAX_PLAYERS_PER_ARENA]!;
     rooms.leave(last.room, last.entity);
-    expect(rooms.live()).toEqual({ playing: MAX_PLAYERS_PER_ARENA, arenas: [{ id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1 }] });
+    expect(rooms.live()).toEqual({ playing: MAX_PLAYERS_PER_ARENA, arenas: [{ id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1, queen: null }] });
+  });
+
+  test("an arena's hive queen: her health in whole percent once she arrives (#102)", () => {
+    const lead = Math.round(10_000 / TICK_MS);
+    const queenWave = Math.round(((QUEEN_EVERY_WAVES - 1) * WAVE_S * 1000) / TICK_MS);
+    const { rooms, tick } = setup(undefined, 0, queenWave - lead);
+    rooms.join("Ada", "tabs", INFO, client().send);
+    // Nothing shoots her (no fill bots) and nothing ends Ada's life, so she arrives untouched.
+    rooms.room(1)!.state.players[0]!.invulnTicks = 1e9;
+    tick(lead + 1 + QUEEN_MARKER_TICKS);
+    expect(rooms.live().arenas).toEqual([{ id: 1, players: 1, wave: QUEEN_EVERY_WAVES, queen: 100 }]);
   });
 });
 

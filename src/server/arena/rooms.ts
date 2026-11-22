@@ -79,8 +79,12 @@ const processMemory = () => {
   return { rssMb: Math.round((m.rss / MB) * 10) / 10, heapUsedMb: Math.round((m.heapUsed / MB) * 10) / 10 };
 };
 
-/** One open arena as the stream board shows it: people only, never fill bots. */
-export type LiveArena = { id: number; players: number; wave: number };
+/**
+ * One open arena as the stream board shows it: people only, never fill bots. `queen` is her health
+ * in whole percent, 1-100, while a hive queen is alive in the arena (#102); null with none or only
+ * her marker.
+ */
+export type LiveArena = { id: number; players: number; wave: number; queen: number | null };
 /** What the stream board reads live (GET /api/board): `playing` is the sum of the arenas' people. */
 export type LiveArenas = { playing: number; arenas: LiveArena[] };
 
@@ -231,13 +235,13 @@ export class Rooms {
   }
 
   /**
-   * The open arenas for the stream board, by id, with their people (bots never count) and wave.
-   * Read per HTTP request, never in the tick. An arena nobody plays in (only watched: the start
-   * screen's demo arena) is left out, so every arena listed has at least one person.
+   * The open arenas for the stream board, by id, with their people (bots never count), wave and
+   * hive queen's health. Read per HTTP request, never in the tick. An arena nobody plays in (only
+   * watched: the start screen's demo arena) is left out, so every arena listed has at least one person.
    */
   live(): LiveArenas {
     const arenas: LiveArena[] = [];
-    for (const { room } of this.rooms.values()) if (room.size > 0) arenas.push({ id: room.id, players: room.size, wave: room.wave });
+    for (const { room } of this.rooms.values()) if (room.size > 0) arenas.push({ id: room.id, players: room.size, wave: room.wave, queen: room.queen });
     arenas.sort((a, b) => a.id - b.id);
     return { playing: arenas.reduce((n, a) => n + a.players, 0), arenas };
   }

@@ -17,6 +17,7 @@ import {
   QUEEN_REWARD_POOL,
   QUEEN_WALL_CLEAR,
   groupGoal,
+  queenHealth,
   queenRewards,
   queenSpot,
   queenWaveStarts,
@@ -454,5 +455,33 @@ describe("contact with her", () => {
     expect(a.bugs.filter((b) => b.kind === "crawler")).toHaveLength(0);
     stepQuiet(a);
     expect(a.bugs.filter((b) => b.kind === "crawler").length).toBeGreaterThan(0);
+  });
+});
+
+describe("her health for the stream board (#102)", () => {
+  test("null with no queen and during her marker; 100 on arrival", () => {
+    const { a, ps } = arenaWith([200, 200]);
+    shield(ps);
+    expect(queenHealth(a)).toBeNull();
+    a.tick = W5;
+    stepQuiet(a);
+    expect(a.queen.stage).toBe(1);
+    expect(queenHealth(a)).toBeNull();
+    stepQuiet(a, QUEEN_MARKER_TICKS);
+    expect(a.queen.stage).toBe(2);
+    expect(queenHealth(a)).toBe(100);
+  });
+
+  test("whole percent rounded up: half is 50, 63.2% is 64, and one hit point is 1, never 0", () => {
+    const { a, ps } = arenaWith([200, 200]);
+    shield(ps);
+    const q = arrive(a);
+    a.queen.maxHp = 1000;
+    q.hp = 500;
+    expect(queenHealth(a)).toBe(50);
+    q.hp = 632;
+    expect(queenHealth(a)).toBe(64);
+    q.hp = 1;
+    expect(queenHealth(a)).toBe(1);
   });
 });

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { Board } from "./data";
 import { BOARD_POLL_MS, fetchBoard, startPolling, type BoardStatus } from "./poll";
 
-const BOARD: Board = { top: [{ name: "Ann", score: 50 }], teams: { tabs: 50, spaces: 0 }, playing: 1, arenas: [{ id: 1, players: 1, wave: 2 }] };
+const BOARD: Board = { top: [{ name: "Ann", score: 50 }], teams: { tabs: 50, spaces: 0 }, playing: 1, arenas: [{ id: 1, players: 1, wave: 2, queen: null }] };
 
 let errors: ReturnType<typeof spyOn>;
 beforeEach(() => {

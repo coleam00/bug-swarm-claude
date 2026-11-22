@@ -17,7 +17,10 @@ export const NAME_MIN_SCALE = 5 / 8;
 export type Board = { top: TopRow[]; teams: Record<Team, number>; playing: number; arenas: LiveArena[] };
 export type { LiveArena };
 
-export type ArenaPills = { pills: { id: number; text: string }[]; more: number };
+/** One arena's pill: `text` always, `queen` ("QUEEN 64%") only while a hive queen lives there (#102). */
+export type ArenaPill = { id: number; text: string; queen: string | null };
+/** `moreQueens` ("2 QUEENS") counts the arenas folded into '+N more' with a hive queen alive, else null (#102). */
+export type ArenaPills = { pills: ArenaPill[]; more: number; moreQueens: string | null };
 
 export type BoardRow = { rank: number; name: string; score: string; isNew: boolean };
 export type BoardTeam = { team: Team; label: string; color: string; total: string; share: number };
@@ -37,6 +40,8 @@ export type BoardView = {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isScore = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isCount = (v: unknown, min: number): v is number => Number.isInteger(v) && (v as number) >= min;
+/** A hive queen's health (#102): a whole percent 1-100, or null (none). Missing reads as none, so an older server's body still parses. */
+const isQueen = (v: unknown): boolean => v === undefined || v === null || (isCount(v, 1) && (v as number) <= 100);
 
 /** The body of GET /api/board, or null when it isn't one. Copies only the fields the board uses. */
 export function parseBoard(body: unknown): Board | null {
@@ -53,23 +58,34 @@ export function parseBoard(body: unknown): Board | null {
   // No cap on the count: several hundred viewers is more than a dozen arenas.
   const arenas: LiveArena[] = [];
   for (const a of body.arenas) {
-    if (!isRecord(a) || !isCount(a.id, 1) || !isCount(a.players, 0) || !isCount(a.wave, 1)) return null;
-    arenas.push({ id: a.id, players: a.players, wave: a.wave });
+    if (!isRecord(a) || !isCount(a.id, 1) || !isCount(a.players, 0) || !isCount(a.wave, 1) || !isQueen(a.queen)) return null;
+    arenas.push({ id: a.id, players: a.players, wave: a.wave, queen: (a.queen as number | null | undefined) ?? null });
   }
   return { top, teams, playing: body.playing, arenas };
 }
 
+/** "1 QUEEN", "2 QUEENS", or null for none: the folded queens on '+N more'. */
+const queensLine = (n: number): string | null => (n === 0 ? null : n === 1 ? "1 QUEEN" : `${n} QUEENS`);
+
 /**
  * The arena strip with room for `slots` chips: one pill per open arena, by id (the order holds still
  * on stream). With more arenas than slots, the last slot becomes '+N more' for the rest. view.ts
- * finds the largest `slots` whose chips fit the strip's measured width.
+ * finds the largest `slots` whose chips fit the strip's measured width. An arena with a hive queen
+ * alive also gets her health, "QUEEN 64%", which view.ts shows after a pulsing mark (#102). Arenas
+ * folded into '+N more' with a queen alive are counted on that chip instead, "2 QUEENS" (owner
+ * ruling on #102), so a queen never goes unseen; the order stays by id.
  */
 export function arenaPills(arenas: LiveArena[], slots: number): ArenaPills {
   const sorted = [...arenas].sort((a, b) => a.id - b.id);
   const shown = sorted.length <= slots ? sorted : sorted.slice(0, Math.max(0, slots - 1));
   return {
-    pills: shown.map((a) => ({ id: a.id, text: `Arena ${a.id} · ${a.players} · wave ${a.wave}` })),
+    pills: shown.map((a) => ({
+      id: a.id,
+      text: `Arena ${a.id} · ${a.players} · wave ${a.wave}`,
+      queen: a.queen === null ? null : `QUEEN ${a.queen}%`,
+    })),
     more: sorted.length - shown.length,
+    moreQueens: queensLine(sorted.slice(shown.length).filter((a) => a.queen !== null).length),
   };
 }
 

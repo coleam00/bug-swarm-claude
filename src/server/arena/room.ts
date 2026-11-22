@@ -68,6 +68,7 @@ import {
   type Observation,
   type PolicyInput,
 } from "../../shared/arena/policies";
+import { queenHealth } from "../../shared/arena/queen";
 import { createRng, type Rng } from "../../shared/arena/rng";
 import { createArenaFrame, createViewState, encodeView, keyframeOf, quantizeArena, viewBoxOf, type ArenaFrame, type ViewBox, type ViewState } from "../../shared/arena/view";
 import type { Team } from "../rules";
@@ -208,6 +209,11 @@ export class Room {
   /** The arena's wave now (1 up), as the snapshot sends it. */
   get wave(): number {
     return wave(this.state.tick);
+  }
+
+  /** The hive queen's health in whole percent while she lives, else null (queen.ts queenHealth; the stream board, #102). */
+  get queen(): number | null {
+    return queenHealth(this.state);
   }
 
   /** Adds a fill bot now and tells everyone. The tick tops arenas up; tests call it directly. */

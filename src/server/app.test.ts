@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { TOP_CACHE_MS, createApp } from "./app";
+import type { LiveArenas } from "./arena/rooms";
 import { findPlayer, hideName, openDb, playerBest, recordRunEnded, recordRunStarted, upsertPlayer } from "./db";
 import { ROBOT_RIM } from "../web/game/look";
 import { TEAMS, type Team } from "./rules";
@@ -301,7 +302,7 @@ describe("the stream board's read", () => {
     top: { name: string; score: number }[];
     teams: Record<Team, number>;
     playing: number;
-    arenas: { id: number; players: number; wave: number }[];
+    arenas: { id: number; players: number; wave: number; queen: number | null }[];
   };
   async function board(a: App): Promise<Board> {
     const res = await a.request("/api/board");
@@ -346,12 +347,13 @@ describe("the stream board's read", () => {
   });
 
   test("the people playing and the open arenas come from the rooms on every read, never cached (#74)", async () => {
-    let live = { playing: 1, arenas: [{ id: 1, players: 1, wave: 1 }] };
+    let live: LiveArenas = { playing: 1, arenas: [{ id: 1, players: 1, wave: 1, queen: null }] };
     const a = createApp(db, { now: () => clock, live: () => live });
     await play(a, "player-0001", "Ann", 50, TABS);
     const before = await board(a); // primes both caches
     expect(before).toEqual({ top: [{ name: "Ann", score: 50 }], teams: { tabs: 50, spaces: 0 }, ...live });
-    live = { playing: 21, arenas: [{ id: 1, players: 20, wave: 3 }, { id: 2, players: 1, wave: 1 }] };
+    // A hive queen at 64% in arena 1 (#102): her health travels as the rooms report it.
+    live = { playing: 21, arenas: [{ id: 1, players: 20, wave: 5, queen: 64 }, { id: 2, players: 1, wave: 1, queen: null }] };
     endRun(startRun(a, "player-0002", "Bob", SPACES), 30); // at the same instant: inside the 1 s window
     expect(await board(a)).toEqual({ top: before.top, teams: before.teams, ...live });
   });

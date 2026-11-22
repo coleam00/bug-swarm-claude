@@ -57,6 +57,16 @@
       .pill { flex: 0 0 auto; white-space: nowrap; font-size: 3.5vh; font-weight: 700; line-height: 1.2; padding: 0.6vh 1.8vh;
         border: 0.3vh solid #22d3ee; border-radius: 3vh; color: #e2e8f0; font-variant-numeric: tabular-nums; }
       .pill.more, .pill.empty-note { color: #94a3b8; border-color: #334155; }
+      /* A hive queen alive in the arena (#102): her amber (look.ts PALETTE[GLOW_QUEEN]) and a pulsing mark
+         before her health. In em, so it follows the pill's size in both layouts. No display here: [hidden] hides it. */
+      .pill-queen { color: #ffb020; }
+      .queen-mark { display: inline-block; width: 0.6em; height: 0.6em; margin-right: 0.3em; border-radius: 50%;
+        vertical-align: 0.05em; background: #ffb020; box-shadow: 0 0 0.4em #ffb020; animation: queen-pulse 1s ease-in-out infinite alternate; }
+      @keyframes queen-pulse {
+        from { opacity: 0.45; transform: scale(0.8); }
+        to { opacity: 1; transform: scale(1.15); }
+      }
+      @media (prefers-reduced-motion: reduce) { .queen-mark { animation: none; } }
 
       /* In the top padding band, above both columns: the arena strip holds the bottom edge (#74). */
       .status { position: fixed; right: 2vh; top: 0.3vh; font-size: 2.6vh; line-height: 1; color: #94a3b8; }

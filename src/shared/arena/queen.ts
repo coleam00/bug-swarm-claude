@@ -142,6 +142,18 @@ function queenBug(state: ArenaState): Bug | null {
 }
 
 /**
+ * Her health as the stream board shows it (#102): whole percent of her hit points, rounded up and
+ * kept within 1-100, so she never reads 0% while she lives. Null with no queen, during her marker,
+ * and once she is dead.
+ */
+export function queenHealth(state: ArenaState): number | null {
+  const g = queenBug(state);
+  const max = state.queen.maxHp;
+  if (!g || g.hp <= 0 || max <= 0) return null;
+  return Math.min(100, Math.max(1, Math.ceil((g.hp * 100) / max)));
+}
+
+/**
  * Her arrival and her goal, one step (sim.ts stepArena, before bugs): a QUEEN_EVERY_WAVES-th wave
  * starting with no queen staged shows her marker at queenSpot; the marker counts down and at 0 she
  * is placed there (queenHp, every player's damage on her zeroed); while she lives, her goal is the
