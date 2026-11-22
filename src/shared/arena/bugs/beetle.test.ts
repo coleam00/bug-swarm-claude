@@ -1,6 +1,8 @@
 // The beetle (#80), by stepping the arena with hand-placed players and bugs: it turns slowly toward
 // its target and walks only where it faces, its shell blocks shots from the front and not from the
-// side or behind, two players from two sides kill it, and its spawn rules, contact and kill.
+// side or behind, two players from two sides kill it, and its spawn rules, contact and kill. It
+// stands at a target under BEETLE_FROM_S of pressure age (#86), so the players it chases here are
+// aged past it first.
 import { describe, expect, test } from "bun:test";
 import { mult } from "../combat";
 import { DT, SHOT_RADIUS, WAVE_S } from "../constants";
@@ -31,6 +33,19 @@ function beetleAt(a: ArenaState, x: number, y: number, dx: number, dy: number): 
 
 const facing = (b: Bug) => Math.atan2(b.dy, b.dx);
 
+/** Makes `p`'s life `seconds` old in pressure age (not a first life, so nothing is held back). */
+function aged(a: ArenaState, p: Player, seconds: number): void {
+  p.firstLife = false;
+  p.lifeStartTick = a.tick - Math.round(seconds / DT);
+}
+
+/** arenaWith, every player's life 300 s old: past BEETLE_FROM_S, so a beetle goes for them. */
+function oldArenaWith(...spots: [number, number][]): { a: ArenaState; ps: Player[] } {
+  const r = arenaWith(...spots);
+  for (const p of r.ps) aged(r.a, p, 300);
+  return r;
+}
+
 /**
  * `p` fires `shots` shots at beetle `b`, which is held where it is and facing (fx, fy) before
  * every step (its own step still turns it one tick toward its target before the shots fly);
@@ -58,7 +73,7 @@ function shootHeld(a: ArenaState, p: Player, b: Bug, fx: number, fy: number, sho
 
 describe("beetle turning and walking", () => {
   test("its first step faces it at its target and starts it walking", () => {
-    const { a } = arenaWith([1200, 1200]);
+    const { a } = oldArenaWith([1200, 1200]);
     const b = placeBug(a, 1200, 1500, BEETLE);
     expect(b.phase).toBe(NEW);
     stepQuiet(a);
@@ -71,7 +86,7 @@ describe("beetle turning and walking", () => {
   });
 
   test(`it turns toward a target 90 degrees off at ${TURN_RATE} rad/s, no faster`, () => {
-    const { a } = arenaWith([1500, 1200]);
+    const { a } = oldArenaWith([1500, 1200]);
     // Facing up (-y), its target to its right (+x), 300 units away.
     const b = beetleAt(a, 1200, 1200, 0, -1);
     stepQuiet(a, Math.round(1 / DT));
@@ -83,7 +98,7 @@ describe("beetle turning and walking", () => {
   });
 
   test(`with its target dead ahead it walks along its facing at ${SPEED} u/s`, () => {
-    const { a } = arenaWith([1500, 1200]);
+    const { a } = oldArenaWith([1500, 1200]);
     const b = beetleAt(a, 1000, 1200, 1, 0);
     stepQuiet(a, 10);
     expect(b.x).toBeCloseTo(1000 + SPEED * 10 * DT, 6);
@@ -92,7 +107,7 @@ describe("beetle turning and walking", () => {
   });
 
   test("with its target behind it, it stands and turns; it walks again once it faces them", () => {
-    const { a } = arenaWith([1500, 1200]);
+    const { a } = oldArenaWith([1500, 1200]);
     const b = beetleAt(a, 1000, 1200, -1, 0);
     // In 1 s it turns 0.9 rad of the 3.14: its target is still more than 90 degrees off.
     stepQuiet(a, Math.round(1 / DT));
@@ -108,6 +123,54 @@ describe("beetle turning and walking", () => {
     const b = beetleAt(a, 1000, 1200, 0, 1);
     stepQuiet(a, 20);
     expect([b.x, b.y, b.dx, b.dy]).toEqual([1000, 1200, 0, 1]);
+  });
+});
+
+describe("beetle spares young lives (#86)", () => {
+  test("a walking beetle facing a 40 s life stands until that life is 60 s old, then walks at it", () => {
+    const { a, ps } = arenaWith([1500, 1200]);
+    const p = ps[0]!;
+    aged(a, p, 40);
+    p.invulnTicks = 1e9;
+    const b = beetleAt(a, 1200, 1200, 1, 0);
+    let firstMove = -1;
+    for (let n = 0; n < Math.round(25 / DT) && firstMove < 0; n++) {
+      stepQuiet(a);
+      if (b.x !== 1200 || b.y !== 1200) firstMove = n;
+      else expect([b.dx, b.dy]).toEqual([1, 0]);
+    }
+    // It waits out the life's 60th second: about 20 s, then walks toward the player.
+    expect(firstMove * DT).toBeGreaterThanOrEqual(20 - DT);
+    expect(firstMove * DT).toBeLessThan(21);
+    expect(b.x).toBeGreaterThan(1200);
+  });
+
+  test("a first life's 10 s hold-back counts: at 65 s old it is 55 s of pressure age, and the beetle stands", () => {
+    const { a, ps } = arenaWith([1500, 1200]);
+    const p = ps[0]!;
+    p.lifeStartTick = a.tick - Math.round(65 / DT);
+    expect(p.firstLife).toBe(true);
+    p.invulnTicks = 1e9;
+    const b = beetleAt(a, 1200, 1200, 1, 0);
+    stepQuiet(a, Math.round(4 / DT));
+    expect([b.x, b.y, b.dx, b.dy]).toEqual([1200, 1200, 1, 0]);
+  });
+
+  test("a new beetle whose target is young starts walking facing +x, not toward them", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    aged(a, ps[0]!, 40);
+    const b = placeBug(a, 1200, 1500, BEETLE);
+    stepQuiet(a);
+    expect(b.phase).toBe(WALK);
+    expect([b.dx, b.dy]).toEqual([1, 0]);
+  });
+
+  test("a beetle with a young life 90 degrees off does not turn toward them", () => {
+    const { a, ps } = arenaWith([1500, 1200]);
+    aged(a, ps[0]!, 40);
+    const b = beetleAt(a, 1200, 1200, 0, -1);
+    stepQuiet(a, Math.round(1 / DT));
+    expect([b.x, b.y, b.dx, b.dy]).toEqual([1200, 1200, 0, -1]);
   });
 });
 
@@ -212,7 +275,7 @@ describe("beetle shell", () => {
 
   test("two players, one at its front and one behind it, both firing: the one behind kills it, the front one's hits are all blocked", () => {
     // It turns toward the nearer one, in front, and walks at them; the other shoots its back.
-    const { a, ps } = arenaWith([1250, 1200], [1650, 1200]);
+    const { a, ps } = oldArenaWith([1250, 1200], [1650, 1200]);
     const [front, back] = [ps[0]!, ps[1]!];
     front.invulnTicks = 1e9;
     const b = placeBug(a, 1400, 1200, BEETLE);

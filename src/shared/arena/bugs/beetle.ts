@@ -2,8 +2,8 @@
 // that come at the shell spark off it (combat.ts shellBlocks: no damage, the streak still grows);
 // shots from the side or behind hurt it. It turns slowly toward its target, so two players coming
 // at it from different sides kill it fast, and one player who walks round it can shoot its back.
-// - new: only until its first step, which faces it at its target ((1, 0) with none) and moves it
-//   to walk. A beetle is never in phase 0 after that, so every snapshot row carries its facing in
+// - new: only until its first step, which faces it at its target ((1, 0) with none, or with a
+//   young one: see below) and moves it to walk. A beetle is never in phase 0 after that, so every snapshot row carries its facing in
 //   the v6 tail, and the browser and the bots see where its shell points. It spawns out of every
 //   view, so its one tail-less row is never seen.
 // - walk: each tick it turns its facing (b.dx, b.dy) toward its target by at most TURN_PER_TICK,
@@ -11,6 +11,11 @@
 //   (max(0, facing . to-target)): a target beside or behind it stalls it while it turns. With no
 //   one up it stands, keeping its facing. It never counts phaseTicks (its ticksIn stays 0 on the
 //   wire).
+// A young target counts as none (#86): a target under BEETLE_FROM_S of pressure age is one the
+// spawn mix spares beetles for, so the beetle neither turns toward nor walks at it; it stands,
+// keeping its facing, until that life comes of age. So a late joiner meeting an arena's
+// established beetles gets the same opening an early joiner gets before wave 4 (direction.md
+// "Fair drop-in"). Its body still hurts on contact.
 // Contact is the stepper's, as for every kind.
 import { DT, WORLD_H, WORLD_W } from "../constants";
 import type { Bug, Player } from "../sim";
@@ -29,7 +34,10 @@ export const BEETLE_TURN = 0.9;
 export const TURN_PER_TICK = BEETLE_TURN * DT;
 /** The shell covers this much either side of its facing, radians: its front 120 degrees. */
 export const SHELL_HALF = Math.PI / 3;
-/** A life must be this old (pressure age) before a beetle spawns for it, seconds. */
+/**
+ * A life must be this old (pressure age) before a beetle spawns for it, and before a beetle turns
+ * toward or walks at it (#86), seconds.
+ */
 export const BEETLE_FROM_S = 60;
 /** Its share of a life's spawns at BEETLE_FROM_S, rising by BEETLE_SHARE_RAMP a second to BEETLE_SHARE_MAX. */
 export const BEETLE_SHARE_START = 0.05;
@@ -73,9 +81,11 @@ export const beetle: BugKindDef = {
   points: 60,
   spawn: { unlockWave: 4, share: beetleShare, maxPerArena: BEETLE_MAX_PER_ARENA },
   shell: { cosHalf: Math.cos(SHELL_HALF) },
-  step(b: Bug, target: Player | null) {
+  step(b: Bug, target0: Player | null, targetAge: number) {
     b.vx = 0;
     b.vy = 0;
+    // A young target is no target (#86).
+    const target = target0 && targetAge >= BEETLE_FROM_S ? target0 : null;
     const tx = target ? target.x - b.x : 0;
     const ty = target ? target.y - b.y : 0;
     const d = Math.hypot(tx, ty);
