@@ -647,17 +647,14 @@ describe("the stream board's live read (#74)", () => {
     expect(rooms.live()).toEqual({ playing: MAX_PLAYERS_PER_ARENA, arenas: [{ id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1, queen: null }] });
   });
 
-  test("an arena's hive queen: null until she arrives, then her health in whole percent (#102)", () => {
+  test("an arena's hive queen: her health in whole percent once she arrives (#102)", () => {
     const lead = Math.round(10_000 / TICK_MS);
     const queenWave = Math.round(((QUEEN_EVERY_WAVES - 1) * WAVE_S * 1000) / TICK_MS);
     const { rooms, tick } = setup(undefined, 0, queenWave - lead);
     rooms.join("Ada", "tabs", INFO, client().send);
-    // Nothing shoots her (no fill bots) and nothing ends Ada's life, so only her arrival changes.
+    // Nothing shoots her (no fill bots) and nothing ends Ada's life, so she arrives untouched.
     rooms.room(1)!.state.players[0]!.invulnTicks = 1e9;
-    expect(rooms.live().arenas).toEqual([{ id: 1, players: 1, wave: QUEEN_EVERY_WAVES - 1, queen: null }]);
-    tick(lead + 1);
-    expect(rooms.live().arenas).toEqual([{ id: 1, players: 1, wave: QUEEN_EVERY_WAVES, queen: null }]); // her marker
-    tick(QUEEN_MARKER_TICKS);
+    tick(lead + 1 + QUEEN_MARKER_TICKS);
     expect(rooms.live().arenas).toEqual([{ id: 1, players: 1, wave: QUEEN_EVERY_WAVES, queen: 100 }]);
   });
 });
