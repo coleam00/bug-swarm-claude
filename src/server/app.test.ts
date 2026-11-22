@@ -297,7 +297,12 @@ describe("the stream board's read", () => {
     endRun(runId, score, Math.floor(score / 10), 1);
   }
 
-  type Board = { top: { name: string; score: number }[]; teams: Record<Team, number> };
+  type Board = {
+    top: { name: string; score: number }[];
+    teams: Record<Team, number>;
+    playing: number;
+    arenas: { id: number; players: number; wave: number }[];
+  };
   async function board(a: App): Promise<Board> {
     const res = await a.request("/api/board");
     expect(res.status).toBe(200);
@@ -315,6 +320,8 @@ describe("the stream board's read", () => {
         { name: "Bob", score: 30 },
       ],
       teams: { tabs: 70, spaces: 30 },
+      playing: 0,
+      arenas: [],
     });
   });
 
@@ -323,7 +330,7 @@ describe("the stream board's read", () => {
     await play(a, "player-0001", "Bad Name", 50, TABS);
     await play(a, "player-0002", "Good", 40, SPACES);
     hideName(db, "bad name", new Date(clock));
-    expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 } });
+    expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 }, playing: 0, arenas: [] });
   });
 
   test("both halves are cached for 1 second, like the routes it combines", async () => {
@@ -335,7 +342,18 @@ describe("the stream board's read", () => {
     clock += 999;
     expect(await board(a)).toEqual(before);
     clock += 1;
-    expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 } });
+    expect(await board(a)).toEqual({ top: [{ name: "Good", score: 40 }], teams: { tabs: 0, spaces: 40 }, playing: 0, arenas: [] });
+  });
+
+  test("the people playing and the open arenas come from the rooms on every read, never cached (#74)", async () => {
+    let live = { playing: 1, arenas: [{ id: 1, players: 1, wave: 1 }] };
+    const a = createApp(db, { now: () => clock, live: () => live });
+    await play(a, "player-0001", "Ann", 50, TABS);
+    const before = await board(a); // primes both caches
+    expect(before).toEqual({ top: [{ name: "Ann", score: 50 }], teams: { tabs: 50, spaces: 0 }, ...live });
+    live = { playing: 21, arenas: [{ id: 1, players: 20, wave: 3 }, { id: 2, players: 1, wave: 1 }] };
+    endRun(startRun(a, "player-0002", "Bob", SPACES), 30); // at the same instant: inside the 1 s window
+    expect(await board(a)).toEqual({ top: before.top, teams: before.teams, ...live });
   });
 });
 

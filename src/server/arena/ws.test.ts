@@ -178,6 +178,9 @@ test(
     expect(four.p.map((p) => p[0]).sort((x, y) => x - y)).toEqual([a.welcome.you, a.welcome.you + 1, a.welcome.you + 2, a.welcome.you + 3]);
     const stats = (await (await fetch(`${srv.url}/api/arena/stats`)).json()) as ArenaStats;
     expect(stats).toMatchObject({ arenas: [{ id: 1, players: 1, bots: 3 }], players: 1, bots: 3 });
+    // The stream board reads the same rooms (serve.ts wires them in) and counts the person only (#74).
+    const board = (await (await fetch(`${srv.url}/api/board`)).json()) as { playing: number; arenas: unknown[] };
+    expect(board).toMatchObject({ playing: 1, arenas: [{ id: a.welcome.arena, players: 1, wave: 1 }] });
   },
   TIMEOUT,
 );

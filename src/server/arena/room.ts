@@ -150,6 +150,11 @@ export class Room {
     return this.bots.size;
   }
 
+  /** The arena's wave now (1 up), as the snapshot sends it. */
+  get wave(): number {
+    return wave(this.state.tick);
+  }
+
   /** Adds a fill bot now and tells everyone. The tick tops arenas up; tests call it directly. */
   addBot(): Player {
     const used = (n: string) => this.state.players.some((p) => p.name === n);
