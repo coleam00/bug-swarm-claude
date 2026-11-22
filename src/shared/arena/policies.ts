@@ -4,8 +4,8 @@
 //
 // The specs below are fixed. Tuning the game changes constants.ts, the bug kinds' files (bugs/)
 // and the pickups' files (pickups/), never these: a gate that fails is not passed by weakening the
-// mover (engineering.md, "Skill is measured"). Going for pickups (#73) was added to the aimer as
-// a strength, never to pass a gate.
+// mover (engineering.md, "Skill is measured"). Going for pickups (#73) and flanking a shelled bug
+// (#80) were added to the aimer as strengths the items asked for, never to pass a gate.
 //
 // - idle: never moves, never fires.
 // - mover: runs from bugs and fires straight ahead. Its move is the threat vector, the sum over
@@ -18,6 +18,14 @@
 //   where the nearest bug within AIM_RANGE will be (leading it with SHOT_SPEED from the barrel)
 //   and fires in bursts: while heat is under BURST_HEAT and fewer than BURST_SHOTS have left,
 //   then it releases for BURST_REST_S. It never fires while locked or with no bug in range.
+//   Shells (#80): a bug whose shell faces it (shelledFrom: it stands within FLANK_COS of the
+//   shell's facing, wider than the shell's own 60 degrees, for the turn while a shot flies) is
+//   never its aim: it aims at the nearest bug in range that is not shelled, and holds fire when
+//   every bug in range is. It flanks the nearest bug with a shell within FLANK_RANGE that it is
+//   not yet well behind (within FLANK_BEHIND_COS of its facing), unless another bug is within
+//   KEEP_DIST: at full speed round it, the way that takes it away from the shell's facing, holding
+//   FLANK_NEAR to FLANK_FAR from it, plus the evasion from every other bug, shooting it once it is
+//   off the shell. With no bug with a shell about it plays exactly as before.
 //   Pickups (#73): while the nearest bug is not within KEEP_DIST and a pickup lies within
 //   PICKUP_SEEK, it walks to the nearest pickup at full speed instead (aim and fire unchanged).
 //   `aimerBase` is the aimer without this.
@@ -25,7 +33,7 @@
 //   (within DASH_CONTACT of touching, now or after one more tick of the bug's velocity), it
 //   presses dash along the evasion (its aim when there is none), on that tick only.
 //
-// - fillBot (#66): the server's fill bots. The aimer without going for pickups (aimerBase, so
+// - fillBot (#66): the server's fill bots. The aimer, flanking too, without going for pickups (aimerBase, so
 //   viewers get them; it still takes one it walks over), with a human layer on top: when its target
 //   changes (its aim jumps by more than FILL_RETARGET) or a bug comes inside KEEP_DIST, it reacts
 //   only after FILL_REACT_MIN_TICKS to FILL_REACT_MAX_TICKS (drawn per reaction), keeping its last
@@ -38,7 +46,8 @@
 //
 // Every policy presses dash while out, so it respawns; only the dasher presses it in a life. The
 // idle and the mover never go for pickups; they take one only when they walk over it.
-import { MAX_BUG_RADIUS } from "./bugs/registry";
+import { MAX_BUG_RADIUS, bugDef } from "./bugs/registry";
+import { shellBlocks } from "./combat";
 import { BARREL, DT, PLAYER_RADIUS, REVIVE_RANGE, SHOT_SPEED } from "./constants";
 import { nextRandom, type Rng } from "./rng";
 import { wrapAngle, type ArenaState } from "./sim";
@@ -47,7 +56,8 @@ export const POLICY_NAMES = ["idle", "mover", "aimer", "dasher"] as const;
 export type PolicyName = (typeof POLICY_NAMES)[number];
 export const [IDLE, MOVER, AIMER, DASHER] = POLICY_NAMES;
 
-export type ObservedBug = { x: number; y: number; vx: number; vy: number };
+/** A bug as a policy sees it: where, how fast, and (fx, fy) its shell's facing, a unit vector, or 0, 0 for a bug with no shell (#80). */
+export type ObservedBug = { x: number; y: number; vx: number; vy: number; fx: number; fy: number };
 
 export type Observation = {
   self: { x: number; y: number; vx: number; vy: number; aim: number; alive: boolean; heat: number; locked: boolean; dashReady: boolean };
@@ -103,6 +113,19 @@ export const STRAFE = 0.35;
 export const DASH_CONTACT = 30;
 /** The aimer walks to a pickup within this, units, when no bug is within KEEP_DIST (#73). */
 export const PICKUP_SEEK = 300;
+/** The aimer flanks a shelled bug within this, units (#80). */
+export const FLANK_RANGE = 400;
+/** While flanking it keeps between these from the bug, units: outward below FLANK_NEAR, inward past FLANK_FAR. */
+export const FLANK_NEAR = 150;
+export const FLANK_FAR = 300;
+/**
+ * A bug is shelled from where the aimer stands when it stands within this cosine of the shell's
+ * facing: 80 degrees, the shell's 60 plus slack for it turning while a shot flies (about 0.3 s
+ * at 300 units: 17 degrees at a beetle's turn).
+ */
+export const FLANK_COS = Math.cos((80 * Math.PI) / 180);
+/** It flanks a bug with a shell until it stands this far round from its facing, cosine: 135 degrees, well behind it. */
+export const FLANK_BEHIND_COS = Math.cos((135 * Math.PI) / 180);
 
 export function createMemory(): PolicyMemory {
   return { aim: 0, burst: 0, rest: 0, lastHeat: 0, strafe: 1, strafeFor: 0 };
@@ -121,15 +144,17 @@ export function createObservation(): Observation {
   };
 }
 
-/** Sets the observed bug at index `i`, growing the list only when it must. */
-export function setObservedBug(obs: Observation, i: number, x: number, y: number, vx: number, vy: number): void {
+/** Sets the observed bug at index `i` (fx, fy: its shell's facing, 0, 0 with none), growing the list only when it must. */
+export function setObservedBug(obs: Observation, i: number, x: number, y: number, vx: number, vy: number, fx: number, fy: number): void {
   const b = obs.bugs[i];
   if (b) {
     b.x = x;
     b.y = y;
     b.vx = vx;
     b.vy = vy;
-  } else obs.bugs[i] = { x, y, vx, vy };
+    b.fx = fx;
+    b.fy = fy;
+  } else obs.bugs[i] = { x, y, vx, vy, fx, fy };
 }
 
 /** Sets the observed pickup at index `i`, growing the list only when it must. */
@@ -162,7 +187,8 @@ export function observe(state: ArenaState, playerId: number, w: number, h: numbe
   out.bugCount = state.bugs.length;
   for (let i = 0; i < state.bugs.length; i++) {
     const b = state.bugs[i]!;
-    setObservedBug(out, i, b.x, b.y, b.vx, b.vy);
+    const shell = bugDef(b.kind).shell !== undefined;
+    setObservedBug(out, i, b.x, b.y, b.vx, b.vy, shell ? b.dx : 0, shell ? b.dy : 0);
   }
   let downs = 0;
   for (const q of state.players) {
@@ -196,18 +222,56 @@ function nearestBug(obs: Observation): number {
   return best;
 }
 
+/** Whether bug `b`'s shell faces a robot at (x, y), so shots from there would spark off it (#80). */
+export function shelledFrom(b: ObservedBug, x: number, y: number): boolean {
+  const dx = b.x - x;
+  const dy = b.y - y;
+  const d = Math.hypot(dx, dy);
+  return d > 0 && shellBlocks(b.fx, b.fy, dx / d, dy / d, FLANK_COS);
+}
+
+/** Whether the aimer at (x, y) flanks bug `b`: it has a shell and the robot is not yet well behind it (#80). */
+function flankable(b: ObservedBug, x: number, y: number): boolean {
+  if (b.fx === 0 && b.fy === 0) return false;
+  const dx = x - b.x;
+  const dy = y - b.y;
+  const d = Math.hypot(dx, dy);
+  return d > 0 && (b.fx * dx + b.fy * dy) / d > FLANK_BEHIND_COS;
+}
+
+/**
+ * The nearest bug that is not shelled from the policy's robot (`flank` false), or that it flanks
+ * (`flank` true); -1 if none. With no bug with a shell, the first is nearestBug's, ties and all.
+ */
+function nearestBy(obs: Observation, flank: boolean): number {
+  const { x, y } = obs.self;
+  let best = -1;
+  let bestD = Infinity;
+  for (let i = 0; i < obs.bugCount; i++) {
+    const b = obs.bugs[i]!;
+    const d = (b.x - x) ** 2 + (b.y - y) ** 2;
+    if (d < bestD && (flank ? flankable(b, x, y) : !shelledFrom(b, x, y))) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
 const evade = { x: 0, y: 0, threat: false };
 
 /**
  * The shared evasion: the threat vector plus the wall push, into `evade` (unnormalised). The
- * mover and the aimer both use it, so the skill gate measures aiming, not running.
+ * mover and the aimer both use it, so the skill gate measures aiming, not running. Bug `skip`
+ * (the one the aimer flanks, #80) is left out.
  */
-function evasion(obs: Observation): void {
+function evasion(obs: Observation, skip = -1): void {
   const { x, y } = obs.self;
   let ex = 0;
   let ey = 0;
   let threat = false;
   for (let i = 0; i < obs.bugCount; i++) {
+    if (i === skip) continue;
     const b = obs.bugs[i]!;
     const dx = x - b.x;
     const dy = y - b.y;
@@ -289,6 +353,33 @@ function intercept(sx: number, sy: number, bx: number, by: number, vx: number, v
   return t > 0 ? t : -1;
 }
 
+/**
+ * The flank (#80): at full speed round bug `i`, the way that carries the robot away from its
+ * shell's facing (round the side its facing is already turned from), out below FLANK_NEAR and in
+ * past FLANK_FAR, plus the evasion from every other bug. Round it at 200 units a robot covers
+ * 1.5 rad/s, faster than a beetle turns.
+ */
+function flankMove(obs: Observation, i: number, out: PolicyInput): void {
+  const b = obs.bugs[i]!;
+  evasion(obs, i);
+  const rx = obs.self.x - b.x;
+  const ry = obs.self.y - b.y;
+  const rd = Math.hypot(rx, ry);
+  const ux = rx / rd;
+  const uy = ry / rd;
+  const side = b.fx * uy - b.fy * ux >= 0 ? 1 : -1;
+  let mx = -uy * side;
+  let my = ux * side;
+  if (rd < FLANK_NEAR) {
+    mx += ux;
+    my += uy;
+  } else if (rd > FLANK_FAR) {
+    mx -= ux;
+    my -= uy;
+  }
+  moveAlong(out, mx / THREAT_RANGE + evade.x, my / THREAT_RANGE + evade.y, 1);
+}
+
 /** The aimer without going for pickups: what the fill bot builds on. */
 export const aimerBase: Policy = (obs, mem, rng, out) => {
   out.dash = !obs.self.alive;
@@ -304,10 +395,18 @@ export const aimerBase: Policy = (obs, mem, rng, out) => {
   const n = nearestBug(obs);
   const near = n >= 0 ? obs.bugs[n]! : null;
   const dist = near ? Math.hypot(near.x - x, near.y - y) : Infinity;
+  // Shells (#80): the bug to shoot is never one shelled from here; the one to flank is.
+  const a = nearestBy(obs, false);
+  const target = a >= 0 ? obs.bugs[a]! : null;
+  const aimDist = target ? Math.hypot(target.x - x, target.y - y) : Infinity;
+  let flank = nearestBy(obs, true);
+  if (flank >= 0 && Math.hypot(obs.bugs[flank]!.x - x, obs.bugs[flank]!.y - y) > FLANK_RANGE) flank = -1;
 
-  // Move: evade when close, else strafe across the nearest bug's line, keeping off the walls.
+  // Move: evade when close (unless the bug that close is the one it flanks), else flank a shelled
+  // bug, else strafe across the nearest bug's line, keeping off the walls.
   evasion(obs);
-  if (near && dist < KEEP_DIST) moveAlong(out, evade.x, evade.y, 1);
+  if (near && dist < KEEP_DIST && n !== flank) moveAlong(out, evade.x, evade.y, 1);
+  else if (flank >= 0) flankMove(obs, flank, out);
   else if (near) {
     mem.strafeFor -= DT;
     if (mem.strafeFor <= 0) {
@@ -319,15 +418,15 @@ export const aimerBase: Policy = (obs, mem, rng, out) => {
     moveAlong(out, px / THREAT_RANGE + evade.x, py / THREAT_RANGE + evade.y, STRAFE);
   } else moveAlong(out, evade.x, evade.y, STRAFE);
 
-  // Aim: lead the nearest bug in range.
-  if (near && dist <= AIM_RANGE) {
-    const ux = (near.x - x) / dist;
-    const uy = (near.y - y) / dist;
+  // Aim: lead the nearest bug in range that is not shelled from here.
+  if (target && aimDist <= AIM_RANGE) {
+    const ux = (target.x - x) / aimDist;
+    const uy = (target.y - y) / aimDist;
     const sx = x + ux * BARREL;
     const sy = y + uy * BARREL;
-    const t = intercept(sx, sy, near.x, near.y, near.vx, near.vy);
-    const tx = t > 0 ? near.x + near.vx * t : near.x;
-    const ty = t > 0 ? near.y + near.vy * t : near.y;
+    const t = intercept(sx, sy, target.x, target.y, target.vx, target.vy);
+    const tx = t > 0 ? target.x + target.vx * t : target.x;
+    const ty = t > 0 ? target.y + target.vy * t : target.y;
     mem.aim = Math.atan2(ty - y, tx - x);
   }
   out.aim = mem.aim;
@@ -338,7 +437,7 @@ export const aimerBase: Policy = (obs, mem, rng, out) => {
     out.fire = false;
     return;
   }
-  const canFire = near !== null && dist <= AIM_RANGE && !obs.self.locked;
+  const canFire = target !== null && aimDist <= AIM_RANGE && !obs.self.locked;
   if (canFire && obs.self.heat < BURST_HEAT && mem.burst < BURST_SHOTS) {
     out.fire = true;
     return;

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { BUG_KINDS, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createRng } from "../src/shared/arena/rng";
 import { stepPlayer } from "../src/shared/arena/sim";
 import { TEAMS } from "../src/server/rules";
-import type { Snapshot } from "../src/shared/arena/protocol";
+import type { Snapshot, SnapshotBug } from "../src/shared/arena/protocol";
 import { createObservationTracker } from "./bots-lib";
 import { AIM_TURN, WALL_AVOID, botName, botTeam, createTally, createWander, formatSummary, parseBotsArgs, stepWander, wsUrl } from "./bots-lib";
 
@@ -123,18 +123,47 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
   t.update(snap(10, [[7, 0, 300, 300]]), 2);
   expect(t.obs.self).toEqual({ x: 500, y: 600, vx: 30, vy: -40, aim: 1.5, alive: true, heat: 0.42, locked: true, dashReady: true });
   expect(t.obs.bugCount).toBe(1);
-  expect(t.obs.bugs[0]).toEqual({ x: 300, y: 300, vx: 0, vy: 0 });
+  expect(t.obs.bugs[0]).toEqual({ x: 300, y: 300, vx: 0, vy: 0, fx: 0, fy: 0 });
   // The floor's pickups (#73), so `bun run bots` policies see what `bun run skill`'s see.
   expect(t.obs.pickupCount).toBe(1);
   expect(t.obs.pickups[0]).toEqual({ x: 700, y: 710 });
   t.update(snap(11, [[9, 0, 50, 50], [7, 0, 308, 294]]), 2);
   expect(t.obs.bugs[1]!.vx).toBeCloseTo(160, 6);
   expect(t.obs.bugs[1]!.vy).toBeCloseTo(-120, 6);
-  expect(t.obs.bugs[0]).toEqual({ x: 50, y: 50, vx: 0, vy: 0 });
+  expect(t.obs.bugs[0]).toEqual({ x: 50, y: 50, vx: 0, vy: 0, fx: 0, fy: 0 });
   expect(t.obs.pickupCount).toBe(0);
   // A snapshot skipped: the gap counts.
   t.update(snap(13, [[7, 0, 324, 282]], 0), 2);
   expect(t.obs.bugCount).toBe(1);
   expect(t.obs.bugs[0]!.vx).toBeCloseTo(160, 6);
   expect(t.obs.self.alive).toBe(false);
+});
+
+test("a policy bot sees a beetle's shell facing from its row's tail, and no facing on any other bug (#80)", () => {
+  const t = createObservationTracker();
+  const beetle = BUG_KINDS.indexOf("beetle");
+  const dasher = BUG_KINDS.indexOf("dasher");
+  const snap = (b: SnapshotBug[]): Snapshot => ({
+    t: "snapshot",
+    tick: 5,
+    ack: 0,
+    p: [[2, 500, 600, 0, 0, 0, 1, 0, 0, 0, 0]],
+    b,
+    s: [],
+    e: [],
+    k: [],
+    d: [],
+    f: [],
+    w: 4,
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0] },
+  });
+  t.update(snap([[1, beetle, 300, 300, 1, Math.PI / 2, 0], [2, dasher, 100, 100, 1, 0.5, 3]]), 2);
+  expect(t.obs.bugs[0]!.fx).toBeCloseTo(0, 9);
+  expect(t.obs.bugs[0]!.fy).toBeCloseTo(1, 9);
+  // A dasher's tail is its lunge line, not a shell: it is seen with no facing.
+  expect([t.obs.bugs[1]!.fx, t.obs.bugs[1]!.fy]).toEqual([0, 0]);
+  // The same slots reused by bugs with no shell: no facing left over from the beetle.
+  t.update(snap([[3, 0, 10, 10], [1, beetle, 300, 300]]), 2);
+  expect([t.obs.bugs[0]!.fx, t.obs.bugs[0]!.fy]).toEqual([0, 0]);
+  expect([t.obs.bugs[1]!.fx, t.obs.bugs[1]!.fy]).toEqual([0, 0]);
 });

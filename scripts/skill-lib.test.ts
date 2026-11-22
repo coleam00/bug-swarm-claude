@@ -133,6 +133,12 @@ describe("bun run skill", () => {
     expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
   });
 
+  test("bugs with a shell are counted a life (#80): an aimer's shots blocked by a shell on seeds 1 and 7, none for the idle", () => {
+    const blocks = [1, 7].map((seed) => playLife("aimer", seed, 180).shells.blocks);
+    expect(blocks.every((b) => b > 0)).toBe(true);
+    expect(playLife("idle", 1, 180).shells).toEqual({ kills: 0, blocks: 0 });
+  });
+
   test("pickupStats: the median and mean of each count", () => {
     const c = (shield: number, laser: number, blocks: number, laserHits: number) => ({ taken: { shield, laser }, blocks, laserHits });
     expect(pickupStats([c(0, 1, 0, 3), c(2, 1, 1, 0), c(1, 4, 0, 6)])).toEqual({

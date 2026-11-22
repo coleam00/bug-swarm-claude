@@ -4,7 +4,7 @@
 // Going for pickups (#73): the aimer and the dasher do, the fill bot does not.
 import { describe, expect, test } from "bun:test";
 import { MAX_BUG_RADIUS } from "./bugs/registry";
-import { DOWN_TICKS, PLAYER_RADIUS, WORLD_H, WORLD_W } from "./constants";
+import { DOWN_TICKS, DT, PLAYER_RADIUS, WORLD_H, WORLD_W } from "./constants";
 import {
   DASH_CONTACT,
   FILL_REACT_MAX_TICKS,
@@ -40,7 +40,7 @@ function decide(gap: number, ready = true): PolicyInput {
   obs.self.y = 1200;
   obs.self.alive = true;
   obs.self.dashReady = ready;
-  setObservedBug(obs, 0, 1200 + gap, 1200, 0, 0);
+  setObservedBug(obs, 0, 1200 + gap, 1200, 0, 0, 0, 0);
   obs.bugCount = 1;
   const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
   dasher(obs, createMemory(), createRng(1), out);
@@ -78,7 +78,7 @@ describe("fill bot", () => {
     const mem = createFillMemory();
     const rng = createRng(seed);
     return angles.map((a) => {
-      setObservedBug(obs, 0, 1200 + Math.cos(a) * 300, 1200 + Math.sin(a) * 300, 0, 0);
+      setObservedBug(obs, 0, 1200 + Math.cos(a) * 300, 1200 + Math.sin(a) * 300, 0, 0, 0, 0);
       const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
       fillBot(obs, mem, rng, out);
       return out;
@@ -197,7 +197,7 @@ describe("going for pickups (#73)", () => {
     setObservedPickup(obs, 0, 1400, 1200);
     obs.pickupCount = 1;
     if (bugGap !== null) {
-      setObservedBug(obs, 0, 1200, 1200 - bugGap, 0, 0);
+      setObservedBug(obs, 0, 1200, 1200 - bugGap, 0, 0, 0, 0);
       obs.bugCount = 1;
     }
     const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
@@ -248,5 +248,79 @@ describe("going for pickups (#73)", () => {
       { x: 1500, y: 1300 },
       { x: 900, y: 1000 },
     ]);
+  });
+});
+
+describe("flanking a beetle (#80)", () => {
+  /**
+   * One aimer at (1200, 1200), untouchable, and a beetle 300 units off at `angle`, walking and
+   * facing it; nothing spawns. Steps up to 20 s; `blind` zeroes every bug's shell facing in the
+   * aimer's observation, an aimer that does not know about shells. Returns when the beetle died
+   * (seconds, -1: alive at 20 s) and the aimer's shots that hurt it and that its shell blocked.
+   */
+  function duel(angle: number, seed: number, blind: boolean): { killedAt: number; hits: number; blocks: number } {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.invulnTicks = 1e9;
+    const b = placeBug(a, 1200 + Math.cos(angle) * 300, 1200 + Math.sin(angle) * 300, "beetle");
+    b.phase = 1;
+    b.dx = -Math.cos(angle);
+    b.dy = -Math.sin(angle);
+    const obs = createObservation();
+    const mem = createMemory();
+    const rng = createRng(seed);
+    const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
+    let hits = 0;
+    let blocks = 0;
+    for (let t = 0; t < 20 / DT; t++) {
+      observe(a, p.id, WORLD_W, WORLD_H, obs);
+      if (blind) for (const o of obs.bugs) o.fx = o.fy = 0;
+      aimer(obs, mem, rng, out);
+      p.input = clampInput({ seq: t + 1, ...out });
+      stepQuiet(a);
+      blocks += a.events.shellBlocks.length;
+      hits += a.events.shotsEnded.filter((e) => e.hit && !e.blocked).length;
+      if (!a.bugs.includes(b)) return { killedAt: (t + 1) * DT, hits, blocks };
+    }
+    return { killedAt: -1, hits, blocks };
+  }
+
+  test("the aimer walks round a beetle that faces it and kills it from the side, its shots almost never blocked", () => {
+    for (const [angle, seed] of [
+      [0, 1],
+      [1, 2],
+      [2.5, 3],
+      [4, 4],
+    ] as const) {
+      const r = duel(angle, seed, false);
+      expect(r.killedAt).toBeGreaterThan(0);
+      expect(r.killedAt).toBeLessThan(10);
+      expect(r.blocks).toBeLessThanOrEqual(2);
+    }
+  });
+
+  test("an aimer blind to shells pours its shots into the shell and does not kill it in 20 s", () => {
+    for (const [angle, seed] of [
+      [0, 1],
+      [2.5, 3],
+    ] as const) {
+      const r = duel(angle, seed, true);
+      expect(r.killedAt).toBe(-1);
+      expect(r.blocks).toBeGreaterThan(50);
+      expect(r.hits).toBe(0);
+    }
+  });
+
+  test("observe sees a beetle's shell facing, and no facing on a bug without a shell", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const beetle = placeBug(a, 1500, 1200, "beetle");
+    beetle.phase = 1;
+    beetle.dx = 0;
+    beetle.dy = 1;
+    const dasher = placeBug(a, 900, 1200, "dasher");
+    dasher.dx = 1;
+    const obs = observe(a, ps[0]!.id, WORLD_W, WORLD_H, createObservation());
+    expect([obs.bugs[0]!.fx, obs.bugs[0]!.fy]).toEqual([0, 1]);
+    expect([obs.bugs[1]!.fx, obs.bugs[1]!.fy]).toEqual([0, 0]);
   });
 });
