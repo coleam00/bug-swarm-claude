@@ -11,6 +11,7 @@
     "hide": "bun scripts/hide.ts",
     "bots": "bun scripts/bots.ts",
     "skill": "bun scripts/skill.ts",
+    "playtest": "bun scripts/playtest.ts",
     "reset": "bun scripts/reset.ts"
   },
   "dependencies": {
