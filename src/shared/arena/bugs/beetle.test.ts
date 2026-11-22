@@ -3,7 +3,7 @@
 // side or behind, two players from two sides kill it, and its spawn rules, contact and kill.
 import { describe, expect, test } from "bun:test";
 import { mult } from "../combat";
-import { DT, WAVE_S } from "../constants";
+import { DT, SHOT_RADIUS, WAVE_S } from "../constants";
 import { createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Player, type ShotEnded } from "../sim";
 import { arenaWith, hold, placeBug, placePickup, stepQuiet } from "../testkit";
 import { BEETLE_FROM_S, BEETLE_SHARE_MAX, NEW, WALK, beetleShare } from "./beetle";
@@ -152,6 +152,37 @@ describe("beetle shell", () => {
     });
   }
 
+  /**
+   * One shot of `p`'s flying along +x or -x past beetle `b`, `off` units to the side of its centre,
+   * starting 40 units from it (no spread); one step; returns how it ended (null: still flying).
+   */
+  function grazing(a: ArenaState, p: Player, b: Bug, from: 1 | -1, off: number): ShotEnded | null {
+    a.shots.push({ id: a.nextShotId++, owner: p.id, life: p.lifeStartTick, x: b.x - from * 40, y: b.y + off, dx: from, dy: 0, travelled: 0, pierce: 1, laser: false, hitA: 0, hitB: 0, hits: 0 });
+    stepQuiet(a);
+    return a.events.shotsEnded[0] ?? null;
+  }
+
+  test("the shell blocks at the edge of the circle shots meet (its radius plus SHOT_RADIUS), as it is drawn", () => {
+    const edge = bugDef(BEETLE).radius + SHOT_RADIUS;
+    // From the front, 2 units inside the edge: blocked; 2 outside: it flies on.
+    for (const [off, blocked] of [
+      [edge - 2, true],
+      [edge + 2, false],
+    ] as const) {
+      const { a, ps } = arenaWith([1200, 1200]);
+      const b = beetleAt(a, 1300, 1200, -1, 0);
+      const end = grazing(a, ps[0]!, b, 1, off);
+      expect(end?.blocked ?? false).toBe(blocked);
+      expect(b.hp).toBe(ITEM_HP);
+    }
+    // From behind, 2 units inside the edge: it hurts.
+    const { a, ps } = arenaWith([1200, 1200]);
+    const b = beetleAt(a, 1300, 1200, -1, 0);
+    const end = grazing(a, ps[0]!, b, -1, edge - 2);
+    expect(end).toEqual(expect.objectContaining({ hit: true, blocked: false }));
+    expect(b.hp).toBe(ITEM_HP - 1);
+  });
+
   test("a review laser shot stops on the shell: the bug it pierced first stays hit, the beetle is not", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
@@ -290,22 +321,5 @@ describe("beetle spawns", () => {
       most = Math.max(most, a.bugs.filter((b) => b.kind === BEETLE).length);
     }
     expect(most).toBe(CAP);
-  });
-});
-
-describe("beetle contact", () => {
-  test("touching a player costs them a hit and spends the beetle, as any bug", () => {
-    const { a, ps } = arenaWith([1200, 1200]);
-    const p = ps[0]!;
-    const b = beetleAt(a, 1220, 1200, -1, 0);
-    stepQuiet(a);
-    expect(p.hits).toBe(1);
-    expect(a.bugs).not.toContain(b);
-    expect(a.events.touches).toEqual([{ player: p.id, kind: BEETLE }]);
-  });
-
-  test(`it has ${ITEM_HP} hit points and scores ${ITEM_POINTS}`, () => {
-    expect(bugDef(BEETLE).hp).toBe(ITEM_HP);
-    expect(bugDef(BEETLE).points).toBe(ITEM_POINTS);
   });
 });

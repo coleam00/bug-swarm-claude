@@ -66,7 +66,7 @@ const SHELLED_KINDS: readonly BugKind[] = BUG_KINDS.filter((k) => bugDef(k).shel
 export type ShellCounts = { kills: number; blocks: number };
 
 /** Adds the last step's shelled-bug kills and shell blocks for player `id` to `c`. */
-function countShells(state: ArenaState, id: number, c: ShellCounts): void {
+export function countShells(state: ArenaState, id: number, c: ShellCounts): void {
   for (const k of state.events.kills) if (k.by === id && SHELLED_KINDS.includes(k.kind)) c.kills++;
   for (const o of state.events.shellBlocks) if (o === id) c.blocks++;
 }

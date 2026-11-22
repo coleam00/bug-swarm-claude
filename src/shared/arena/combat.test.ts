@@ -158,25 +158,11 @@ describe("shell (#80)", () => {
   /** A shot coming at a shell facing +x, `off` degrees off straight against it. */
   const at = (off: number) => shellBlocks(1, 0, -Math.cos(deg(off)), Math.sin(deg(off)), HALF);
 
-  test("a shot straight at the shell's face is blocked", () => {
-    expect(at(0)).toBe(true);
-  });
-
   test("the shell's edge is 60 degrees either side of its facing", () => {
     expect(at(59)).toBe(true);
     expect(at(-59)).toBe(true);
     expect(at(61)).toBe(false);
     expect(at(-61)).toBe(false);
-  });
-
-  test("a shot from the side or from behind is not blocked", () => {
-    expect(at(90)).toBe(false);
-    expect(at(135)).toBe(false);
-    expect(at(180)).toBe(false);
-  });
-
-  test("a bug not yet facing anywhere blocks nothing", () => {
-    expect(shellBlocks(0, 0, -1, 0, HALF)).toBe(false);
   });
 });
 

@@ -1,19 +1,22 @@
 // The beetle (#80): a big, slow, steel-blue bug with a shell over its front 120 degrees. Every
 // player sees which way its shell faces: a beetle is never in phase 0 once it has stepped, so its
 // facing rides every snapshot row's tail (and turns smoothly between snapshots, game.ts).
-// - The shell's rim: a bright pale arc over a soft steel glow, round its front SHELL_HALF either
-//   side of its facing, just outside its body, so the side that blocks reads at a glance.
+// - It is drawn on the circle shots meet (its radius plus SHOT_RADIUS, combat.ts): its body, head
+//   included, inside it, broad across its line rather than long, and the shell's rim, a bright pale
+//   arc over a soft steel glow round its front SHELL_HALF either side of its facing, on it. So a shot
+//   that visibly reaches the rim is one the simulation blocks, and its spark lands on the rim.
 // - A shot the shell blocks sparks steel-white and rings a "ting" (game.ts, tings.ts); a shot that
 //   hurts it sparks yellow, as on any bug.
 import { BEETLE_RADIUS, SHELL_HALF } from "../../../../shared/arena/bugs/beetle";
+import { SHOT_RADIUS } from "../../../../shared/arena/constants";
 import { GLOW_STEEL, PALETTE, type BugLook } from "../../../game/look";
 import type { BugsView } from "../../render";
 import { drawBody } from "./body";
 import type { BugDraw, BugFrame } from "./kind";
 
 const look: BugLook = {
-  // Drawn much bigger than its 12-unit collision radius: a big, armoured bug.
-  radius: BEETLE_RADIUS * 1.7,
+  // Its collision radius: with the sprite's head at 1.23x, the body stays inside the hit circle.
+  radius: BEETLE_RADIUS,
   shell: "#4b6a8a",
   shine: "#9fb8d0",
   head: "#1e2a38",
@@ -25,8 +28,15 @@ const look: BugLook = {
   jitterHz: 0,
 };
 
-/** The rim's radius, world units: just outside the drawn body. */
-export const RIM_RADIUS = look.radius + 2;
+/** Broad: its body is drawn this wide across its line (the sprite's shell is 0.8x its radius across). */
+export const BROAD = 1.35;
+/** The rim's radius, world units: the circle shots meet it at, so blocks spark on the rim. */
+export const RIM_RADIUS = BEETLE_RADIUS + SHOT_RADIUS;
+/**
+ * How far the drawn body reaches from its centre, world units: the sprite's head along its line
+ * (1.23x the look's radius, sprites.ts) and its shell across it (0.8x, times BROAD).
+ */
+export const BODY_REACH = Math.max(1.23 * look.radius, 0.8 * look.radius * BROAD);
 const RIM = "#e0f2fe";
 const RIM_GLOW = PALETTE[GLOW_STEEL];
 /** The rim's soft underlay and its bright core, world units wide. */
@@ -48,7 +58,7 @@ function draw(f: BugFrame, view: BugsView, i: number): void {
   // It faces its facing exactly: the shell is where it points.
   const phase = view.phase[i]!;
   const angle = phase === 0 ? NaN : view.angle[i]!;
-  drawBody(f, look, view, i, 1, 1, 1, 1, angle);
+  drawBody(f, look, view, i, 1, BROAD, 1, 1, angle);
   if (phase === 0) return;
   const { ctx, k } = f;
   const x = view.x[i]!;

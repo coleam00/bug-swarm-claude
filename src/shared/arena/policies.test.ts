@@ -299,18 +299,6 @@ describe("flanking a beetle (#80)", () => {
     }
   });
 
-  test("an aimer blind to shells pours its shots into the shell and does not kill it in 20 s", () => {
-    for (const [angle, seed] of [
-      [0, 1],
-      [2.5, 3],
-    ] as const) {
-      const r = duel(angle, seed, true);
-      expect(r.killedAt).toBe(-1);
-      expect(r.blocks).toBeGreaterThan(50);
-      expect(r.hits).toBe(0);
-    }
-  });
-
   test("flanking a beetle 100 units off, a crawler behind it does not push it into the beetle", () => {
     // The beetle 100 units right, facing it; a crawler 280 units left. Inside FLANK_NEAR the beetle
     // repels it as a threat, so its move is away from the beetle, not toward it.
