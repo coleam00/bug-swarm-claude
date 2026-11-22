@@ -2,7 +2,7 @@
 // player sees which way its shell faces: a beetle is never in phase 0 once it has stepped, so its
 // facing rides every snapshot row's tail (and turns smoothly between snapshots, game.ts).
 // - The shell's rim: a bright pale arc over a soft steel glow, round its front SHELL_HALF either
-//   side of its facing, just outside its body, so the side that blocks reads from across a phone.
+//   side of its facing, just outside its body, so the side that blocks reads at a glance.
 // - A shot the shell blocks sparks steel-white and rings a "ting" (game.ts, tings.ts); a shot that
 //   hurts it sparks yellow, as on any bug.
 import { BEETLE_RADIUS, SHELL_HALF } from "../../../../shared/arena/bugs/beetle";

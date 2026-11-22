@@ -31,7 +31,8 @@ describe("tings (#80)", () => {
   test("a block beside a young ting restarts it rather than adding one; one further off adds its own", () => {
     const t = createTings();
     spawnTing(t, 100, 100);
-    updateTings(t, 0.05);
+    // One shot later at full fire rate (7 a second).
+    updateTings(t, 0.15);
     spawnTing(t, 110, 100);
     expect(t.live).toBe(1);
     expect(t.age[0]).toBe(0);

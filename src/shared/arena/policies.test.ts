@@ -311,6 +311,25 @@ describe("flanking a beetle (#80)", () => {
     }
   });
 
+  test("flanking a beetle 100 units off, a crawler behind it does not push it into the beetle", () => {
+    // The beetle 100 units right, facing it; a crawler 280 units left. Inside FLANK_NEAR the beetle
+    // repels it as a threat, so its move is away from the beetle, not toward it.
+    const obs = createObservation();
+    obs.world.w = 2400;
+    obs.world.h = 2400;
+    obs.self.x = 1200;
+    obs.self.y = 1200;
+    obs.self.alive = true;
+    setObservedBug(obs, 0, 1300, 1200, 0, 0, -1, 0);
+    setObservedBug(obs, 1, 920, 1200, 0, 0, 0, 0);
+    obs.bugCount = 2;
+    const out: PolicyInput = { mx: 0, my: 0, aim: 0, fire: false, dash: false };
+    aimerBase(obs, createMemory(), createRng(1), out);
+    expect(out.mx).toBeLessThan(0);
+    // It does not shoot the shell: it aims at the crawler.
+    expect(Math.abs(out.aim)).toBeCloseTo(Math.PI, 1);
+  });
+
   test("observe sees a beetle's shell facing, and no facing on a bug without a shell", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const beetle = placeBug(a, 1500, 1200, "beetle");
