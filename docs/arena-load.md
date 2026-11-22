@@ -41,17 +41,17 @@ Each run was 200 aimer bots for 120 s against `bun src/server/main.ts` (built `d
 
 | | before (#87, protocol v9) | after (#89, protocol v11) |
 |---|---|---|
-| errors | 0 | 0 (all four runs) |
+| errors | 0 | 0 (all five runs) |
 | arenas | 10 x 20 players | 10 x 20 players (11 in the two-tab run) |
-| tick p50 / p95 | 0.99 / 1.83 ms | 1.03 / 2.34 ms (run 1); 0.91 / 1.92 ms (run 2); 1.27 / 2.60 ms (two-tab run, Chrome on the same machine); 0.93 / 2.13 ms (final) |
-| per player, KB/s | about 70.6 (every socket got the same snapshot; the watcher's figure) | mean 23.3, p95 26.3, **max 26.5** (run 1); mean 24.3, p95 26.1, max 26.5 (run 2); mean 24.2, p95 26.8, max 26.9 (two-tab run); mean 23.3, p95 26.5, max 26.6 (final) |
-| watcher, KB/s | 70.6 | 19.9 |
-| server memory | 74 MB working set at the end | rss 95.2 MB, heap 9.9 MB (run 1); rss 91.9 MB, heap 8.5 MB (run 2); rss 109.8 MB, heap 16.4 MB (two-tab run); rss 105.3 MB, heap 16.3 MB (final) |
+| tick p50 / p95 | 0.99 / 1.83 ms | 1.03 / 2.34 ms (run 1); 0.91 / 1.92 ms (run 2); 1.27 / 2.60 ms (two-tab run, Chrome on the same machine); 0.93 / 2.13 ms (final); 0.92 / 1.83 ms (after merging #84 and #90) |
+| per player, KB/s | about 70.6 (every socket got the same snapshot; the watcher's figure) | mean 23.3, p95 26.3, **max 26.5** (run 1); mean 24.3, p95 26.1, max 26.5 (run 2); mean 24.2, p95 26.8, max 26.9 (two-tab run); mean 23.3, p95 26.5, max 26.6 (final); mean 26.5, p95 27.9, **max 28.0** (after merging #84 and #90) |
+| watcher, KB/s | 70.6 | 19.9; 21.1 after merging #84 and #90 |
+| server memory | 74 MB working set at the end | rss 95.2 MB, heap 9.9 MB (run 1); rss 91.9 MB, heap 8.5 MB (run 2); rss 109.8 MB, heap 16.4 MB (two-tab run); rss 105.3 MB, heap 16.3 MB (final); rss 92.3 MB, heap 8.1 MB (after merging #84 and #90) |
 | verdict | (no gate then) | pass, exit 0 |
 
 The "before" numbers come from the same command on `main` at 279249a. Its watcher's 70.6 KB/s is averaged over the whole run, so the first half's ramp pulls it down. #80's tab read 85 KB/s in a crowded arena.
 
-Run 2 added `--watchers 2`. Runs 1, 2 and the two-tab run were back to back on one server process; the final run, on the committed code, had a fresh one. Server memory is `process.memoryUsage()` read by the stats endpoint at the end of each run.
+Run 2 and the post-merge run added `--watchers 2`. The post-merge run is on main's CI drone (#84) and #90's pickups (drops x2.5, up to 16 on the floor, a first-life shield): the extra floor rows and effect bits cost about 1.5 KB/s per player. Runs 1, 2 and the two-tab run were back to back on one server process; the final run, on the committed code, had a fresh one. Server memory is `process.memoryUsage()` read by the stats endpoint at the end of each run.
 
 **Where the bytes go.** `.evidence/89/probe-v10.ts` ran one aimer player plus 199 bots and measured seconds 45 to 90 of the run:
 - 25.1 KB/s in total, with 101.8 bugs and 20 players in view on average;

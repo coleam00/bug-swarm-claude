@@ -237,7 +237,7 @@ The fourth developer tool, #78's other half. It drops by #78's rule: each kind's
 - **Measured** (`docs/arena-load.md`, `.evidence/89/`, the factory's Windows machine): 200 aimer bots for 120 s against a production build.
   - 0 errors, 10 arenas of 20.
   - Tick p50 0.91 to 1.27 ms, p95 1.92 to 2.60 ms (v9: 0.99 / 1.83).
-  - Per player, over the second half: mean 23.3 to 24.3 KB/s, max 26.5 to 26.9 (v9: about 70). The first half, as bugs ramp up: about 11.5.
+  - Per player, over the second half: mean 23.3 to 24.3 KB/s, max 26.5 to 26.9 (v9: about 70). With #84's drone and #90's pickups merged in: mean 26.5, max 28.0, tick p95 1.83 ms, a watcher 21.1. The first half, as bugs ramp up: about 11.5.
   - A watcher: 19.9 KB/s.
   - Server rss 92 to 110 MB.
   - Two headless Chrome windows in one of those arenas read 60 fps, 6 to 14 KB/s and ack 56 to 102 ms throughout, and their robots moved at full speed whenever a key was held and they were up.
