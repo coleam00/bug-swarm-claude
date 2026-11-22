@@ -14,7 +14,9 @@ describe("beetle look (#80)", () => {
 
   test("the rim is drawn on the circle shots meet, and the body inside it", () => {
     const hit = beetle.radius + SHOT_RADIUS;
-    expect(RIM_RADIUS).toBe(hit);
-    expect(BODY_REACH).toBeLessThanOrEqual(hit);
+    expect(RIM_RADIUS).toBeCloseTo(hit, 6);
+    expect(BODY_REACH).toBeLessThanOrEqual(hit + 1e-6);
+    // A drawing much smaller than the body the simulation hits (say half size) fails here.
+    expect(BODY_REACH).toBeGreaterThan(beetle.radius * 0.75);
   });
 });

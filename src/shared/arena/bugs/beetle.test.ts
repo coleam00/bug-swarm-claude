@@ -7,7 +7,7 @@ import { DT, SHOT_RADIUS, WAVE_S } from "../constants";
 import { createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Player, type ShotEnded } from "../sim";
 import { arenaWith, hold, placeBug, placePickup, stepQuiet } from "../testkit";
 import { BEETLE_FROM_S, BEETLE_SHARE_MAX, NEW, WALK, beetleShare } from "./beetle";
-import { bugDef } from "./registry";
+import { BUG_DEFS, bugDef } from "./registry";
 
 const BEETLE = "beetle" as const;
 
@@ -321,5 +321,12 @@ describe("beetle spawns", () => {
       most = Math.max(most, a.bugs.filter((b) => b.kind === BEETLE).length);
     }
     expect(most).toBe(CAP);
+  });
+});
+
+describe("beetle size (#80, owner)", () => {
+  test("the beetle is the biggest of the regular bug kinds, so it reads as the tank", () => {
+    const others = Object.entries(BUG_DEFS).filter(([k]) => k !== BEETLE && k !== "glob");
+    for (const [, def] of others) expect(bugDef(BEETLE).radius).toBeGreaterThan(def.radius);
   });
 });
