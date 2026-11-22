@@ -16,7 +16,7 @@ export const TING_RING_TO = 26;
 export const TING_RISE = 18;
 /** A block within this of a ting younger than TING_MERGE_S restarts it, world units. */
 export const TING_MERGE = 24;
-export const TING_MERGE_S = 0.12;
+export const TING_MERGE_S = 0.3;
 
 export type Tings = {
   x: Float32Array;
