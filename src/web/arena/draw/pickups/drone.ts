@@ -8,7 +8,7 @@ import type { PickupDraw } from "./kind";
 
 const COLOUR = PALETTE[GLOW_DRONE];
 /** The drone's drawn radius, world units (release 1's DRONE_RADIUS). */
-export const DRONE_RADIUS = 8;
+const DRONE_RADIUS = 8;
 /** Its glow's size, in drone radii, and how it pulses (release 1's). */
 const GLOW_SIZE = 3.2;
 const GLOW_PULSE = 0.3;

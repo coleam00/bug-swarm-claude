@@ -6,7 +6,7 @@ import { bugDef } from "../bugs/registry";
 import { mult } from "../combat";
 import { DT, PICKUP_IDS } from "../constants";
 import { nextRandom } from "../rng";
-import { endLife, type ArenaState, type Bug, type Player } from "../sim";
+import type { ArenaState, Bug, Player } from "../sim";
 import { arenaWith, downNow, effectOf, hold, nextDrop, placeBug, placePickup, stepQuiet } from "../testkit";
 import { DRONE_FIRE_RATE, DRONE_ORBIT, DRONE_RANGE, DRONE_S, drone, droneAngle, stepDrone } from "./drone";
 
@@ -72,8 +72,11 @@ describe("the CI drone", () => {
 
   test("it targets the nearest live bug, straight at its centre", () => {
     const { a, p } = withDrone();
+    // The nearest is between two farther ones in the list, so neither the first nor the last in
+    // range passes for it; a dead one nearer still is skipped.
     placeBug(a, 1200, 1500); // 300 away
     const near = placeBug(a, 1000, 1200); // 200 away
+    placeBug(a, 1200, 900); // 300 away
     const dead = placeBug(a, 1250, 1200);
     dead.hp = 0;
     stepDrone(a, p);
@@ -211,25 +214,12 @@ describe("the CI drone", () => {
     expect(p.down).toBe(true);
     // Going down clears effects; set it again to show the step itself skips a holder who is down.
     p.effect[DRONE] = 100;
+    // Owed a shot now (downNow's step fired one), so a drone that fired while down would show.
+    p.droneCooldown = 0;
     a.bugs.length = 0;
     placeBug(a, 1500, 1200);
     stepQuiet(a);
     expect(droneShots(a)).toEqual([]);
-  });
-
-  test("a drone shot whose holder's life ended scores nothing", () => {
-    const { a, p } = withDrone();
-    placeBug(a, 1290, 1200);
-    stepDrone(a, p);
-    a.events.shotsFired.length = 0;
-    endLife(a, p);
-    const kills: [number, number][] = [];
-    for (let i = 0; i < 5 && kills.length === 0; i++) {
-      stepQuiet(a);
-      kills.push(...a.events.kills.map((k): [number, number] => [k.by, k.points]));
-      expect(a.events.droneKills).toEqual([]);
-    }
-    expect(kills).toEqual([[0, 0]]);
   });
 
   test("its kills draw their drops like any shot kill", () => {

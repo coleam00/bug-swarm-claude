@@ -46,11 +46,6 @@ export function droneAngle(tick: number, playerId: number): number {
   return (tick * DT * DRONE_SPIN + playerId) % TAU;
 }
 
-/** Whether `p` has the drone now. */
-export function hasDrone(p: Player): boolean {
-  return p.effect[DRONE]! > 0;
-}
-
 /**
  * The effect, one tick, for a player who is up: with the drone, its cooldown runs down, and each
  * time it is owed a shot the drone fires one at the nearest live bug (any kind, globs too) whose
