@@ -58,7 +58,8 @@
         border: 0.3vh solid #22d3ee; border-radius: 3vh; color: #e2e8f0; font-variant-numeric: tabular-nums; }
       .pill.more, .pill.empty-note { color: #94a3b8; border-color: #334155; }
 
-      .status { position: fixed; right: 2vh; bottom: 1.5vh; font-size: 2.6vh; color: #94a3b8; }
+      /* In the top padding band, above both columns: the arena strip holds the bottom edge (#74). */
+      .status { position: fixed; right: 2vh; top: 0.3vh; font-size: 2.6vh; line-height: 1; color: #94a3b8; }
 
       /* A new top-10 entry, or the team that just took the lead: a 1.5 s glow, then it settles. */
       .row.flash { animation: row-flash 1.5s ease-out; }
@@ -94,7 +95,7 @@
         .arenas { flex-wrap: wrap; gap: 2vw; }
         .pill { font-size: 4.5vw; padding: 1vw 2.5vw; border-width: 0.5vw; border-radius: 4vw; }
         .row { font-size: 7vw; gap: 2.5vw; padding: 0 1.5vw; border-radius: 1.5vw; }
-        .status { font-size: 3.5vw; right: 3vw; bottom: 2vw; }
+        .status { font-size: 3.5vw; line-height: normal; right: 3vw; top: auto; bottom: 2vw; }
       }
     </style>
   </head>
