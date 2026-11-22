@@ -15,6 +15,7 @@ import {
   quantile,
   runDropIn,
   runFill,
+  runQueen,
   runSkill,
   shellStats,
   countShells,
@@ -22,6 +23,7 @@ import {
   warmArenas,
 } from "./skill-lib";
 import { createArena } from "../src/shared/arena/sim";
+import { QUEEN_HP_BASE, QUEEN_HP_PERSON } from "../src/shared/arena/queen";
 
 describe("bun run skill: fair drop-in", () => {
   test("the late gate is 0.8x and the idle gate 10 s, at their boundaries", () => {
@@ -57,6 +59,19 @@ describe("bun run skill: fair drop-in", () => {
     const lines = formatDropIn(r);
     expect(lines.filter((l) => l.startsWith("gate:"))).toHaveLength(2);
     expect(lines.filter((l) => l.startsWith("info: mover late"))).toHaveLength(1);
+  });
+});
+
+describe("bun run skill: the hive queen (#85, reported, not gated)", () => {
+  test("on 2 seeds, 4 aimers meet her at wave 5 with her hit points for 4 people, and the report says how long she took", () => {
+    const r = runQueen(2, 4);
+    expect(r.hp).toBe(QUEEN_HP_BASE + 4 * QUEEN_HP_PERSON);
+    expect([r.seeds, r.aimers]).toEqual([2, 4]);
+    expect(r.median).toBeGreaterThan(0);
+    expect(r.p75).toBeGreaterThanOrEqual(r.median);
+    // The kill is seen: not every fight runs to the cap.
+    expect(r.capped).toBeLessThan(r.seeds);
+    expect(runQueen(2, 4)).toEqual(r);
   });
 });
 

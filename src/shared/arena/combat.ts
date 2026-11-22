@@ -16,6 +16,7 @@ import {
 } from "./constants";
 import { bugDef } from "./bugs/registry";
 import { laserPierce } from "./pickups/laser";
+import { creditQueen } from "./bugs/queen";
 import { nextRandom } from "./rng";
 import type { ArenaState, Bug, Player, Shot } from "./sim";
 
@@ -166,6 +167,8 @@ export function stepShots(state: ArenaState): void {
         ended = true;
         break;
       }
+      // A hive queen's damage is credited to the life that dealt it (#85, queen.ts).
+      if (owner) creditQueen(owner, hitBug, 1, hitBug.hp);
       hitBug.hp--;
       if (owner) {
         if (!s.drone) owner.streak++;

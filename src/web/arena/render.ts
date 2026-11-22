@@ -11,12 +11,18 @@
 // Pickups (#73): each on the floor as a halo, a disc and its glyph, blinking in its last
 // 3 s; on every robot that has one, its look (a shield bubble, a glow at a laser's barrel, a CI drone orbiting, #84); a laser
 // shot as a longer, brighter beam and a drone's in violet; your active ones as timer icons under the HUD line, each with a
-// ring draining as it runs out. It reuses release 1's sprites and pooled
+// ring draining as it runs out. The hive queen (#85): her marker pulsing on the floor with its
+// countdown while she arrives, her health bar under the HUD line while she lives, an arrow at the
+// screen's edge to her when she is off it, her mark on the minimap, and the banners ("The hive
+// queen is coming", "Queen down!"); all from the snapshot's `q`, so none depends on which bugs a
+// snapshot carries. The start screen (watch) draws her marker and body but none of the rest.
+// It reuses release 1's sprites and pooled
 // effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
 // built on resize only; a frame allocates nothing but the strings of a value that changed.
 import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, MINIMAP_CELL, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
 import { pickupDef } from "../../shared/arena/pickups/registry";
-import type { SnapshotMe } from "../../shared/arena/protocol";
+import { QUEEN_RADIUS } from "../../shared/arena/bugs/queen";
+import type { SnapshotMe, SnapshotQueen } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
 import { ringAt, type RingAt, type Rings } from "../game/fx/rings";
@@ -32,6 +38,7 @@ import {
   BOMB_RING_WIDTH,
   GLOW_DRONE,
   GLOW_LASER,
+  GLOW_QUEEN,
   GLOW_SHOT,
   GLOW_WHITE,
   LETTERBOX,
@@ -74,6 +81,21 @@ import {
   type HudWidths,
 } from "./hudline";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
+import {
+  QUEEN_BAR_BELOW,
+  QUEEN_BAR_H,
+  QUEEN_BAR_SHIFT,
+  bannerAlpha,
+  bannerFloor,
+  bannerY,
+  barFill,
+  fitScale,
+  markerLook,
+  queenBarLayout,
+  type Banner,
+  type MarkerLook,
+  type QueenBar,
+} from "./queenhud";
 import { shotTravel, type ClientShots } from "./shots";
 import { TING_S, tingLook, type TingLook, type Tings } from "./tings";
 import { BOT_TAG, botTagBox, tagBaselines, type TagBox, type TagSpot } from "./tag";
@@ -216,6 +238,28 @@ const DOWN_HINT_FONT = "bold 16px system-ui, sans-serif";
 /** The DOWN line, CSS px below the screen's centre (under your robot), and its hint below it. */
 const DOWN_BELOW = 70;
 const DOWN_HINT = "A player next to you revives you";
+// The hive queen (#85).
+const QUEEN_COLOUR = PALETTE[GLOW_QUEEN];
+/** Her marker on the floor: a ring this many queen radii across, pulsing, with a countdown arc. */
+const MARKER_RADIUS = QUEEN_RADIUS * 1.6;
+const MARKER_WIDTH = 5;
+const QUEEN_LABEL = "Hive queen";
+const QUEEN_LABEL_FONT = "bold 12px system-ui, sans-serif";
+const QUEEN_BAR_TRACK = "rgba(5, 7, 13, 0.7)";
+const QUEEN_BAR_EDGE = "rgba(248, 250, 252, 0.35)";
+/** The arrow to her: larger than a downed player's, in her colour, CSS px. */
+const QUEEN_ARROW_LENGTH = 34;
+const QUEEN_ARROW_WIDTH = 28;
+/** Her minimap mark, CSS px: at least twice a player dot (MINIMAP_DOT), ringed in white while she lives. */
+const QUEEN_MAP_DOT = 6;
+const QUEEN_MAP_RING = "#ffffff";
+const BANNER_FONT = "bold 30px system-ui, sans-serif";
+const BANNER_SUB_FONT = "bold 18px system-ui, sans-serif";
+const BANNER_COMING = "The hive queen is coming";
+const BANNER_DOWN = "Queen down!";
+/** The banners stay this far inside the safe edges, CSS px, and their second line this far under the first. */
+const BANNER_MARGIN = 16;
+const BANNER_SUB_BELOW = 30;
 
 /**
  * One robot to draw, world units. `inv`: untouchable, so it blinks. `prot`: spawn-protected (a
@@ -321,6 +365,11 @@ export type Scene = {
   dashButton: DashButton | null;
   /** How far your dash has cooled, 0 to 1 (1: ready). */
   dashReady: number;
+  /** The hive queen from the newest snapshot (#85): [] none, her marker, or her alive. */
+  queen: SnapshotQueen;
+  /** "Queen down!" (#85) and the name of who dealt the most ("" for no name). */
+  banner: Banner;
+  bannerName: string;
 };
 
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
@@ -384,6 +433,15 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const spot: TagSpot = { name: 0, help: 0 };
   let lineDirty = true;
   const downTexts = new Map<number, string>();
+  // The hive queen's bar and banners (#85): laid out per frame into these, texts measured on change.
+  const bar: QueenBar = { x: 0, labelY: 0, y: 0, w: 0 };
+  const marker: MarkerLook = { pulse: 0, left: 0 };
+  const arrowSafe: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
+  let bannerFor = "";
+  let bannerSub = "";
+  let comingW = 0;
+  let downW = 0;
+  let subW = 0;
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
   let vt = 0;
@@ -816,6 +874,152 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalAlpha = 1;
   }
 
+  /** The hive queen's marker while she arrives (#85): a pulsing ring on the floor, its countdown arc emptying. */
+  function drawMarker(q: SnapshotQueen, t: number): void {
+    if (q.length === 0 || q[0] !== 0) return;
+    const x = q[1];
+    const y = q[2];
+    const reach = MARKER_RADIUS * 1.6;
+    if (x + reach < vl || x - reach > vr || y + reach < vt || y - reach > vb) return;
+    markerLook(q[3], t, marker);
+    const r = MARKER_RADIUS * (1 + 0.12 * marker.pulse);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.35 + 0.45 * marker.pulse;
+    const g = r * 1.5;
+    ctx.drawImage(glows[GLOW_QUEEN]!, x - g, y - g, g * 2, g * 2);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 0.5 + 0.5 * marker.pulse;
+    ctx.strokeStyle = QUEEN_COLOUR;
+    ctx.lineWidth = MARKER_WIDTH;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = MARKER_WIDTH * 1.6;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.6, -Math.PI / 2, -Math.PI / 2 + TAU * marker.left);
+    ctx.stroke();
+    ctx.lineCap = "butt";
+  }
+
+  /** Text `s` centred at `x`, `y` in `font`, scaled down to fit `maxW` (`w`: its width at full size). */
+  function drawFitted(s: string, w: number, font: string, x: number, y: number, maxW: number): void {
+    const sc = fitScale(w, maxW);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(sc, sc);
+    ctx.font = font;
+    ctx.strokeText(s, 0, 0);
+    ctx.fillText(s, 0, 0);
+    ctx.restore();
+  }
+
+  /**
+   * The hive queen's HUD (#85): her health bar under the line while she lives, and the banners:
+   * "The hive queen is coming" while her marker shows, "Queen down!" naming who dealt the most for
+   * a few seconds after her kill. Banner texts are measured only when they change.
+   */
+  function drawQueenHud(sc: Scene, lineY: number, icons: number): void {
+    const q = sc.queen;
+    if (q.length > 0 && q[0] === 1) {
+      queenBarLayout(hud.left, lineY, minimap.x, icons, bar);
+      if (bar.w > 0) {
+        ctx.font = QUEEN_LABEL_FONT;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = TEXT_STROKE;
+        ctx.fillStyle = QUEEN_COLOUR;
+        ctx.strokeText(QUEEN_LABEL, bar.x, bar.labelY);
+        ctx.fillText(QUEEN_LABEL, bar.x, bar.labelY);
+        ctx.fillStyle = QUEEN_BAR_TRACK;
+        ctx.fillRect(bar.x, bar.y, bar.w, QUEEN_BAR_H);
+        ctx.fillStyle = QUEEN_COLOUR;
+        ctx.fillRect(bar.x, bar.y, bar.w * barFill(q[4], q[5]), QUEEN_BAR_H);
+        ctx.strokeStyle = QUEEN_BAR_EDGE;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bar.x, bar.y, bar.w, QUEEN_BAR_H);
+      }
+    }
+    const coming = q.length > 0 && q[0] === 0;
+    const downAlpha = bannerAlpha(sc.banner.left);
+    if (!coming && downAlpha <= 0) return;
+    const maxW = cssW - safe.left - safe.right - 2 * BANNER_MARGIN;
+    const cx = safe.left + (cssW - safe.left - safe.right) / 2;
+    if (comingW === 0) {
+      ctx.font = BANNER_FONT;
+      comingW = ctx.measureText(BANNER_COMING).width;
+      downW = ctx.measureText(BANNER_DOWN).width;
+    }
+    if (sc.bannerName !== bannerFor) {
+      bannerFor = sc.bannerName;
+      bannerSub = bannerFor ? `${bannerFor} dealt the most` : "";
+      ctx.font = BANNER_SUB_FONT;
+      subW = bannerSub ? ctx.measureText(bannerSub).width : 0;
+    }
+    const halfW = Math.min(maxW, coming ? comingW : Math.max(downW, subW)) / 2 + BANNER_MARGIN;
+    const hudBottom = hud.top + LINE_MIDDLE + barShift(sc) + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
+    const y = bannerY(cssH, bannerFloor(cx, halfW, minimap.x, minimap.y + minimap.size + BANNER_MARGIN * 2, hudBottom, BANNER_MARGIN));
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = TEXT_STROKE;
+    if (coming) {
+      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(sc.t * TAU * 2);
+      ctx.fillStyle = QUEEN_COLOUR;
+      drawFitted(BANNER_COMING, comingW, BANNER_FONT, cx, y, maxW);
+      ctx.globalAlpha = 1;
+      return;
+    }
+    ctx.globalAlpha = downAlpha;
+    ctx.fillStyle = QUEEN_COLOUR;
+    drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
+    if (bannerSub) {
+      ctx.fillStyle = TEXT_FILL;
+      ctx.lineWidth = 4;
+      drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * The arrow at the screen's edge to the hive queen while she is off screen, at any distance (#85),
+   * kept below the minimap's bottom so the HUD line, her bar and the minimap stay clear.
+   */
+  function drawQueenArrow(cam: Camera, q: SnapshotQueen, t: number): void {
+    if (q.length === 0 || q[0] !== 1) return;
+    // Never in the top band: it stays below the minimap, so it covers neither the HUD line, her bar nor the minimap.
+    arrowSafe.left = safe.left;
+    arrowSafe.right = safe.right;
+    arrowSafe.bottom = safe.bottom;
+    arrowSafe.top = Math.max(safe.top, minimap.y + minimap.size);
+    if (!edgeArrow(cam, cssW, cssH, arrowSafe, cam.x, cam.y, q[2], q[3], arrow, Infinity)) return;
+    ctx.save();
+    ctx.translate(arrow.x, arrow.y);
+    ctx.rotate(arrow.angle);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(t * 5);
+    const g = QUEEN_ARROW_LENGTH;
+    ctx.drawImage(glows[GLOW_QUEEN]!, -g, -g, g * 2, g * 2);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = QUEEN_COLOUR;
+    ctx.strokeStyle = TEXT_STROKE;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(QUEEN_ARROW_LENGTH / 2, 0);
+    ctx.lineTo(-QUEEN_ARROW_LENGTH / 2, -QUEEN_ARROW_WIDTH / 2);
+    ctx.lineTo(-QUEEN_ARROW_LENGTH / 4, 0);
+    ctx.lineTo(-QUEEN_ARROW_LENGTH / 2, QUEEN_ARROW_WIDTH / 2);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+  }
+
   /** Your gun's heat: an arc around your robot, open at the bottom, flashing near the lock. */
   function drawHeat(me: Robot, sm: SnapshotMe, t: number): void {
     const locked = sm.lk === 1;
@@ -890,12 +1094,20 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   }
 
   /**
-   * The bottom of the HUD band, CSS px (#90): the score's, or your pickup timers' while any show.
+   * The bottom of the HUD band, CSS px (#90): the score's, or your pickup timers' while any show,
+   * or the hive queen's bar while she lives (#85).
    * Name tags and HELP stay below it (tag.ts tagBaselines). The line's scale is the last frame's.
    */
-  function hudBandBottom(icons: number): number {
-    const below = icons > 0 ? HUD_ICONS_BELOW + HUD_ICON_SIZE / 2 + ICON_RING_WIDTH / 2 : SCORE_HALF * line.scale;
+  function hudBandBottom(icons: number, queen: SnapshotQueen): number {
+    let below = icons > 0 ? HUD_ICONS_BELOW + HUD_ICON_SIZE / 2 + ICON_RING_WIDTH / 2 : SCORE_HALF * line.scale;
+    // The hive queen's health bar (#85) is in the band while she lives.
+    if (queen.length > 0 && queen[0] === 1) below = Math.max(below, QUEEN_BAR_BELOW + hudIconsShift(icons) + QUEEN_BAR_H);
     return hud.top + LINE_MIDDLE + below;
+  }
+
+  /** How far what sits under the HUD line moves down for the hive queen's health bar (#85). */
+  function barShift(sc: Scene): number {
+    return sc.queen.length > 0 && sc.queen[0] === 1 ? QUEEN_BAR_SHIFT : 0;
   }
 
   /** Your active pickups (from `me.fx`), as many as there are, at most one per pickup. */
@@ -990,6 +1202,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.restore();
     const icons = iconCount(me);
     if (icons > 0) drawIcons(me, y + HUD_ICONS_BELOW);
+    drawQueenHud(sc, y, icons);
     // "streak lost", flicking up and out under the score.
     if (sc.hud.lost > 0) {
       const f = sc.hud.lost / STREAK_LOST_S;
@@ -999,7 +1212,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.textBaseline = "middle";
       ctx.lineWidth = 4;
       ctx.fillStyle = LOST_FILL;
-      const ly = y + LOST_BELOW + hudIconsShift(icons) - (1 - f) * 8;
+      const ly = y + LOST_BELOW + hudIconsShift(icons) + barShift(sc) - (1 - f) * 8;
       ctx.strokeText("streak lost", hud.left, ly);
       ctx.fillText("streak lost", hud.left, ly);
       ctx.globalAlpha = 1;
@@ -1068,6 +1281,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     sb = top + cam.h - safe.bottom / cam.scale;
 
     drawFloor(sc.floor, t);
+    drawMarker(sc.queen, t);
     drawBugs(sc.bugs, t, k, ox, oy);
     drawShots(sc, k, ox, oy);
     ctx.setTransform(k, 0, 0, k, ox, oy);
@@ -1103,7 +1317,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     // Name tags over every robot, as canvas text (never HTML: names are typed by viewers), and
     // never under the HUD band (#90): a tag that would reach it flips under its robot.
-    const band = sc.out || !sc.me ? -Infinity : (hudBandBottom(iconCount(sc.me)) * dpr - oy) / k;
+    const band = sc.out || !sc.me ? -Infinity : (hudBandBottom(iconCount(sc.me), sc.queen) * dpr - oy) / k;
     ctx.font = NAME_FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
@@ -1213,6 +1427,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
     }
 
+    drawQueenArrow(cam, sc.queen, t);
+
     const m = minimap;
     ctx.fillStyle = MINIMAP_FILL;
     ctx.fillRect(m.x, m.y, m.size, m.size);
@@ -1251,6 +1467,31 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.stroke();
       }
     }
+    // The hive queen (#85): a pulsing mark where she is, a ring where she is about to arrive.
+    const q = sc.queen;
+    if (q.length > 0) {
+      const alive = q[0] === 1;
+      if (q[0] === 1) toMinimap(m, q[2], q[3], dot);
+      else if (q[0] === 0) toMinimap(m, q[1], q[2], dot);
+      // Pulses up from QUEEN_MAP_DOT, never down: at its smallest twice a player dot's size.
+      const r = QUEEN_MAP_DOT * (1 + 0.2 * (0.5 + 0.5 * Math.sin(t * TAU * 1.5)));
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, r, 0, TAU);
+      ctx.lineWidth = 2;
+      if (alive) {
+        // Alive: an amber centre in a white ring in an amber ring, a shape no player or bug dot has.
+        ctx.fillStyle = QUEEN_COLOUR;
+        ctx.fill();
+        ctx.strokeStyle = QUEEN_MAP_RING;
+        ctx.stroke();
+        // And a second, amber ring outside it, so she never reads as your own white-ringed dot.
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, r + 3, 0, TAU);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = QUEEN_COLOUR;
+      } else ctx.strokeStyle = QUEEN_COLOUR;
+      ctx.stroke();
+    }
 
     if (!sc.out) drawHud(sc);
     // The F readout, under the line (off by default; F toggles it).
@@ -1259,7 +1500,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText(sc.stats, hud.left, hud.top + LINE_MIDDLE + STATS_BELOW + (sc.out ? 0 : hudIconsShift(iconCount(sc.me))));
+      ctx.fillText(sc.stats, hud.left, hud.top + LINE_MIDDLE + STATS_BELOW + (sc.out ? 0 : hudIconsShift(iconCount(sc.me)) + barShift(sc)));
     }
   }
 

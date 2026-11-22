@@ -6,6 +6,7 @@ import { crawlerDraw } from "./crawler";
 import { dasherDraw } from "./dasher";
 import { globDraw } from "./glob";
 import type { BugDraw } from "./kind";
+import { queenDraw } from "./queen";
 import { spitterDraw } from "./spitter";
 
-export const BUG_DRAW: Record<BugKind, BugDraw> = { crawler: crawlerDraw, dasher: dasherDraw, spitter: spitterDraw, glob: globDraw, beetle: beetleDraw };
+export const BUG_DRAW: Record<BugKind, BugDraw> = { crawler: crawlerDraw, dasher: dasherDraw, spitter: spitterDraw, glob: globDraw, beetle: beetleDraw, queen: queenDraw };

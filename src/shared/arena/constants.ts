@@ -77,9 +77,9 @@ export const MAX_CLIENT_MESSAGE_BYTES = 1024;
  * The protocol version. A hello with another one is refused with error "version". v8: watching
  * (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's
  * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
- * with deltas between (view.ts).
+ * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event.
  */
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 // ---- Snapshots at stream scale (#89, view.ts). ----
 
@@ -151,7 +151,7 @@ export const HEAT_WARN = 0.85;
  * Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). The first
  * is the base kind: a spawn is the base kind unless the mix picks another (bugs/index.ts).
  */
-export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle"] as const;
+export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle", "queen"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
 
 // ---- Pickups (#73). Every pickup id in PICKUP_IDS; each pickup's numbers in its own file in pickups/. ----
@@ -184,8 +184,16 @@ export const SPAWN_RAMP_PER_S2 = 0.05;
 export const SPAWN_MAX_PER_S = 8;
 /** A player's unspent spawn budget is capped here, so a full arena does not bank spawns. */
 export const SPAWN_BUDGET_CAP = 2;
-/** The most bugs in one arena; past it no bug spawns (keeps the tick inside its budget). */
+/**
+ * The most bugs in one arena; past it no bug spawns or is launched (keeps the tick inside its
+ * budget). A hive queen (#85) is placed whatever the count, so an arena holds at most one more.
+ */
 export const MAX_BUGS_PER_ARENA = 150;
+/**
+ * While a hive queen (#85) is arriving or alive, the spawn mix stops this many short of
+ * MAX_BUGS_PER_ARENA, so her brood and her ring of globs have room (bugs/index.ts spawnCap).
+ */
+export const QUEEN_RESERVE = 16;
 /** A bug spawns this far from the player it targets, units. */
 export const SPAWN_DIST_MIN = 560;
 export const SPAWN_DIST_MAX = 720;
@@ -209,7 +217,7 @@ export const HITS_PER_LIFE = 3;
 export const INVULN_S = 1;
 /** A life over waits this long before a press respawns you, seconds (release 1's restart guard). */
 export const RESPAWN_DELAY_S = 0.8;
-/** The arena's wave clock, seconds per wave. Shown, and unlocks bug kinds (#65); never spawn volume. */
+/** The arena's wave clock, seconds per wave. Shown, unlocks bug kinds (#65) and brings a hive queen every fifth wave (#85); never spawn volume. */
 export const WAVE_S = 30;
 /** Streak multiplier steps: [hits in a row, multiplier], highest first. Below the last: x1. */
 export const STREAK_STEPS: readonly (readonly [number, number])[] = [

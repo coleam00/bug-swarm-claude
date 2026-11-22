@@ -17,8 +17,12 @@ export const FLY_TICKS = Math.round(2 / DT);
 export const FADE_TICKS = Math.round(0.5 / DT);
 /** Points for shooting one down, before the streak multiplier. */
 export const GLOB_POINTS = 5;
-/** The most globs in flight in one arena: a spitter's launch past it lobs nothing. */
-export const GLOB_MAX_PER_ARENA = 12;
+/**
+ * The most globs in flight in one arena: a launch past it lobs nothing. 24 (12 before #85): a
+ * hive queen's ring is 12, and spitters (at most 6, each with at most one glob in flight: a glob
+ * lasts 2.5 s, a spitter's cycle 3.1 s) never reach it.
+ */
+export const GLOB_MAX_PER_ARENA = 24;
 
 export const GLOB_PHASES = ["fly", "fade"] as const;
 export const [FLY, FADE] = [0, 1] as const;

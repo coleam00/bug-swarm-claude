@@ -2,6 +2,7 @@
 // WebSocket, on one Bun server. main.ts calls it with the environment; the arena's integration
 // test calls it on port 0 and stops it before it ends.
 import type { Database } from "bun:sqlite";
+import { DT, WAVE_S } from "../shared/arena/constants";
 import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
 import { hiddenKeys } from "./db";
 import { mountArenaRoutes } from "./arena/http";
@@ -30,6 +31,8 @@ export type ServerOptions = {
   arenaDemo?: number;
   /** How often live arenas are checked for hidden names, ms; defaults to the real one (tests shorten it). */
   hideSweepMs?: number;
+  /** Each new arena's first tick; 0 by default (startTickFrom: BUG_SWARM_START_WAVE, a debug aid, #85). */
+  arenaStartTick?: number;
 };
 
 export type RunningServer = {
@@ -87,6 +90,21 @@ export function gracefulShutdown(deps: ShutdownDeps): (signal: string) => Promis
   };
 }
 
+/**
+ * Each new arena's first tick (#85, a debug aid for evidence, off by default): with
+ * BUG_SWARM_START_WAVE a whole number of at least 2, the tick 10 s before that wave starts, so a
+ * fresh arena reaches it 10 s after it opens (wave 5: a hive queen's marker). Anything else: 0.
+ */
+export function startTickFrom(env: Record<string, string | undefined>): number {
+  const raw = env.BUG_SWARM_START_WAVE;
+  const wave = raw === undefined || raw.trim() === "" ? NaN : Number(raw);
+  if (!Number.isInteger(wave) || wave < 2) return 0;
+  return Math.round(((wave - 1) * WAVE_S - START_LEAD_S) / DT);
+}
+
+/** BUG_SWARM_START_WAVE's arenas open this long before the wave turns, seconds. */
+export const START_LEAD_S = 10;
+
 /** The build id the arena sends: Railway's commit, else BUILD_ID, else the start time. */
 export function buildIdFrom(env: Record<string, string | undefined>, startedAt: number): string {
   return env.RAILWAY_GIT_COMMIT_SHA || env.BUILD_ID || String(startedAt);
@@ -118,7 +136,7 @@ export function hiddenNames(db: Database, now: () => number = Date.now): (name: 
 export function startServer(opts: ServerOptions): RunningServer {
   // Finished lives are saved as runs, off the tick (lives.ts).
   const lives = createLifeSaver(opts.db);
-  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo });
+  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo, startTick: opts.arenaStartTick });
   // The board reads the open arenas live from the rooms.
   const app = createApp(opts.db, { ...opts.appOptions, live: () => rooms.live() });
   // Before servePages: its catch-all answers every path it reaches.

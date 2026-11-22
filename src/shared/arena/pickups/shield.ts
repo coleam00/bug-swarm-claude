@@ -27,7 +27,7 @@ export const shield: PickupDef = {
   // of the numbers #73 had halved for the late-joiner gate, set by measurement so an aimer takes 2 to
   // 3 pickups a life (`bun run skill`). The spitter (#72) drops as the dasher does; a beetle (#80)
   // takes 8 shots and drops twice what a dasher does. A glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.009375, dasher: 0.01875, spitter: 0.01875, glob: 0, beetle: 0.0375 },
+  drop: { crawler: 0.009375, dasher: 0.01875, spitter: 0.01875, glob: 0, beetle: 0.0375, queen: 0 },
   floorTicks: Math.round(SHIELD_FLOOR_S / DT),
   durationTicks: Math.round(SHIELD_S / DT),
 };

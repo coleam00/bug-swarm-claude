@@ -133,6 +133,7 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
       [2, 500, 600, 30, -40, 1.5, 1, 0, 0, 0, 0],
     ],
     b,
+    q: [],
     s: [],
     e: [],
     k: [],
@@ -175,6 +176,7 @@ test("a policy bot sees a beetle's shell facing from its row's tail, and no faci
     k: [],
     d: [],
     f: [],
+    q: [],
     w: 4,
     me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0 },
   });

@@ -9,6 +9,7 @@
 // and per pickup (#73) how many the player took, how many hits a shield blocked, how many bugs
 // its review laser shots hit and how many its refactor bombs killed (#78); and for bugs with a
 // shell (#80, the beetle), how many the player killed and how many of its shots a shell blocked.
+// It reports how long aimers take to kill the wave-5 hive queen (#85, runQueen), not gated.
 // Every gate is played with pickups dropping. Tested in skill-lib.test.ts on a few seeds.
 import { BUG_KINDS, DASH_TICKS, DT, PICKUP_IDS, WORLD_H, WORLD_W, type BugKind, type PickupId } from "../src/shared/arena/constants";
 import { bugDef } from "../src/shared/arena/bugs/registry";
@@ -565,6 +566,66 @@ export function formatDropIn(r: DropInReport): string[] {
   const worst = Math.min(...r.idle.map((a) => a.median));
   lines.push(`gate: idle newcomer median life >= ${IDLE_MIN_S} s at every join age: lowest ${worst.toFixed(1)} s ${r.idlePass ? "PASS" : "FAIL"}`);
   return lines;
+}
+
+// ---- The hive queen (#85): how long a group takes to bring her down. Reported, not a gate. ----
+
+/** Seeds the queen report plays, and the people (aimers) it plays them with; a solo row beside it. */
+export const QUEEN_SEEDS = 30;
+export const QUEEN_AIMERS = 4;
+/** The item's target: 4 aimers bring her down in under this, seconds (median). */
+export const QUEEN_TARGET_S = 60;
+/** A fight still going this long after she arrives is reported capped, seconds. */
+export const QUEEN_CAP_S = 180;
+
+export type QueenReport = { seeds: number; aimers: number; median: number; p75: number; capped: number; hp: number };
+
+/**
+ * How long `aimers` aimer bots (people, respawning) take to kill the wave-5 hive queen, on seeds 0
+ * to seeds-1: each seed's arena is played from tick 0 until she arrives, then until she dies or
+ * QUEEN_CAP_S pass (counted as the cap). Also her median hit points at arrival.
+ */
+export function runQueen(seeds: number, aimers: number): QueenReport {
+  const secs: number[] = [];
+  const hps: number[] = [];
+  let capped = 0;
+  for (let seed = 0; seed < seeds; seed++) {
+    const state = createArena(seed);
+    const bots: Bot[] = [];
+    for (let i = 0; i < aimers; i++) bots.push(newBot(joinPlayer(state, `aimer ${i}`, i % 2 ? "spaces" : "tabs").id, seed * 7 + i));
+    const step = () => {
+      for (const b of bots) drive(state, b, POLICIES.aimer, true);
+      stepArena(state);
+    };
+    while (state.queen.stage !== 2) step();
+    hps.push(state.queen.maxHp);
+    const from = state.tick;
+    const until = from + Math.round(QUEEN_CAP_S / DT);
+    let down = false;
+    while (state.tick < until && !down) {
+      step();
+      down = state.events.queenDown !== null;
+    }
+    if (down) secs.push((state.tick - from) * DT);
+    else {
+      secs.push(QUEEN_CAP_S);
+      capped++;
+    }
+  }
+  const sorted = secs.sort((a, b) => a - b);
+  return {
+    seeds,
+    aimers,
+    median: quantile(sorted, 0.5),
+    p75: quantile(sorted, 0.75),
+    capped,
+    hp: quantile(hps.sort((a, b) => a - b), 0.5),
+  };
+}
+
+export function formatQueen(r: QueenReport): string {
+  const target = r.aimers === QUEEN_AIMERS ? ` (target < ${QUEEN_TARGET_S} s)` : "";
+  return `queen (wave 5, ${r.hp} hp): ${r.aimers} aimer${r.aimers === 1 ? "" : "s"} on ${r.seeds} seeds: median ${r.median.toFixed(1)} s, p75 ${r.p75.toFixed(1)} s, capped ${r.capped}${target} (reported, not gated)`;
 }
 
 export type SkillArgs = { seeds: number; lateSeeds: number; max: number };

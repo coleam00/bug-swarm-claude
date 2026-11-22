@@ -380,7 +380,8 @@ describe("beetle spawns", () => {
 
 describe("beetle size (#80, owner)", () => {
   test("the beetle is the biggest of the regular bug kinds, so it reads as the tank", () => {
-    const others = Object.entries(BUG_DEFS).filter(([k]) => k !== BEETLE && k !== "glob");
+    // A boss (#85, the hive queen) is not a regular kind: placed by its own code, never spawned.
+    const others = Object.entries(BUG_DEFS).filter(([k, d]) => k !== BEETLE && k !== "glob" && !d.boss);
     for (const [, def] of others) expect(bugDef(BEETLE).radius).toBeGreaterThan(def.radius);
   });
 });

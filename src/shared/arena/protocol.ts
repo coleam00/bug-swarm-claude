@@ -17,13 +17,14 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 /**
  * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
  * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
- * index in PICKUP_IDS) and a test shield blocking a hit (whose; both v7). Hits, kills and shots
- * travel in snapshots, and so do who is down now (`d`) and the pickups on the floor (`f`), for a
- * late joiner.
+ * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v12,
+ * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points).
+ * Hits, kills and shots travel in snapshots, and so do who is down now (`d`), the pickups on the
+ * floor (`f`) and the hive queen's marker or health (`q`), for a late joiner.
  */
-export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
@@ -148,6 +149,14 @@ export type SnapshotKill = [bug: number, by: number, x: number, y: number, point
 export type SnapshotDown = [id: number, secondsLeft: number, reviver: number, progress: number];
 /** A pickup on the floor (v7, #73): id, its index in PICKUP_IDS, x, y (to 0.1), ticks before it goes. */
 export type SnapshotPickup = [id: number, pickup: number, x: number, y: number, ticksLeft: number];
+/**
+ * The hive queen (v12, #85), decoded: empty with none; her marker while she arrives (stage 0: x, y,
+ * ticks before she appears); or her alive (stage 1: her bug id, x, y, hit points left and at the
+ * start). Every recipient gets it, never culled to the view, so her arrow, minimap mark and health
+ * bar never depend on which bugs a snapshot carries. On the wire the marker carries the tick she
+ * appears instead of the ticks left, and positions are whole units.
+ */
+export type SnapshotQueen = [] | [stage: 0, x: number, y: number, ticksLeft: number] | [stage: 1, id: number, x: number, y: number, hp: number, maxHp: number];
 
 /** Your own numbers, in your snapshots only. */
 export type SnapshotMe = {
@@ -204,6 +213,8 @@ export type Snapshot = {
   f: SnapshotPickup[];
   /** The arena's wave. */
   w: number;
+  /** The hive queen's marker or health (v12, #85), never culled. */
+  q: SnapshotQueen;
   me: SnapshotMe;
   /**
    * On keyframes only (v11): every bug outside your view square, globs left out, as minimap cells
@@ -221,7 +232,9 @@ export type Snapshot = {
  *   `phase, angle100, ticksIn`;
  * - `f`: the pickups in view, `[id, pickup, x10, y10, goneTick]`;
  * - `d`: every downed player, `[id, downTick, reviver, progress100]`;
- * - `w`, `me` (every key) and `m` (the minimap's far bugs).
+ * - `w`, `me` (every key) and `m` (the minimap's far bugs);
+ * - `q` (v12, #85): the hive queen, `[]`, `[0, x, y, appearTick]` or `[1, id, x, y, hp, maxHp]`,
+ *   never culled.
  *
  * A delta (`base`: the tick of the previous snapshot this recipient was sent) changes the
  * receiver's copy of that snapshot, in this order: `gb` the mirror indices of bugs gone; `b` a flat
@@ -229,7 +242,7 @@ export type Snapshot = {
  * has a tail (0, 0 when `bt` replaces it); `bt` `[index, phase, angle100, ticksIn]` for a new tail
  * (`[index, 0]` drops it); `nb` new bug rows, appended. Players the same way: `gp`, `p` (flat
  * `dx10, dy10, daim100`), `pf` `[index, flags, effects]`, `np`. Pickups: `gf` gone ids, `nf` new
- * rows. `d` and `w` only when they changed; `me` only its changed keys. A field with nothing in it
+ * rows. `d`, `w` and `q` only when they changed; `me` only its changed keys. A field with nothing in it
  * is left out. `s`, `e` and `k` (this tick's events, culled to the view) are on every snapshot.
  */
 export type WireSnapshot = {
@@ -244,6 +257,7 @@ export type WireSnapshot = {
   f?: number[][];
   d?: number[][];
   w?: number;
+  q?: number[];
   me?: Partial<SnapshotMe>;
   m?: number[];
   gb?: number[];
@@ -271,6 +285,8 @@ export type ArenaEvent = {
   points?: number;
   /** With "pickup": the pickup's index in PICKUP_IDS (v7). */
   pickup?: number;
+  /** With "queen" (v12): each rewarded player's id and points. */
+  paid?: [id: number, points: number][];
   /** With "over": the life's score, kills and length. */
   score?: number;
   kills?: number;

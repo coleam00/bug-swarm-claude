@@ -1,6 +1,7 @@
 // The shutdown a SIGTERM or SIGINT runs (main.ts), with fakes for the server, database, timer and exit.
 import { expect, test } from "bun:test";
-import { buildIdFrom, gracefulShutdown, type ShutdownDeps } from "./serve";
+import { DT, WAVE_S } from "../shared/arena/constants";
+import { START_LEAD_S, buildIdFrom, gracefulShutdown, startTickFrom, type ShutdownDeps } from "./serve";
 
 function fakes(stop: () => Promise<number>) {
   const calls: string[] = [];
@@ -55,4 +56,11 @@ test("the build id is Railway's commit, else BUILD_ID, else the start time", () 
   expect(buildIdFrom({ RAILWAY_GIT_COMMIT_SHA: "abc", BUILD_ID: "two" }, 7)).toBe("abc");
   expect(buildIdFrom({ BUILD_ID: "two" }, 7)).toBe("two");
   expect(buildIdFrom({}, 7)).toBe("7");
+});
+
+test("BUG_SWARM_START_WAVE is off unless it is a whole wave of at least 2; then arenas open 10 s before it (#85)", () => {
+  for (const v of [undefined, "", " ", "1", "0", "-5", "4.5", "five", "NaN", "Infinity"]) expect(startTickFrom({ BUG_SWARM_START_WAVE: v })).toBe(0);
+  expect(startTickFrom({})).toBe(0);
+  expect(startTickFrom({ BUG_SWARM_START_WAVE: "5" })).toBe(Math.round((4 * WAVE_S - START_LEAD_S) / DT));
+  expect(startTickFrom({ BUG_SWARM_START_WAVE: "2" }) * DT).toBeCloseTo(WAVE_S - START_LEAD_S, 9);
 });

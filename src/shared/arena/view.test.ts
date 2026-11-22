@@ -5,6 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   BUG_KINDS,
+  DT,
   DOWN_TICKS,
   KEYFRAME_TICKS,
   MAX_PLAYERS_PER_ARENA,
@@ -14,11 +15,14 @@ import {
   SHOT_RANGE,
   PROTOCOL_VERSION,
   TICK_MS,
+  WAVE_S,
   WORLD_H,
   WORLD_W,
   type BugKind,
 } from "./constants";
+import { QUEEN_EVERY_WAVES } from "./bugs/queen";
 import { createFillMemory, createObservation, fillBot, observe, type PolicyInput } from "./policies";
+import { QUEEN_MARKER_TICKS } from "./queen";
 import { WELCOME, parseServerMessage, type Snapshot, type SnapshotMe, type WireSnapshot } from "./protocol";
 import { createRng } from "./rng";
 import { joinPlayer, leavePlayer, stepArena, wave, type ArenaState, type Player } from "./sim";
@@ -86,8 +90,17 @@ function expected(a: ArenaState, box: ViewBox | null, you: number, ack: number, 
       a.floor.filter((x) => inBox(box, Math.round(x.x * 10) / 10, Math.round(x.y * 10) / 10)).map((x) => [x.id, PICKUP_IDS.indexOf(x.kind), q1(x.x), q1(x.y), x.ticksLeft]),
     ) as Snapshot["f"],
     w: wave(a.tick),
+    q: queenExpected(a),
     me: { ...me, he: q2(me.he), x: q2(me.x), y: q2(me.y), vx: q2(me.vx), vy: q2(me.vy) },
   };
+}
+
+/** The hive queen as every recipient should decode her (#85): never culled, whole units. */
+function queenExpected(a: ArenaState): Snapshot["q"] {
+  const q = a.queen;
+  if (q.stage === 1) return [0, Math.round(q.x), Math.round(q.y), q.ticksLeft];
+  const g = q.stage === 2 ? a.bugs.find((b) => b.id === q.bugId) : undefined;
+  return g ? [1, g.id, Math.round(g.x), Math.round(g.y), g.hp, q.maxHp] : [];
 }
 
 const comparable = (s: Snapshot) => {
@@ -242,6 +255,52 @@ describe("encode, then decode, equals the arena culled and quantized", () => {
     const snap = applySnapshot(createViewMirror(), parseServerMessage(encodeView(quantizeArena(a, 1, createArenaFrame()), createViewState(), viewBoxOf(ps[0]!.x, ps[0]!.y, { cx: 0, cy: 0, half: 0 }), ps[0]!.id, 0, meOf(ps[0]))) as WireSnapshot)!;
     expect(snap.p[0]!.slice(0, 5)).toEqual([ps[0]!.id, 1000.12, 1000.99, 123.46, 0]);
     expect(snap.p[1]!.slice(0, 5)).toEqual([ps[1]!.id, 1100.5, 1000, 0, 0]);
+  });
+});
+
+describe("the hive queen (#85)", () => {
+  test("her marker, her health and her kill reach a player while her bug row is culled from their view, through keyframes and deltas", () => {
+    const { a, ps } = arenaWith([200, 200]);
+    const p = ps[0]!;
+    p.invulnTicks = 1e9;
+    a.tick = Math.round(((QUEEN_EVERY_WAVES - 1) * WAVE_S) / DT);
+    const frame = createArenaFrame();
+    const vs = createViewState();
+    const mirror = createViewMirror();
+    const box: ViewBox = { cx: 0, cy: 0, half: 0 };
+    const seen: Snapshot["q"][] = [];
+    let deltas = 0;
+    let qOnDeltas = 0;
+    let outside = 0;
+    for (let t = 0; t < QUEEN_MARKER_TICKS + 60; t++) {
+      p.budget = 0;
+      if (a.queen.stage === 2 && t === QUEEN_MARKER_TICKS + 30) a.bugs.find((b) => b.id === a.queen.bugId)!.hp = 5;
+      stepArena(a);
+      viewBoxOf(p.x, p.y, box);
+      const wire = parseServerMessage(encodeView(quantizeArena(a, wave(a.tick), frame), vs, box, p.id, 0, meOf(p))) as WireSnapshot;
+      if (wire.key !== 1) {
+        deltas++;
+        if (wire.q) qOnDeltas++;
+      }
+      const got = applySnapshot(mirror, wire)!;
+      expect(got.q).toEqual(queenExpected(a));
+      if (a.queen.stage === 2 && !inBox(box, Math.round(a.queen.x), Math.round(a.queen.y), 60)) {
+        // Outside this player's view square: her bug row is culled, her `q` is not.
+        outside++;
+        expect(got.b.some((r) => r[0] === a.queen.bugId)).toBe(false);
+      }
+      seen.push(got.q);
+    }
+    expect(seen.some((q) => q[0] === 0)).toBe(true);
+    expect(seen.some((q) => q[0] === 1)).toBe(true);
+    expect(outside).toBeGreaterThan(0);
+    // The marker's wire row holds still while it counts down, so most deltas carry no `q`.
+    expect(qOnDeltas).toBeLessThan(deltas);
+    // Killed: back to [] for everyone.
+    a.bugs.find((b) => b.id === a.queen.bugId)!.hp = 0;
+    a.queen.stage = 0;
+    stepArena(a);
+    expect(applySnapshot(mirror, parseServerMessage(encodeView(quantizeArena(a, wave(a.tick), frame), vs, viewBoxOf(p.x, p.y, box), p.id, 0, meOf(p))) as WireSnapshot)!.q).toEqual([]);
   });
 });
 

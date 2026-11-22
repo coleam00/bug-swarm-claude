@@ -7,6 +7,7 @@ import { DT, type BugKind } from "../constants";
 import { bugDef } from "../bugs/registry";
 import { mult } from "../combat";
 import type { ArenaState, Player } from "../sim";
+import { creditQueen } from "../bugs/queen";
 import type { PickupDef } from "./kind";
 
 /** How far the bomb reaches, centre to centre, world units. */
@@ -19,9 +20,10 @@ export const BOMB_FLOOR_S = 12;
 /**
  * Which kinds the bomb kills outright (true) or hits for BOMB_DAMAGE (false): the item's crawlers
  * and dashers die, everything else takes the damage (a 3 hp spitter and a 1 hp glob die of it too,
- * today). A Record over BUG_KINDS, so a new kind does not compile until it says which.
+ * today; a hive queen (#85) takes the damage, credited to the taker's share of her reward). A Record
+ * over BUG_KINDS, so a new kind does not compile until it says which.
  */
-export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: true, spitter: false, glob: false, beetle: false };
+export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: true, spitter: false, glob: false, beetle: false, queen: false };
 
 export const bomb: PickupDef = {
   id: "bomb",
@@ -31,7 +33,7 @@ export const bomb: PickupDef = {
   // of the numbers #73 had halved for the late-joiner gate, set by measurement so an aimer takes 2 to
   // 3 pickups a life (`bun run skill`). The spitter (#72) drops as the dasher does; a beetle (#80)
   // takes 8 shots and drops twice what a dasher does. A glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.009375, dasher: 0.01875, spitter: 0.01875, glob: 0, beetle: 0.0375 },
+  drop: { crawler: 0.009375, dasher: 0.01875, spitter: 0.01875, glob: 0, beetle: 0.0375, queen: 0 },
   floorTicks: Math.round(BOMB_FLOOR_S / DT),
   durationTicks: 0,
 };
@@ -52,7 +54,10 @@ export function bombGoesOff(state: ArenaState, p: Player): void {
     const dx = b.x - p.x;
     const dy = b.y - p.y;
     if (dx * dx + dy * dy > R2) continue;
+    const before = b.hp;
     b.hp = BOMB_CLEARS[b.kind] ? 0 : b.hp - BOMB_DAMAGE;
+    // A hive queen's damage is credited to the taker (#85, queen.ts).
+    creditQueen(p, b, BOMB_DAMAGE, before);
     if (b.hp > 0) continue;
     const points = bugDef(b.kind).points * mult(p.streak);
     p.score += points;

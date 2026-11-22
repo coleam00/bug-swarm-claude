@@ -18,6 +18,8 @@ import { parseServerMessage, type ServerMessage, type Snapshot, type WireSnapsho
 import { createSnapshotReader } from "../../shared/arena/view";
 import type { Input } from "../../shared/arena/sim";
 import { DOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
+import { QUEEN_EVERY_WAVES } from "../../shared/arena/bugs/queen";
+import { QUEEN_MARKER_TICKS, QUEEN_REWARD_EACH, QUEEN_REWARD_POOL } from "../../shared/arena/queen";
 import { placeBug } from "../../shared/arena/testkit";
 import { isBotName } from "../rules";
 import { Room, meOf, type LifeRecord } from "./room";
@@ -407,6 +409,57 @@ describe("lives", () => {
     // Bob's revive points are in his life when it ends, saved under his (spaces) name.
     rooms.leave(jb.room, jb.entity);
     expect(saved).toMatchObject([{ playerKey: "b".repeat(32), team: "spaces", score: REVIVE_POINTS }]);
+  });
+
+  test("a hive queen (#85): every member sees her marker and health in `q`, then her kill as a `queen` event with every reward, saved on the life", () => {
+    const saved: LifeRecord[] = [];
+    const { rooms, tick } = setup((r) => saved.push(r));
+    const a = client();
+    const b = client();
+    const ja = rooms.join("Ada", "tabs", INFO, a.send);
+    rooms.join("Bob", "spaces", { playerKey: "b".repeat(32), touch: false }, b.send);
+    const room = rooms.room(ja.room)!;
+    const st = room.state;
+    const quiet = () => {
+      for (const p of st.players) {
+        p.budget = 0;
+        p.invulnTicks = 1000;
+      }
+    };
+    quiet();
+    tick();
+    st.bugs.length = 0;
+    // The tick before wave QUEEN_EVERY_WAVES starts: the next one shows her marker.
+    st.tick = Math.round(((QUEEN_EVERY_WAVES - 1) * WAVE_S) / (TICK_MS / 1000));
+    quiet();
+    tick();
+    expect(snapshots(a.got).at(-1)!.q).toEqual([0, st.queen.x, st.queen.y, QUEEN_MARKER_TICKS]);
+    for (let i = 0; i < QUEEN_MARKER_TICKS; i++) {
+      quiet();
+      tick();
+    }
+    const q = st.bugs.find((x) => x.kind === "queen")!;
+    const r1 = (v: number) => Math.round(v);
+    expect(snapshots(b.got).at(-1)!.q).toEqual([1, q.id, r1(q.x), r1(q.y), q.hp, q.hp]);
+    // Ada fires a shot at her last hit point.
+    const pa = st.players.find((p) => p.id === ja.entity)!;
+    q.hp = 1;
+    pa.x = q.x - 120;
+    pa.y = q.y;
+    pa.protectTicks = 0;
+    for (let i = 0; i < 6 && st.queen.stage === 2; i++) {
+      rooms.input(ja.room, ja.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false });
+      quiet();
+      tick();
+    }
+    expect(st.queen.stage).toBe(0);
+    const reward = QUEEN_REWARD_EACH + QUEEN_REWARD_POOL;
+    for (const c of [a, b]) {
+      expect(c.got.filter((m) => m.t === "event" && m.kind === "queen")).toEqual([{ t: "event", kind: "queen", id: ja.entity, paid: [[ja.entity, reward]] }]);
+      expect(snapshots(c.got).at(-1)!.q).toEqual([]);
+    }
+    rooms.leave(ja.room, ja.entity);
+    expect(saved).toMatchObject([{ playerKey: INFO.playerKey, score: reward }]);
   });
 
   test("a stale input stops firing as well as moving", () => {

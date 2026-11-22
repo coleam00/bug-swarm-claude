@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 import {
   CLIENT_TYPES,
+  EVENT,
+  EVENT_KINDS,
+  QUEEN,
   SERVER_TYPES,
+  type ArenaEvent,
   encodeHello,
   encodeInput,
   encodeWatch,
@@ -133,5 +137,11 @@ describe("server messages", () => {
     for (const t of CLIENT_TYPES) expect(parseServerMessage(s({ t }))).toBeNull();
     expect(parseServerMessage("{")).toBeNull();
     expect(parseServerMessage(new ArrayBuffer(4))).toBeNull();
+  });
+
+  test("v12: a `queen` event (#85) names the top dealer and every reward, and is the last event kind", () => {
+    const ev: ArenaEvent = { t: EVENT, kind: QUEEN, id: 3, paid: [[3, 475], [5, 275]] };
+    expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
+    expect(EVENT_KINDS.at(-1)).toBe("queen");
   });
 });

@@ -43,6 +43,7 @@ import {
   type SnapshotBug,
   type SnapshotMe,
   type SnapshotPlayer,
+  type SnapshotQueen,
   type WireMessage,
   type WireSnapshot,
 } from "./protocol";
@@ -104,6 +105,8 @@ export type ArenaFrame = {
   fmark: number[];
   /** Every downed player, as the wire's `d`. */
   downs: string;
+  /** The hive queen as the wire's `q` (#85): never culled. */
+  queen: string;
   /** This tick's events as JSON rows, with where each happened for culling. */
   shots: string[];
   sx: number[];
@@ -150,6 +153,7 @@ export function createArenaFrame(): ArenaFrame {
     fgone: [],
     fmark: [],
     downs: "[]",
+    queen: "[]",
     shots: [],
     sx: [],
     sy: [],
@@ -181,6 +185,18 @@ function effectBits(p: ArenaState["players"][number]): number {
   let bits = 0;
   for (let i = 0; i < p.effect.length; i++) if (p.effect[i]! > 0) bits |= 1 << i;
   return bits;
+}
+
+/**
+ * The hive queen's wire `q` (#85): `[]`; her marker `[0, x, y, appearTick]` (the tick she appears, so
+ * the string holds still while it counts down); or her alive `[1, id, x, y, hp, maxHp]`, whole units.
+ */
+function queenRow(state: ArenaState): string {
+  const q = state.queen;
+  if (q.stage === 1) return `[0,${Math.round(q.x)},${Math.round(q.y)},${state.tick + q.ticksLeft}]`;
+  if (q.stage !== 2) return "[]";
+  for (const g of state.bugs) if (g.id === q.bugId) return `[1,${g.id},${Math.round(g.x)},${Math.round(g.y)},${g.hp},${q.maxHp}]`;
+  return "[]";
 }
 
 /**
@@ -221,6 +237,7 @@ export function quantizeArena(state: ArenaState, wave: number, f: ArenaFrame): A
     d += `[${p.id},${p.downTick},${p.reviver},${Math.round((p.reviveTicks / REVIVE_TICKS) * 100)}]`;
   }
   f.downs = d + "]";
+  f.queen = queenRow(state);
   const floor = state.floor;
   f.floor = floor.length;
   for (let i = 0; i < floor.length; i++) {
@@ -296,6 +313,8 @@ export type ViewState = {
   fy: number[];
   fgone: number[];
   downs: string;
+  /** The hive queen's `q` as last sent (#85). */
+  queen: string;
   wave: number;
   /** `me` as last sent, in ME_KEYS order, and its fx joined. */
   me: number[];
@@ -331,6 +350,7 @@ export function createViewState(): ViewState {
     fy: [],
     fgone: [],
     downs: "",
+    queen: "",
     wave: -1,
     me: [],
     meFx: "",
@@ -503,6 +523,8 @@ export function encodeView(f: ArenaFrame, vs: ViewState, box: ViewBox | null, yo
   vs.downs = f.downs;
   if (f.wave !== vs.wave) out += `,"w":${f.wave}`;
   vs.wave = f.wave;
+  if (f.queen !== vs.queen) out += `,"q":${f.queen}`;
+  vs.queen = f.queen;
   let m = "";
   for (let i = 0; i < ME_KEYS.length; i++) {
     const v = meValue(me, ME_KEYS[i]!);
@@ -536,7 +558,8 @@ export function keyframeOf(f: ArenaFrame, vs: ViewState, box: ViewBox | null, yo
   vs.meFx = me.fx.join(",");
   vs.downs = f.downs;
   vs.wave = f.wave;
-  let out = `{"t":"${SNAPSHOT}","tick":${f.tick},"key":1,"you":${you},"ack":${ack},"p":[${p}],"b":[${b}],"f":[${fl}],"d":${f.downs},"w":${f.wave},"me":{${m}"fx":[${vs.meFx}]}`;
+  vs.queen = f.queen;
+  let out = `{"t":"${SNAPSHOT}","tick":${f.tick},"key":1,"you":${you},"ack":${ack},"p":[${p}],"b":[${b}],"f":[${fl}],"d":${f.downs},"w":${f.wave},"q":${f.queen},"me":{${m}"fx":[${vs.meFx}]}`;
   if (box) {
     let far = "";
     for (let j = 0; j < f.bugs; j++) {
@@ -558,11 +581,13 @@ export type ViewMirror = {
   floor: number[][];
   downs: number[][];
   wave: number;
+  /** The hive queen's wire `q` (#85). */
+  queen: number[];
   me: SnapshotMe;
 };
 
 export function createViewMirror(): ViewMirror {
-  return { tick: -1, you: 0, bugs: [], players: [], floor: [], downs: [], wave: 0, me: zeroMe() };
+  return { tick: -1, you: 0, bugs: [], players: [], floor: [], downs: [], wave: 0, queen: [], me: zeroMe() };
 }
 
 function zeroMe(): SnapshotMe {
@@ -590,6 +615,7 @@ export function applySnapshot(m: ViewMirror, s: WireSnapshot): Snapshot | null {
     m.floor = (s.f ?? []).map((r) => r.slice());
     m.downs = s.d ?? [];
     m.wave = s.w ?? 0;
+    m.queen = s.q ?? [];
     m.me = { ...zeroMe(), ...s.me };
   } else {
     if (m.tick < 0 || s.base !== m.tick) {
@@ -634,10 +660,18 @@ export function applySnapshot(m: ViewMirror, s: WireSnapshot): Snapshot | null {
     for (const r of s.nf ?? []) m.floor.push(r.slice());
     if (s.d) m.downs = s.d;
     if (s.w !== undefined) m.wave = s.w;
+    if (s.q) m.queen = s.q;
     if (s.me) Object.assign(m.me, s.me);
   }
   m.tick = s.tick;
   return decoded(m, s);
+}
+
+/** The wire `q` decoded at `tick` (#85): the marker's appear tick becomes the ticks left. */
+function queenOf(q: number[], tick: number): SnapshotQueen {
+  if (q[0] === 0) return [0, q[1]!, q[2]!, Math.max(0, q[3]! - tick)];
+  if (q[0] === 1) return [1, q[1]!, q[2]!, q[3]!, q[4]!, q[5]!];
+  return [];
 }
 
 function decoded(m: ViewMirror, s: WireSnapshot): Snapshot {
@@ -672,6 +706,7 @@ function decoded(m: ViewMirror, s: WireSnapshot): Snapshot {
     d: m.downs.map((r) => [r[0]!, q2((Math.max(0, DOWN_TICKS - (s.tick - r[1]!)) * TICK_MS) / 1000), r[2]!, r[3]! / 100]),
     f: m.floor.map((r) => [r[0]!, r[1]!, r[2]! / 10, r[3]! / 10, r[4]! - s.tick]),
     w: m.wave,
+    q: queenOf(m.queen, s.tick),
     me: { ...me, fx: me.fx.slice() },
   };
   if (s.m) out.m = s.m;

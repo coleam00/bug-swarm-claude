@@ -6,9 +6,10 @@ import { crawler } from "./crawler";
 import { dasher } from "./dasher";
 import { glob } from "./glob";
 import type { BugKindDef } from "./kind";
+import { queen } from "./queen";
 import { spitter } from "./spitter";
 
-export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher, spitter, glob, beetle };
+export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher, spitter, glob, beetle, queen };
 
 export function bugDef(kind: BugKind): BugKindDef {
   return BUG_DEFS[kind];
@@ -17,5 +18,9 @@ export function bugDef(kind: BugKind): BugKindDef {
 /** The base kind: what a spawn is when the mix picks no other. */
 export const BASE_KIND: BugKind = BUG_KINDS[0];
 
-/** The largest radius of any kind, units: for checks that hold for every kind (spawn clamps, view). */
-export const MAX_BUG_RADIUS = Math.max(...BUG_KINDS.map((k) => BUG_DEFS[k].radius));
+/**
+ * The largest radius of any kind but a boss (#85), units: for checks that hold for every spawned
+ * kind (spawn clamps, view). A boss is placed by its own code and drawn from the snapshot's own
+ * field, so its size moves none of them (a 15-unit spitter alone moved the late gate, #72).
+ */
+export const MAX_BUG_RADIUS = Math.max(...BUG_KINDS.filter((k) => !BUG_DEFS[k].boss).map((k) => BUG_DEFS[k].radius));

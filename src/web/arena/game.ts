@@ -14,6 +14,9 @@
 // Pickups (#73): the floor comes in each snapshot's `f` and is drawn with the bugs; a `pickup`
 // event floats the pickup's label over whoever took it (and a refactor bomb's ring goes out from
 // them, #78), and a `block` event pops their shield.
+// The hive queen (#85): each snapshot's `q` (her marker, or her health) is kept for the renderer;
+// her `queen` event bursts where she died, floats each reward over its robot and shows "Queen
+// down!" naming who dealt the most (her kill row itself scores no points, so floats nothing).
 // Watching (#79): `startWatch` runs the same arena for the start screen with no robot of its own:
 // a watch connection (net.ts watchArena), no input listeners at all (the name field keeps its
 // keys), no HUD, a camera that drifts between the action (drift.ts), and a backing store at most
@@ -23,6 +26,9 @@
 // second as cells (`m`). The F readout adds the KB/s the socket receives and the p95 time from an
 // input leaving to a snapshot acknowledging it (netmeter.ts).
 import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
+
+/** Bugs a snapshot can carry: the arena's cap, plus a hive queen, who is placed whatever the count (#85). */
+const BUG_SLOTS = MAX_BUGS_PER_ARENA + 1;
 import { BOMB_RADIUS, bomb } from "../../shared/arena/pickups/bomb";
 import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
@@ -32,6 +38,7 @@ import {
   LEAVE,
   OVER,
   PICKUP,
+  QUEEN,
   REVIVE,
   SNAPSHOT,
   WELCOME,
@@ -40,6 +47,7 @@ import {
   type ServerMessage,
   type SnapshotDown,
   type SnapshotMe,
+  type SnapshotQueen,
 } from "../../shared/arena/protocol";
 import { clampInput, wrapAngle, type Input } from "../../shared/arena/sim";
 import { isTeam, type Team } from "../../server/rules";
@@ -53,7 +61,7 @@ import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
+import { GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createDrift, stepDrift } from "./drift";
@@ -90,6 +98,7 @@ import {
 import { markUpdateReload } from "../player";
 import { connectArena, watchArena, type Connection, type PlayHandlers, type WatchConnection } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
+import { createBanner, showBanner, updateBanner } from "./queenhud";
 import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 import { countPeople, isBot } from "./tag";
@@ -213,6 +222,11 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   const fxRng = createRng(Date.now() | 0);
   // A kill bursts in its kind's glow, by its index in BUG_KINDS.
   const killGlows = BUG_KINDS.map((k) => BUG_DRAW[k].look.glow);
+  // The hive queen (#85): the newest snapshot's `q`, and "Queen down!" with its name.
+  const noQueen: SnapshotQueen = [];
+  let queenQ: SnapshotQueen = noQueen;
+  const banner = createBanner();
+  let bannerName = "";
 
   // Who is in the arena: names and teams come once, in the welcome and in join events.
   const roster = new Map<number, Robot>();
@@ -321,11 +335,14 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       clearShots(shots);
       clearKills(kills);
       resetHudFx(hudFx);
+      queenQ = noQueen;
+      banner.left = 0;
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
       people = countPeople(roster.values());
     } else if (m.t === SNAPSHOT) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
+      queenQ = m.q ?? noQueen;
       if (m.m) far = m.m;
       noteAck(net, m.ack, performance.now());
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5]);
@@ -386,6 +403,17 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         // A shield blocked a hit: the bubble pops, for everyone.
         const r = roster.get(m.id);
         if (r) spawnBurst(particles, r.x, r.y, BURST_COUNT, GLOW_SHIELD, fxRng);
+      } else if (m.kind === QUEEN) {
+        // The hive queen is down: a big burst where she was last seen, each reward over its robot,
+        // and the banner naming who dealt the most (drawn as canvas text, never HTML).
+        const q = queenQ;
+        if (q.length > 0 && q[0] === 1) for (let i = 0; i < 3; i++) spawnBurst(particles, q[2], q[3], BURST_COUNT, GLOW_QUEEN, fxRng);
+        for (const [id, points] of m.paid ?? []) {
+          const r = roster.get(id);
+          if (r && points > 0) spawnText(texts, r.x, r.y - LABEL_ABOVE / 2, points);
+        }
+        bannerName = roster.get(m.id)?.name ?? "";
+        showBanner(banner, m.id);
       }
     }
   };
@@ -533,14 +561,14 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false, fx: 0 };
   const span: BugSpan = { from: null, to: null, t: 0 };
   const bugs: BugsView = {
-    x: new Float32Array(MAX_BUGS_PER_ARENA),
-    y: new Float32Array(MAX_BUGS_PER_ARENA),
-    heading: new Float32Array(MAX_BUGS_PER_ARENA),
-    anim: new Float32Array(MAX_BUGS_PER_ARENA),
-    kind: new Uint8Array(MAX_BUGS_PER_ARENA),
-    phase: new Uint8Array(MAX_BUGS_PER_ARENA),
-    angle: new Float32Array(MAX_BUGS_PER_ARENA),
-    phaseS: new Float32Array(MAX_BUGS_PER_ARENA),
+    x: new Float32Array(BUG_SLOTS),
+    y: new Float32Array(BUG_SLOTS),
+    heading: new Float32Array(BUG_SLOTS),
+    anim: new Float32Array(BUG_SLOTS),
+    kind: new Uint8Array(BUG_SLOTS),
+    phase: new Uint8Array(BUG_SLOTS),
+    angle: new Float32Array(BUG_SLOTS),
+    phaseS: new Float32Array(BUG_SLOTS),
     count: 0,
   };
   const floor: FloorView = {
@@ -579,6 +607,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     stats: null,
     dashButton: null,
     dashReady: 1,
+    queen: noQueen,
+    banner,
+    bannerName: "",
   };
   const meter = createFpsMeter();
   const record: WatchRecord | null = watch && import.meta.env.DEV ? { work: new Float64Array(COST_FRAMES), count: 0 } : null;
@@ -623,7 +654,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       floor.left[i] = (row[4] - Math.max(0, rt - from.tick)) * DT;
     }
     for (const row of from.b) {
-      if (bugs.count >= MAX_BUGS_PER_ARENA) break;
+      if (bugs.count >= BUG_SLOTS) break;
       const id = row[0];
       const next = span.to?.bi.get(id);
       let x = row[2];
@@ -666,7 +697,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       bugs.phaseS[i] = phaseS;
     }
     // Forget the headings of bugs long gone.
-    if (headings.size > MAX_BUGS_PER_ARENA * 2) headings.clear();
+    if (headings.size > BUG_SLOTS * 2) headings.clear();
   };
 
   const frame = (now: number) => {
@@ -704,6 +735,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     updateTings(tings, dt);
     updateShake(shake, dt, fxRng);
     updateHudFx(hudFx, dt);
+    updateBanner(banner, dt);
 
     // Who to draw: everyone in a life in the newest snapshot, you predicted, the rest interpolated.
     drawn.length = 0;
@@ -787,6 +819,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.stats = showStats ? statsText : null;
     scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
+    scene.queen = queenQ;
+    scene.bannerName = bannerName;
     renderer.draw(cam, scene);
     if (record) {
       record.work[record.count % COST_FRAMES] = performance.now() - t0;
