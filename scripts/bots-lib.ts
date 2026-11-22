@@ -134,9 +134,11 @@ export function randomPlayerId(): string {
 }
 
 /**
- * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`), every
- * bug, with each bug's velocity derived from how far it moved since the last snapshot that had it,
- * and every pickup on the floor (`f`, #73), as `bun run skill`'s observe sees them.
+ * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`), the bugs
+ * its snapshot carries, with each bug's velocity derived from how far it moved since the last
+ * snapshot that had it, and the pickups on the floor (`f`, #73). Since #89 a snapshot holds only the
+ * bugs and pickups in the bot's view square, so this is less than `bun run skill`'s observe, which
+ * sees the whole arena.
  */
 export type ObservationTracker = { obs: Observation; update(m: Snapshot, you: number): void };
 
@@ -203,6 +205,12 @@ export function secondHalfKbps(b: BotBytes, midMs: number, endMs: number): numbe
   return endMs - from >= 1000 ? b.second / (endMs - from) : null;
 }
 
+/** A bot's KB/s over the first half of the run, from its welcome to `midMs` (the ramp), or null. */
+export function firstHalfKbps(b: BotBytes, midMs: number): number | null {
+  if (b.welcomedAt === null || midMs - b.welcomedAt < 1000) return null;
+  return b.first / (midMs - b.welcomedAt);
+}
+
 export type Rates = { mean: number; p95: number; max: number; count: number };
 
 /** Mean, p95 and max of per-player rates, or null with none. */
@@ -243,8 +251,10 @@ export type Tally = {
   lives: number[];
   /** Each watcher's bandwidth: UTF-8 bytes received, over the seconds since its welcome. */
   watchers: { bytes: number; seconds: number }[];
-  /** Each bot's KB/s over the second half of the run (secondHalfKbps). */
+  /** Each bot's KB/s over the second half of the run (secondHalfKbps), the gated one. */
   kbps: number[];
+  /** Each bot's KB/s over the first half (firstHalfKbps), printed only: bugs are still ramping up. */
+  kbpsFirst: number[];
   /** Server memory from the stats, MB. */
   memory: { rssMb: number; heapUsedMb: number } | null;
   /** Arenas open on the server at the end. */
@@ -252,7 +262,7 @@ export type Tally = {
 };
 
 export function createTally(): Tally {
-  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watchers: [], kbps: [], memory: null, serverArenas: null };
+  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watchers: [], kbps: [], kbpsFirst: [], memory: null, serverArenas: null };
 }
 
 /** Watchers' received KB/s (1 KB = 1000 bytes): mean and max, or null with none measured. */
@@ -295,6 +305,8 @@ export function formatSummary(args: BotsArgs, tally: Tally, seconds: number, tic
         ? `per player (second half, payload): mean ${kbps.mean.toFixed(1)} KB/s, p95 ${kbps.p95.toFixed(1)} KB/s, max ${kbps.max.toFixed(1)} KB/s over ${kbps.count} bot(s)`
         : "per player: no bandwidth measured",
     );
+    const first = rateStats(tally.kbpsFirst);
+    if (first) lines.push(`per player (first half, not gated: bugs still ramping up): mean ${first.mean.toFixed(1)} KB/s, max ${first.max.toFixed(1)} KB/s`);
   }
   if (args.watchers > 0) {
     const r = watcherRates(tally.watchers);

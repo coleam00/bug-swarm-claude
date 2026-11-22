@@ -14,6 +14,7 @@ import {
   botTeam,
   budgetVerdict,
   createTally,
+  firstHalfKbps,
   createWander,
   formatSummary,
   parseBotsArgs,
@@ -218,6 +219,9 @@ describe("the budget gate (#89)", () => {
     expect(secondHalfKbps({ first: 0, second: 900_000, welcomedAt: 90_000 }, 60_000, 120_000)).toBe(30);
     expect(secondHalfKbps({ first: 0, second: 0, welcomedAt: null }, 60_000, 120_000)).toBeNull();
     expect(secondHalfKbps({ first: 0, second: 10, welcomedAt: 119_500 }, 60_000, 120_000)).toBeNull();
+    // The first half, printed only: from the welcome to the middle.
+    expect(firstHalfKbps({ first: 500_000, second: 0, welcomedAt: 10_000 }, 60_000)).toBe(10);
+    expect(firstHalfKbps({ first: 0, second: 0, welcomedAt: null }, 60_000)).toBeNull();
   });
 
   test("rates: mean, p95 and max", () => {
@@ -244,11 +248,13 @@ describe("the budget gate (#89)", () => {
     const tally = createTally();
     tally.joins = 2;
     tally.kbps.push(20, 45);
+    tally.kbpsFirst.push(10, 12);
     tally.memory = { rssMb: 80.5, heapUsedMb: 30 };
     tally.serverArenas = 1;
     const text = formatSummary({ url: "u", count: 2, seconds: 120, policy: "aimer", watchers: 0 }, tally, 120, { p50: 1, p95: 2 }).join("\n");
     expect(text).toContain("mean 32.5 KB/s, p95 45.0 KB/s, max 45.0 KB/s over 2 bot(s)");
     expect(text).toContain("rss 80.5 MB");
+    expect(text).toContain("first half, not gated: bugs still ramping up): mean 11.0 KB/s, max 12.0 KB/s");
     expect(text).toContain("budget: tick p95 under 10 ms: pass");
     expect(text).toContain("budget: at most 40 KB/s per player: MISS");
     expect(text).toContain("budget: 0 errors: pass");

@@ -199,6 +199,27 @@ export function newestDown(it: Interp, id: number): SnapshotDown | undefined {
   return f ? findDown(f, id) : undefined;
 }
 
+/**
+ * How long a bug's drawn heading takes to follow its direction of travel, seconds (#89). Bug
+ * positions travel in whole units since protocol v10, so one tick's step points a few degrees off
+ * (a walking crawler: p50 2.1, p95 5.6 degrees, against 0.2 and 0.6 at 0.1 units). Easing over
+ * about a tick roughly halves that (p50 1.1, p95 3.3) and still shows a real turn within 0.1 s;
+ * easing longer lags a spitter's or dasher's sharp turns by more than it smooths.
+ */
+export const HEADING_EASE_S = 0.06;
+
+/**
+ * A bug's heading after `dt` seconds of following `target` (its direction of travel) from `prev`,
+ * the short way round; a bug seen for the first time (`prev` undefined) faces it at once.
+ */
+export function easeHeading(prev: number | undefined, target: number, dt: number): number {
+  if (prev === undefined) return target;
+  let d = target - prev;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return prev + d * (1 - Math.exp(-dt / HEADING_EASE_S));
+}
+
 /** The newest snapshot, for the ids and the minimap. */
 export function newestPlayers(it: Interp): SnapshotPlayer[] {
   return it.frames[it.frames.length - 1]?.p ?? [];

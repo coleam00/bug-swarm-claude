@@ -80,6 +80,7 @@ import {
   downAt,
   newestDown,
   newestPlayers,
+  easeHeading,
   pushSnapshot,
   renderTick,
   resetInterp,
@@ -599,7 +600,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     r.dashAt = now / 1000;
   };
 
-  const fillBugs = (rt: number) => {
+  const fillBugs = (rt: number, dt: number) => {
     bugSpan(interp, rt, span);
     bugs.count = 0;
     floor.count = 0;
@@ -620,14 +621,16 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       const next = span.to?.bi.get(id);
       let x = row[2];
       let y = row[3];
-      let heading = headings.get(id) ?? 0;
+      const had = headings.get(id);
+      let heading = had ?? 0;
       if (next) {
         const dx = next[2] - row[2];
         const dy = next[3] - row[3];
         x += dx * span.t;
         y += dy * span.t;
         if (dx * dx + dy * dy > 0.01) {
-          heading = Math.atan2(dy, dx);
+          // Eased, not snapped: whole-unit positions (v10) make one tick's direction a few degrees off.
+          heading = easeHeading(had, Math.atan2(dy, dx), dt);
           headings.set(id, heading);
         }
       }
@@ -746,7 +749,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       drawn.push(r);
     }
     if (selfIndex >= 0) followCamera(cam, drawn[selfIndex]!.x, drawn[selfIndex]!.y, dt);
-    fillBugs(rt);
+    fillBugs(rt, dt);
     if (watch && drawn.length > 0) {
       if (snapNext) {
         // A new arena on screen: start on its first focus rather than panning in from afar.

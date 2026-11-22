@@ -198,15 +198,16 @@ The bomb half of #78. The CI drone, #78's other half, is its own item, #84 (owne
 - **Watchers** share one `ViewState` with no square: one delta string a tick for all of them. A watcher that is new, rehomed or missed a send gets a keyframe of the same state (`keyframeOf`), encoded once that tick for all such watchers.
 - **The browser:**
   - The minimap draws the far cells beside the bugs in view.
+  - A walking bug's drawn heading eases toward its direction of travel over about a tick (`interp.ts` `easeHeading`, 0.06 s). Whole-unit positions make one tick's direction a few degrees off: a crawler's p50 2.1 and p95 5.6 degrees, eased to 1.1 and 3.3.
   - The F readout adds the KB/s the socket receives and `ack`, the p95 over 2 s of the time from an input leaving to a snapshot acknowledging it (`netmeter.ts`, fixed rings, nothing allocated per frame).
 - **`bun run bots`** decodes as a browser does (a snapshot it cannot decode after a keyframe is a `desync` error). It counts each bot's payload bytes over the run's second half and gates the run on the budgets (`bots-lib.ts` `budgetVerdict`). Its bots now see only their view, so what they observe is no longer `bun run skill`'s perfect information. The skill gates run on the simulation and are unaffected.
 - **Measured** (`docs/arena-load.md`, `.evidence/89/`, the factory's Windows machine): 200 aimer bots for 120 s against a production build.
   - 0 errors, 10 arenas of 20.
   - Tick p50 0.91 to 1.27 ms, p95 1.92 to 2.60 ms (v9: 0.99 / 1.83).
-  - Per player, over the second half: mean 23.3 to 24.3 KB/s, max 26.5 to 26.9 (v9: about 70).
+  - Per player, over the second half: mean 23.3 to 24.3 KB/s, max 26.5 to 26.9 (v9: about 70). The first half, as bugs ramp up: about 11.5.
   - A watcher: 19.9 KB/s.
   - Server rss 92 to 110 MB.
-  - Two headless Chrome windows in one of those arenas read 60 fps, 6 to 14 KB/s and ack 56 to 102 ms throughout, and their robots moved at full speed under held keys.
+  - Two headless Chrome windows in one of those arenas read 60 fps, 6 to 14 KB/s and ack 56 to 102 ms throughout, and their robots moved at full speed whenever a key was held and they were up.
 
 ### Lives and scores
 - A **life** runs from spawn to out (3 hits put you down; 10 s down with no revive is out, #59), or until its player leaves (a disconnect: a reconnect starts a new life), or the server shutting down (a redeploy, #69: every life in progress ends there with its score so far and is saved; "Redeploys"). When it ends, the server saves it as a run (player id, team, score, kills, length, touch flag) through the existing `db.ts`, so top 10, best, team totals, `/board` and `stats` keep working. Server fill bots' lives are never saved (#66); `bun run bots` clients are ordinary players to the server, so theirs are.

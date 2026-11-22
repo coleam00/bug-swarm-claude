@@ -32,6 +32,7 @@ import {
   createTally,
   createWander,
   budgetVerdict,
+  firstHalfKbps,
   formatSummary,
   rateStats,
   secondHalfKbps,
@@ -222,6 +223,8 @@ const ended = performance.now();
 for (const bot of bots) {
   const r = secondHalfKbps(bot.bytes, midAt, ended);
   if (r !== null) tally.kbps.push(r);
+  const f = firstHalfKbps(bot.bytes, midAt);
+  if (f !== null) tally.kbpsFirst.push(f);
 }
 for (const w of watchers) if (w.since !== null) tally.watchers.push({ bytes: w.bytes, seconds: (ended - w.since) / 1000 });
 for (const bot of bots) {

@@ -27,7 +27,7 @@ The script prints the arenas, errors, the server's tick p50/p95 and memory (from
 - tick p95 not under 10 ms;
 - any one bot over 40 KB/s.
 
-**How the bandwidth gate reads.** Each bot counts the payload bytes of every message it receives after its welcome (1 KB = 1000 B). WebSocket framing is not counted: 2 to 4 bytes a frame, about 80 B/s at 20 snapshots a second. A bot's rate is taken over the **second half** of the run. The first half under-reads, because each arena's bugs are still ramping up toward the 150 cap: before #89 a 45 s run read 37.6 KB/s against 63.7 at 120 s. The gate is on the **maximum** over all bots, not the mean.
+**How the bandwidth gate reads.** Each bot counts the payload bytes of every message it receives after its welcome (1 KB = 1000 B). WebSocket framing is not counted: 2 to 4 bytes a frame, about 80 B/s at 20 snapshots a second. A bot's rate is taken over the **second half** of the run. The first half under-reads, because each arena's bugs are still ramping up toward the 150 cap. In the final run below, the first half averaged 11.5 KB/s per bot against 23.3 in the second; the script prints the first half too, ungated. The gate is on the **maximum** over all bots, not the mean.
 
 ## The machine
 
@@ -41,17 +41,17 @@ Each run was 200 aimer bots for 120 s against `bun src/server/main.ts` (built `d
 
 | | before (#87, protocol v9) | after (#89, protocol v10) |
 |---|---|---|
-| errors | 0 | 0 (all three runs) |
+| errors | 0 | 0 (all four runs) |
 | arenas | 10 x 20 players | 10 x 20 players (11 in the two-tab run) |
-| tick p50 / p95 | 0.99 / 1.83 ms | 1.03 / 2.34 ms; 0.91 / 1.92 ms; 1.27 / 2.60 ms (with Chrome running) |
-| per player, KB/s | about 70.6 (every socket got the same snapshot; the watcher's figure) | mean 23.3, p95 26.3, **max 26.5** (run 1); mean 24.3, p95 26.1, max 26.5 (run 2) |
+| tick p50 / p95 | 0.99 / 1.83 ms | 1.03 / 2.34 ms (run 1); 0.91 / 1.92 ms (run 2); 1.27 / 2.60 ms (two-tab run, Chrome on the same machine); 0.93 / 2.13 ms (final) |
+| per player, KB/s | about 70.6 (every socket got the same snapshot; the watcher's figure) | mean 23.3, p95 26.3, **max 26.5** (run 1); mean 24.3, p95 26.1, max 26.5 (run 2); mean 24.2, p95 26.8, max 26.9 (two-tab run); mean 23.3, p95 26.5, max 26.6 (final) |
 | watcher, KB/s | 70.6 | 19.9 |
-| server memory | 74 MB working set at the end | rss 95.2 MB, heap 9.9 MB (run 1); rss 91.9 MB, heap 8.5 MB (run 2); rss 109.8 MB, heap 16.4 MB (two-tab run) |
+| server memory | 74 MB working set at the end | rss 95.2 MB, heap 9.9 MB (run 1); rss 91.9 MB, heap 8.5 MB (run 2); rss 109.8 MB, heap 16.4 MB (two-tab run); rss 105.3 MB, heap 16.3 MB (final) |
 | verdict | (no gate then) | pass, exit 0 |
 
 The "before" numbers come from the same command on `main` at 279249a. Its watcher's 70.6 KB/s is averaged over the whole run, so the first half's ramp pulls it down. #80's tab read 85 KB/s in a crowded arena.
 
-Server memory is `process.memoryUsage()` read by the stats endpoint at the end of each run. It includes the stats' own allocations and Bun's heap growth over three back-to-back runs on one process.
+Run 2 added `--watchers 2`. Runs 1, 2 and the two-tab run were back to back on one server process; the final run, on the committed code, had a fresh one. Server memory is `process.memoryUsage()` read by the stats endpoint at the end of each run.
 
 **Where the bytes go.** `.evidence/89/probe-v10.ts` ran one aimer player plus 199 bots and measured seconds 45 to 90 of the run:
 - 25.1 KB/s in total, with 101.8 bugs and 20 players in view on average;
@@ -72,8 +72,8 @@ The F readout, from the screenshots (`.evidence/89/twotabs-*.png`):
 | t+60 s | 60 fps, 6.4 KB/s, ack 87 ms | 60 fps, 13.6 KB/s, ack 70 ms |
 | t+110 s | 60 fps, 7.3 KB/s, ack 85 ms | 60 fps, 6.8 KB/s, ack 102 ms |
 
-- **Controls stayed responsive.** Whenever a tab was up, its robot moved at full speed (300 units/s) in the held direction, and it reversed within the second the key changed. For example, TabOne went from x 2386 to 388 holding A, at t+30 to t+37 s. TabTwo went from x 1004.9 to 2386 holding D, at t+22 to t+27 s. (`.evidence/89/twotabs.log`.)
-- **When a robot stood still,** it had reached a wall or was down. Both tabs only held a key and fired at the wall, so bugs downed them often.
+- **Controls stayed responsive.** Whenever a tab was up with a key pressed, its robot moved at full speed (300 units/s) in the held direction, and it reversed within the second the key changed. For example, TabOne went from x 2386 to 388 holding A, at t+30 to t+37 s. TabTwo went from x 1004.9 to 2386 holding D, at t+22 to t+27 s. (`.evidence/89/twotabs.log`.)
+- **When a robot stood still,** it was at a wall, down, or just respawned with nothing held. The life-over screen releases every held key and button (`controls.ts` `releaseAll`, as designed), and the driver re-pressed only the move key, at its next 10 s switch, and never the mouse. So after a tab's first respawn it fired no more, and it stood until the next switch (TabOne from its respawn at t+96 to t+100). The tabs only held a key and fired at the wall, so bugs downed them often.
 - **The ack figure** is the p95 time from an input leaving to a snapshot acknowledging it. It includes the server's input queue: one input is applied per tick, and up to 4 are queued. Your own robot is predicted, so moving never waits on it.
 - **Bandwidth was lower for the tabs** than for the bots. Holding one direction carried them to the walls, away from the bots' cluster.
 - **This is headless Chrome,** whose rAF is not a physical display. It ran with `--disable-backgrounding-occluded-windows`, so neither window was throttled as hidden.
