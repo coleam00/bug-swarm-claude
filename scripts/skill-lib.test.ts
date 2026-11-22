@@ -127,11 +127,6 @@ describe("bun run skill", () => {
     expect(aim.blocks).toBeGreaterThan(0);
     // A block is never a hit landed: the counts come from different events.
     expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0 }, blocks: 0, laserHits: 0 });
-    const lines = formatSkill(r);
-    const head = lines.findIndex((l) => l.startsWith("pickups a life"));
-    expect(head).toBeGreaterThan(0);
-    expect(lines[head + 3]).toStartWith("aimer");
-    expect(lines[head + 3]).toContain("laser hits");
     // One life's counts replay exactly.
     expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
   });

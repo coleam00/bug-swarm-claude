@@ -15,11 +15,12 @@ function lasered() {
   return { a, p };
 }
 
-/** Fires one shot (fire held for one step), then steps until it ends; returns its end. */
+/** Fires one shot (fire held for one step), then steps until it ends; returns its fired event, its end and the kills. */
 function fireOne(a: ReturnType<typeof lasered>["a"], p: ReturnType<typeof lasered>["p"]) {
   hold(p, { fire: true });
   stepQuiet(a);
   hold(p, {});
+  const fired = a.events.shotsFired[0]!;
   const kills = [...a.events.kills];
   let ended = [...a.events.shotsEnded];
   for (let i = 0; i < 30 && ended.length === 0; i++) {
@@ -27,7 +28,7 @@ function fireOne(a: ReturnType<typeof lasered>["a"], p: ReturnType<typeof lasere
     kills.push(...a.events.kills);
     ended = [...a.events.shotsEnded];
   }
-  return { ended: ended[0]!, kills };
+  return { fired, ended: ended[0]!, kills };
 }
 
 describe("the review laser", () => {
@@ -39,7 +40,9 @@ describe("the review laser", () => {
   test(`a shot through 4 crawlers in a line kills ${LASER_PIERCE} and ends on the last of them`, () => {
     const { a, p } = lasered();
     const line = [1300, 1330, 1360, 1390].map((x) => placeBug(a, x, 1200));
-    const { ended, kills } = fireOne(a, p);
+    const { fired, ended, kills } = fireOne(a, p);
+    // The event the snapshot carries to every browser says it is a laser shot, so they draw the beam.
+    expect(fired.laser).toBe(true);
     expect(a.shots.length).toBe(0);
     expect(kills.map((k) => k.bug)).toEqual(line.slice(0, LASER_PIERCE).map((b) => b.id));
     expect(a.bugs.map((b) => b.id)).toEqual([line[3]!.id]);
@@ -67,7 +70,8 @@ describe("the review laser", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
     const line = [1300, 1330].map((x) => placeBug(a, x, 1200));
-    const { kills } = fireOne(a, p);
+    const { fired, kills } = fireOne(a, p);
+    expect(fired.laser).toBe(false);
     expect(kills.map((k) => k.bug)).toEqual([line[0]!.id]);
     expect(a.bugs.map((b) => b.id)).toEqual([line[1]!.id]);
   });
@@ -80,6 +84,7 @@ describe("the review laser", () => {
     stepQuiet(a);
     hold(p, {});
     expect(a.shots[0]!.laser).toBe(true);
+    expect(a.events.shotsFired[0]!.laser).toBe(true);
     expect(effectOf(p, "laser")).toBe(0);
     stepQuiet(a, 20);
     const line = [1300, 1330].map((x) => placeBug(a, x, 1200));

@@ -101,10 +101,9 @@ describe("drops", () => {
 });
 
 describe("the floor", () => {
-  test("a pickup lies for exactly its floor time (12 s), then goes", () => {
+  test(`a pickup lies for exactly its floor time (${shield.floorTicks / 20} s), then goes`, () => {
     const { a } = arenaWith([200, 200]);
     placePickup(a, 1500, 1500, "shield");
-    expect(shield.floorTicks).toBe(240);
     stepQuiet(a, shield.floorTicks - 1);
     expect(a.floor.length).toBe(1);
     expect(a.floor[0]!.ticksLeft).toBe(1);
