@@ -203,6 +203,10 @@ describe("fair drop-in: personal pacing", () => {
         drive();
         stepArena(a);
       }
+      // A hive queen (#85, the wave-20 one at 10 minutes) launches crawlers no budget sent: she
+      // is taken out, so only spawns are counted (a queen arrives next at wave 25, after this).
+      a.bugs = a.bugs.filter((b) => b.kind !== "queen");
+      a.queen.stage = 0;
       const p = joinPlayer(a, "new", "tabs");
       let count = 0;
       for (let t = 0; t < 600; t++) {

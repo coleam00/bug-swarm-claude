@@ -11,6 +11,7 @@ import { stepDrone } from "./pickups/drone";
 import { stepDowns } from "./downs";
 import { stepPickups } from "./pickups";
 import { FIRST_LIFE_SHIELD_TICKS, SHIELD, shieldBlocks } from "./pickups/shield";
+import { payQueen, stepQueen } from "./queen";
 import {
   ACCEL,
   DASH_COOLDOWN_TICKS,
@@ -299,7 +300,10 @@ export function createArena(seed: number): ArenaState {
   };
 }
 
-/** The arena's wave number (1 up), every WAVE_S seconds. Shown only: it never changes spawn volume. */
+/**
+ * The arena's wave number (1 up), every WAVE_S seconds. It never changes spawn volume: it unlocks
+ * bug kinds (#65) and brings a hive queen every QUEEN_EVERY_WAVES-th wave (#85, queen.ts).
+ */
 export function wave(tick: number): number {
   return 1 + Math.floor((tick * DT) / WAVE_S);
 }
@@ -348,9 +352,12 @@ export function canAct(p: Player): boolean {
 
 const spot = { x: 0, y: 0 };
 
-/** The squared distance from (x, y) to the nearest bug (Infinity with none). */
+/**
+ * The squared distance from (x, y) to the nearest bug (Infinity with none). A hive queen's marker
+ * counts as a bug (#85): a join or respawn never lands where she is about to arrive.
+ */
 function nearestBugD2(state: ArenaState, x: number, y: number): number {
-  let best = Infinity;
+  let best = state.queen.stage === 1 ? (state.queen.x - x) ** 2 + (state.queen.y - y) ** 2 : Infinity;
   for (const b of state.bugs) {
     const dx = b.x - x;
     const dy = b.y - y;
@@ -694,12 +701,15 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  *    going out, respawns at a safeSpot in a life that is no longer their first; a player who is
  *    up and holding fire loses any spawn protection left, before they fire;
  * 2. fire and heat, then a CI drone's shots, players who are up only (combat.ts, pickups/drone.ts);
+ * 3a. the hive queen (#85, queen.ts): her marker on the first tick of a QUEEN_EVERY_WAVES-th wave,
+ *    her arrival when it runs out, and her goal (the largest group) while she lives;
  * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits (a test
  *    shield blocks one: strikePlayer); the last hit puts a player down (bugs/);
  * 4. shots: travel, hits (a review laser shot pierces), kills, misses (combat.ts);
  * 5. pickups: effects count down, floor pickups age, this step's kills drop, players who are up
  *    take what they touch (a refactor bomb goes off at the take, its kills drop too and its dead
  *    bugs leave in the same step) (pickups/);
+ * 5b. a hive queen killed in this step (by a shot or a bomb) pays her reward (queen.ts payQueen);
  * 6. downs: revive progress, revives and bleed-outs (downs.ts);
  * 7. spawn protection counts down (after contact, so a join and a respawn are both protected for
  *    SPAWN_PROTECT_S of contact steps), and the tick counts.
@@ -747,9 +757,11 @@ export function stepArena(state: ArenaState): void {
     stepFire(state, p);
     stepDrone(state, p);
   }
+  stepQueen(state);
   stepBugs(state);
   stepShots(state);
   stepPickups(state);
+  payQueen(state);
   stepDowns(state);
   for (const p of state.players) if (p.alive && p.protectTicks > 0) p.protectTicks--;
   state.tick++;
