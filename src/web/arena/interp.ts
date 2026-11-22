@@ -199,11 +199,6 @@ export function newestDown(it: Interp, id: number): SnapshotDown | undefined {
   return f ? findDown(f, id) : undefined;
 }
 
-/** The newest snapshot's tick and pickups on the floor (#73), or null before any. */
-export function newestFrame(it: Interp): { tick: number; f: SnapshotPickup[] } | null {
-  return it.frames[it.frames.length - 1] ?? null;
-}
-
 /** The newest snapshot, for the ids and the minimap. */
 export function newestPlayers(it: Interp): SnapshotPlayer[] {
   return it.frames[it.frames.length - 1]?.p ?? [];

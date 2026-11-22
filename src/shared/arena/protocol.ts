@@ -117,7 +117,10 @@ export type SnapshotBug = [id: number, kind: number, x: number, y: number] | [id
  * laser shot (1) or not (0, v7). It flies per shotTravelAt.
  */
 export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number, laser: 0 | 1];
-/** A shot ended this tick: id, hit (1) or miss (0), units flown from the barrel (to 0.1). */
+/**
+ * A shot ended this tick: id, ended on a bug (1) or at its range or a wall (0; a review laser shot
+ * may have hit bugs on the way, v7), units flown from the barrel (to 0.1).
+ */
 export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
 /** A bug killed this tick: bug id, by (0: nobody scores), x, y, points, its kind's index in BUG_KINDS (v6). */
 export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number, kind: number];

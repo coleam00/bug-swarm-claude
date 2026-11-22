@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
-import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, downAt, newestDown, newestFrame, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
+import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, downAt, newestDown, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
 const row = (id: number, x: number, y: number, aim = 0, dash: 0 | 1 = 0, fx = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, dash, 0, fx];
 const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false, fx: 0 });
 
 describe("sampling", () => {
-  test("a player's pickup effects (#73) come from the snapshot it is drawn from, and the floor from the newest", () => {
+  test("a player's pickup effects (#73) come from the snapshot it is drawn from, and so does the floor", () => {
     const it = createInterp();
     pushSnapshot(it, 10, [row(1, 100, 200, 0, 0, 0)], 0, [], [], []);
     pushSnapshot(it, 11, [row(1, 110, 180, 0, 0, 3)], 50, [], [], [[4, 1, 500, 600, 200]]);
@@ -16,7 +16,7 @@ describe("sampling", () => {
     expect(o.fx).toBe(0);
     sample(it, 1, 11, o);
     expect(o.fx).toBe(3);
-    expect(newestFrame(it)).toMatchObject({ tick: 11, f: [[4, 1, 500, 600, 200]] });
+    expect(bugSpan(it, 11, { from: null, to: null, t: 0 }).from!.f).toEqual([[4, 1, 500, 600, 200]]);
   });
 
   test("halfway between two snapshots is halfway between their positions", () => {
