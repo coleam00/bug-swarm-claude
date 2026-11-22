@@ -122,8 +122,8 @@ describe("bun run skill", () => {
   });
 
   test("pickups are counted a life: the aimer takes some on 32 seeds, its shields block, its lasers hit, its bombs and drones kill; the idle takes none", () => {
-    // 32 seeds: at these drop chances a shield block is rare (the first 24 seeds hold none since the
-    // CI drone, #84, split each kind's chance over four pickups).
+    // Every first life's spawn shield (#90) blocks once, so a pickup shield's block shows as more
+    // than one block a life (mean); on 32 seeds the aimer reads 1.125.
     const r = runSkill(32, 180);
     const by = (n: string) => r.policies.find((p) => p.policy === n)!;
     const aim = by("aimer").pickups.mean;
@@ -132,7 +132,7 @@ describe("bun run skill", () => {
     expect(aim.bombKills).toBeGreaterThan(0);
     expect(aim.taken.drone).toBeGreaterThan(0);
     expect(aim.droneKills).toBeGreaterThan(0);
-    expect(aim.blocks).toBeGreaterThan(0);
+    expect(aim.blocks).toBeGreaterThan(1);
     expect(aim.total).toBe(aim.taken.shield + aim.taken.laser + aim.taken.bomb + aim.taken.drone);
     // The idle takes none; its one block a life is its first life's spawn shield (#90).
     expect(by("idle").pickups.mean).toEqual({ total: 0, taken: { shield: 0, laser: 0, bomb: 0, drone: 0 }, blocks: 1, laserHits: 0, bombKills: 0, droneKills: 0 });
