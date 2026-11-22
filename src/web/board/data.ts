@@ -30,7 +30,7 @@ export type BoardView = {
   overtook: boolean;
   /** People playing now, formatted. */
   playing: string;
-  /** The open arenas, by id. view.ts fits as many pills as the strip holds (arenaPills). */
+  /** The open arenas. view.ts fits as many pills as the strip holds (arenaPills, which orders them by id). */
   arenas: LiveArena[];
 };
 
@@ -115,7 +115,7 @@ export function boardView(prev: Board | null, next: Board): BoardView {
     leader,
     overtook: was !== null && leader !== null && leader !== was,
     playing: formatScore(next.playing),
-    arenas: [...next.arenas].sort((a, b) => a.id - b.id),
+    arenas: next.arenas,
   };
 }
 

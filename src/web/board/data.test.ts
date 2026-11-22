@@ -183,8 +183,6 @@ describe("playing now and the arena pills (#74)", () => {
   test("one pill per arena, reading 'Arena <id> · <people> · wave <wave>', by id", () => {
     expect(arenaPills([], 4)).toEqual({ pills: [], more: 0 });
     expect(arenaPills([{ id: 3, players: 14, wave: 7 }], 4)).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7" }], more: 0 });
-    const v = boardView(null, { ...board([]), arenas: [{ id: 5, players: 1, wave: 1 }, { id: 2, players: 20, wave: 4 }] });
-    expect(v.arenas.map((a) => a.id)).toEqual([2, 5]);
     expect(arenaPills([{ id: 5, players: 1, wave: 1 }, { id: 2, players: 20, wave: 4 }], 4).pills.map((p) => p.id)).toEqual([2, 5]);
   });
 
