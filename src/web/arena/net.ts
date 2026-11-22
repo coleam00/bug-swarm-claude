@@ -15,6 +15,10 @@
 // turns it into the player's connection on the same socket: the hello goes on the next turn, so
 // a `close()` in the same turn (React StrictMode unmounting at once) never joins, and it carries
 // the build of the watch's first welcome, so a page made stale by a redeploy still reloads.
+// Snapshots arrive culled and as deltas (v11, #89): each socket decodes them through its own
+// reader (view.ts), reset by every welcome, and one that cannot be decoded yet (a lost delta,
+// before the next keyframe) is skipped. `received` counts the characters that arrived (the F
+// readout's KB/s; snapshots are ASCII, so characters are bytes).
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
@@ -29,8 +33,10 @@ import {
   encodeWatch,
   parseServerMessage,
   type ErrorCode,
+  type WireMessage,
   type ServerMessage,
 } from "../../shared/arena/protocol";
+import { createSnapshotReader } from "../../shared/arena/view";
 
 export const RECONNECT_FIRST_MS = 500;
 export const RECONNECT_MAX_MS = 5000;
@@ -63,6 +69,8 @@ export type Connection = {
   /** Sends if the socket is open; otherwise drops it (inputs are worthless late). */
   send(message: string): void;
   readonly open: boolean;
+  /** Characters received on every socket of this connection so far. */
+  readonly received: number;
   /** Closes the socket and stops every timer; nothing reconnects after it. */
   close(): void;
 };
@@ -141,6 +149,7 @@ function connect(mode: Mode, url?: string): WatchConnection {
     socket.close();
   };
   let lastHeard = 0;
+  let received = 0;
   let rejoin: ReturnType<typeof setTimeout> | null = null;
 
   /** Gives up on `socket` (closed, or silent) and schedules a rejoin. */
@@ -172,6 +181,8 @@ function connect(mode: Mode, url?: string): WatchConnection {
     if (final) return;
     const socket = new WebSocket(target);
     ws = socket;
+    // A new socket starts from a keyframe after its welcome.
+    const read = createSnapshotReader();
     lastHeard = performance.now();
     socket.addEventListener("open", () => {
       // Closed before it opened: never say hello (a hello joins, and leaving saves a life).
@@ -181,7 +192,9 @@ function connect(mode: Mode, url?: string): WatchConnection {
     socket.addEventListener("message", (e) => {
       if (ws !== socket) return;
       lastHeard = performance.now();
-      const m = parseServerMessage(e.data);
+      if (typeof e.data === "string") received += e.data.length;
+      const wire: WireMessage | null = parseServerMessage(e.data);
+      const m = wire && read(wire);
       if (!m) return;
       const on = mode.play;
       if (!on) {
@@ -229,6 +242,9 @@ function connect(mode: Mode, url?: string): WatchConnection {
     },
     get open() {
       return ws !== null && ws.readyState === WebSocket.OPEN;
+    },
+    get received() {
+      return received;
     },
     close() {
       final = true;

@@ -9,11 +9,13 @@ import {
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
   MAX_PLAYERS_PER_ARENA,
+  MINIMAP_CELL,
   PROTOCOL_VERSION,
   TICK_MS,
   WAVE_S,
 } from "../../shared/arena/constants";
-import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
+import { parseServerMessage, type ServerMessage, type Snapshot, type WireSnapshot } from "../../shared/arena/protocol";
+import { createSnapshotReader } from "../../shared/arena/view";
 import type { Input } from "../../shared/arena/sim";
 import { DOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
 import { placeBug } from "../../shared/arena/testkit";
@@ -53,9 +55,28 @@ function setup(saveLife?: (r: LifeRecord) => void, fillTo = 0) {
   return { rooms, timers, tick };
 }
 
+/**
+ * A socket's side: every message, snapshots decoded as a browser decodes them (view.ts), and the
+ * raw wire snapshots. `drop` makes the next sends fail, as a socket Bun drops a frame on.
+ */
 function client() {
   const got: ServerMessage[] = [];
-  return { got, send: (m: string) => void got.push(JSON.parse(m) as ServerMessage) };
+  const wire: WireSnapshot[] = [];
+  const read = createSnapshotReader();
+  const c = {
+    got,
+    wire,
+    drop: false,
+    send: (m: string) => {
+      if (c.drop) return false;
+      const w = parseServerMessage(m)!;
+      if (w.t === "snapshot") wire.push(w);
+      const decoded = read(w);
+      if (decoded) got.push(decoded);
+      return true;
+    },
+  };
+  return c;
 }
 
 const input = (seq: number, mx = 1, my = 0): Input => ({ seq, mx, my, aim: 0, fire: false, dash: false });
@@ -126,8 +147,48 @@ describe("ticking", () => {
     const sb = snapshots(b.got).at(-1)!;
     expect([sa.tick, sa.ack, sb.ack]).toEqual([1, 7, 0]);
     expect(sa.p.map((p) => p[0])).toEqual([ja.entity, jb.entity]);
-    expect(sa.p).toEqual(sb.p);
-    expect(sa.p[0]![3]).toBe(120); // Ada's vx after one step of mx = 1
+    expect(sb.p.map((p) => p[0])).toEqual([ja.entity, jb.entity]);
+    const ada = rooms.room(ja.room)!.state.players[0]!;
+    // Ada's own row is exact, with her velocity (vx 120 after one step of mx = 1); Bob sees her to 0.1, with none (v11).
+    expect(sa.p[0]!.slice(1, 5)).toEqual([Math.round(ada.x * 100) / 100, Math.round(ada.y * 100) / 100, 120, 0]);
+    expect(sb.p[0]!.slice(1, 5)).toEqual([Math.round(ada.x * 10) / 10, Math.round(ada.y * 10) / 10, 0, 0]);
+    expect(sa.me).toMatchObject({ x: sa.p[0]![1], vx: 120 });
+  });
+
+  test("a snapshot the socket dropped makes that member's next one a keyframe; the others carry on with deltas", () => {
+    const { rooms, tick } = setup();
+    const a = client();
+    const b = client();
+    rooms.join("Ada", "tabs", INFO, a.send);
+    rooms.join("Bob", "spaces", INFO, b.send);
+    tick(3);
+    a.drop = true;
+    tick();
+    a.drop = false;
+    tick();
+    expect(a.wire.map((w) => w.key === 1)).toEqual([true, false, false, true]);
+    expect(b.wire.map((w) => w.key === 1)).toEqual([true, false, false, false, false]);
+    // Ada decodes every snapshot she got: the keyframe resynced her.
+    expect(snapshots(a.got).map((s) => s.tick)).toEqual([1, 2, 3, 5]);
+  });
+
+  test("a bug far from a player is not in their snapshot, but is on their minimap; a player near it gets it", () => {
+    const { rooms, tick } = setup();
+    const a = client();
+    const b = client();
+    const ja = rooms.join("Ada", "tabs", INFO, a.send);
+    const jb = rooms.join("Bob", "spaces", INFO, b.send);
+    const state = rooms.room(ja.room)!.state;
+    const [ada, bob] = [state.players[0]!, state.players[1]!];
+    [ada.x, ada.y, bob.x, bob.y] = [500, 500, 1900, 1900];
+    const bug = placeBug(state, 1950, 1950);
+    tick();
+    const sa = snapshots(a.got).at(-1)!;
+    const sb = snapshots(b.got).at(-1)!;
+    expect(sa.b.map((r) => r[0])).not.toContain(bug.id);
+    expect(sa.m).toEqual([Math.round(bug.x / MINIMAP_CELL), Math.round(bug.y / MINIMAP_CELL)]);
+    expect(sb.b.map((r) => r[0])).toContain(bug.id);
+    expect(sa.p.map((p) => p[0])).toEqual([ja.entity, jb.entity]);
   });
 
   test("one input per tick, in order; old and repeated sequence numbers are dropped", () => {
@@ -373,9 +434,9 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.dashCooldown = 27;
   p.effect.fill(0);
   p.effect[1] = 37;
-  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[] };
+  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[], x: 0, y: 0, vx: 0, vy: 0 };
   const fx = me.fx;
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0] });
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy });
   // The effects are copied into the same array every snapshot.
   expect(me.fx).toBe(fx);
   p.lockTicks = 0;
@@ -537,12 +598,15 @@ describe("watchers (#79, the start screen)", () => {
   function rawClient() {
     const raw: string[] = [];
     const got: ServerMessage[] = [];
+    const read = createSnapshotReader();
     return {
       raw,
       got,
       send: (m: string) => {
         raw.push(m);
-        got.push(JSON.parse(m) as ServerMessage);
+        const decoded = read(parseServerMessage(m)!);
+        if (decoded) got.push(decoded);
+        return true;
       },
     };
   }
@@ -590,6 +654,24 @@ describe("watchers (#79, the start screen)", () => {
     // Ada saw Bob join and her snapshots, never a watcher.
     expect(a.got.filter((m) => m.t === "event").map((m) => (m as { name?: string }).name)).toEqual(["Bob"]);
     expect(rooms.stats()).toMatchObject({ players: 2, watchers: 1, arenas: [{ id: 1, players: 2, watchers: 1 }] });
+  });
+
+  test("a watcher arriving mid-stream gets a keyframe while the others get the shared delta; both decode the same arena (#89)", () => {
+    const { rooms, tick } = setup();
+    rooms.join("Ada", "tabs", INFO, client().send);
+    const w1 = rawClient();
+    rooms.watch(w1.send);
+    tick(3);
+    const w2 = rawClient();
+    rooms.watch(w2.send);
+    tick();
+    const keyOf = (raw: string) => (JSON.parse(raw) as WireSnapshot).key === 1;
+    expect(w1.raw.filter((r) => r.startsWith('{"t":"snapshot"')).map(keyOf)).toEqual([true, false, false, false]);
+    expect(w2.raw.map(keyOf)).toEqual([true]);
+    expect(snapshots(w2.got).at(-1)).toEqual(snapshots(w1.got).at(-1)!);
+    tick();
+    // From then on they share one stream.
+    expect(w2.raw.at(-1)).toBe(w1.raw.at(-1)!);
   });
 
   test("a watch lands in the arena with the most people; past the cap it is refused until one leaves", () => {

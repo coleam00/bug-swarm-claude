@@ -18,6 +18,8 @@
 // `you: 0` and the arena's events and snapshots, takes no player slot, and its inputs are dropped.
 // Over the watcher cap it gets `error full` and is closed. A hello on a watching socket stops the
 // watch and joins as a player on the same socket, checked exactly like a first hello.
+// A frame Bun drops (send returns 0) is reported back to the room, which makes that socket's next
+// snapshot a keyframe (view.ts); -1 (queued under backpressure) is delivered late, not lost.
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
@@ -146,7 +148,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     // A watching socket becomes a player: no more watcher frames after the welcome below.
     if (ws.data.watcher !== null) rooms.unwatch(ws.data.watcher);
     ws.data.watcher = null;
-    const entered = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => void ws.send(msg));
+    const entered = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => ws.send(msg) !== 0);
     ws.data.room = entered.room;
     ws.data.entity = entered.entity;
     ws.data.name = name.name;
@@ -157,7 +159,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
 
   const watch = (ws: ServerWebSocket<SocketData>, v: number) => {
     if (v !== PROTOCOL_VERSION) return refuse(ws, ERROR_VERSION);
-    const watching = rooms.watch((msg) => void ws.send(msg));
+    const watching = rooms.watch((msg) => ws.send(msg) !== 0);
     if (!watching) return refuse(ws, ERROR_FULL);
     if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
     ws.data.helloTimer = null;

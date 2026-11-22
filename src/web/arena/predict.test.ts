@@ -2,7 +2,6 @@
 // using the same shared sim. The server here is the real shared simulation.
 import { describe, expect, test } from "bun:test";
 import { DASH_COOLDOWN_TICKS, PLAYER_RADIUS } from "../../shared/arena/constants";
-import { encodeSnapshotPlayers } from "../../shared/arena/protocol";
 import { ROBOT_RADIUS } from "../game/config";
 import { clampInput, createArena, joinPlayer, stepArena, type Input, type Player } from "../../shared/arena/sim";
 import { MAX_PENDING, createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor, SNAP_DISTANCE } from "./predict";
@@ -18,10 +17,10 @@ function inputs(n: number): Input[] {
   return out;
 }
 
-/** The player as a snapshot carries it: quantized to 0.01. */
+/** Your own robot as your snapshot carries it: `me`'s x, y, vx and vy, quantized to 0.01 (view.ts). */
 function quantized(p: Player): [number, number, number, number] {
-  const row = (JSON.parse(encodeSnapshotPlayers([p])) as number[][])[0]!;
-  return [row[1]!, row[2]!, row[3]!, row[4]!];
+  const q2 = (v: number) => Math.round(v * 100) / 100;
+  return [q2(p.x), q2(p.y), q2(p.vx), q2(p.vy)];
 }
 
 describe("prediction", () => {

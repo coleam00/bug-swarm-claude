@@ -7,7 +7,8 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { DEMO_WARM_TICKS, HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
 import { placeBug, placePickup } from "../../shared/arena/testkit";
-import { encodeHello, encodeInput, encodeWatch, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
+import { encodeHello, encodeInput, encodeWatch, parseServerMessage, type ServerMessage, type Snapshot, type Welcome, type WireSnapshot } from "../../shared/arena/protocol";
+import { createSnapshotReader } from "../../shared/arena/view";
 import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
 import { TOP_CACHE_MS } from "../app";
 import { startServer, type RunningServer, type ServerOptions } from "../serve";
@@ -43,7 +44,12 @@ afterEach(async () => {
 });
 
 type Client = {
+  /** Every message, snapshots decoded as a browser decodes them (view.ts). */
   got: ServerMessage[];
+  /** The snapshots as they came over the wire. */
+  wire: WireSnapshot[];
+  /** For each welcome, how many wire snapshots had come before it. */
+  welcomes: number[];
   closed: Promise<number>;
   isClosed: () => boolean;
   send: (m: string | Uint8Array) => void;
@@ -54,6 +60,9 @@ type Client = {
 async function connect(): Promise<Client> {
   const ws = new WebSocket(srv.url.replace("http", "ws") + "/ws");
   const got: ServerMessage[] = [];
+  const wire: WireSnapshot[] = [];
+  const welcomes: number[] = [];
+  const read = createSnapshotReader();
   let closedFlag = false;
   const closed = new Promise<number>((resolve) =>
     ws.addEventListener("close", (e) => {
@@ -61,13 +70,21 @@ async function connect(): Promise<Client> {
       resolve(e.code);
     }),
   );
-  ws.addEventListener("message", (e) => got.push(JSON.parse(String(e.data)) as ServerMessage));
+  ws.addEventListener("message", (e) => {
+    const w = parseServerMessage(String(e.data))!;
+    if (w.t === "snapshot") wire.push(w);
+    if (w.t === "welcome") welcomes.push(wire.length);
+    const m = read(w);
+    if (m) got.push(m);
+  });
   await new Promise<void>((resolve, reject) => {
     ws.addEventListener("open", () => resolve());
     ws.addEventListener("error", () => reject(new Error("connect failed")));
   });
   const client: Client = {
     got,
+    wire,
+    welcomes,
     closed,
     isClosed: () => closedFlag,
     send: (m) => ws.send(m),
@@ -624,6 +641,15 @@ test(
     await c.waitFor("Ada's own snapshot", () => c.got.some((m) => m.t === "snapshot" && m.me.al === 1));
     expect(srv.rooms.stats()).toMatchObject({ players: 1, watchers: 0, arenas: [{ id: played.arena, players: 1, watchers: 0 }] });
     expect(srv.server.pendingWebSockets).toBe(1);
+    // v11 (#89): after each welcome, the watch's and the player's, the first snapshot is a keyframe
+    // (the player's names her); every other is a delta on the snapshot before it.
+    await c.waitFor("a few more snapshots", () => c.wire.length > c.welcomes[1]! + 3);
+    expect(c.welcomes).toHaveLength(2);
+    for (const at of c.welcomes) expect(c.wire[at]!.key).toBe(1);
+    expect(c.wire[c.welcomes[1]!]!.you).toBe(played.you);
+    for (let i = 1; i < c.wire.length; i++) if (c.wire[i]!.key !== 1) expect(c.wire[i]!.base).toBe(c.wire[i - 1]!.tick);
+    // ...and deltas do come: a socket layer that reported every send as dropped would send only keyframes.
+    expect(c.wire.slice(c.welcomes[1]! + 1).some((w) => w.key !== 1)).toBe(true);
   },
   TIMEOUT,
 );
