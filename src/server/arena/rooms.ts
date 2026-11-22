@@ -54,6 +54,8 @@ export type RoomsOptions = {
   maxWatchers?: number;
   /** Bots a watched arena with no people runs (default DEMO_BOTS; 0: none). */
   demoTo?: number;
+  /** Each new arena's first tick (default 0; BUG_SWARM_START_WAVE, a debug aid, #85). */
+  startTick?: number;
 };
 
 /** `players` counts people only; `bots` the server's fill bots; `watchers` the watching sockets. */
@@ -95,6 +97,7 @@ export class Rooms {
   private readonly fillTo: number;
   private readonly maxWatchers: number;
   private readonly demoTo: number;
+  private readonly startTick: number;
   /** Every watcher: the arena it watches and its socket's send. */
   private readonly watchers = new Map<number, { room: number; send: Send }>();
   private nextWatcher = 1;
@@ -110,6 +113,7 @@ export class Rooms {
     this.fillTo = opts.fillTo ?? FILL_TARGET;
     this.maxWatchers = opts.maxWatchers ?? MAX_WATCHERS;
     this.demoTo = opts.demoTo ?? DEMO_BOTS;
+    this.startTick = opts.startTick ?? 0;
   }
 
   private welcome(room: Room, you: number): Welcome {
@@ -276,7 +280,7 @@ export class Rooms {
   /** Opens a new arena and starts its tick timer. */
   private open(): Room {
     const id = this.nextId++;
-    const room = new Room(id, arenaSeed(id), this.now(), this.ticks, this.clock, this.saveLife, this.fillTo, this.demoTo);
+    const room = new Room(id, arenaSeed(id), this.now(), this.ticks, this.clock, this.saveLife, this.fillTo, this.demoTo, this.startTick);
     const stop = this.startTimer(() => room.advance(this.now()), TICK_MS);
     this.rooms.set(id, { room, stop });
     return room;

@@ -73,8 +73,8 @@ export const INPUT_STALE_TICKS = 10;
 export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
-/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's style 2, a CI drone's. */
-export const PROTOCOL_VERSION = 10;
+/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's style 2, a CI drone's; v11 (#85): the hive queen's `q` and `queen` event. */
+export const PROTOCOL_VERSION = 11;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 

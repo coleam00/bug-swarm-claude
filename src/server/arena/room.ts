@@ -34,6 +34,7 @@ import {
   LEAVE,
   OVER,
   PICKUP,
+  QUEEN,
   REVIVE,
   encodeSnapshot,
   encodeSnapshotShared,
@@ -150,8 +151,10 @@ export class Room {
     private readonly fillTo = 0,
     /** Bots an arena with watchers and no people runs; 0: none. */
     private readonly demoTo = 0,
+    /** The arena's first tick (0; BUG_SWARM_START_WAVE starts it later, a debug aid, #85). */
+    startTick = 0,
   ) {
-    this.state = createArena(seed);
+    this.state = createArena(seed, startTick);
     this.nextTickAt = startMs + TICK_MS;
   }
 
@@ -380,6 +383,8 @@ export class Room {
     for (const r of ev.revives) this.broadcast({ t: EVENT, kind: REVIVE, id: r.id, by: r.by, points: r.points });
     for (const x of ev.pickups) this.broadcast({ t: EVENT, kind: PICKUP, id: x.player, pickup: PICKUP_IDS.indexOf(x.kind) });
     for (const id of ev.blocks) this.broadcast({ t: EVENT, kind: BLOCK, id });
+    // A hive queen killed (#85): who dealt her the most, and every reward (already on their scores).
+    if (ev.queenDown) this.broadcast({ t: EVENT, kind: QUEEN, id: ev.queenDown.top, paid: ev.queenDown.paid });
     for (const life of this.state.events.livesEnded) {
       // A fill bot is not a member, so its lives end here unsaved and unannounced.
       const m = this.members.get(life.id);

@@ -280,9 +280,13 @@ export function noInput(seq = 0): Input {
   return { seq, mx: 0, my: 0, aim: 0, fire: false, dash: false };
 }
 
-export function createArena(seed: number): ArenaState {
+/**
+ * A new arena seeded `seed`. `startTick` (0 unless the server's BUG_SWARM_START_WAVE asks, a debug
+ * aid for evidence, #85) is where its clock starts, so its waves come sooner.
+ */
+export function createArena(seed: number, startTick = 0): ArenaState {
   return {
-    tick: 0,
+    tick: startTick,
     rng: createRng(seed),
     players: [],
     nextId: 1,

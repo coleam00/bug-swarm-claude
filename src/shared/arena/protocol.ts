@@ -17,13 +17,14 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 /**
  * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
  * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
- * index in PICKUP_IDS) and a test shield blocking a hit (whose; both v7). Hits, kills and shots
- * travel in snapshots, and so do who is down now (`d`) and the pickups on the floor (`f`), for a
- * late joiner.
+ * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v11,
+ * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points).
+ * Hits, kills and shots travel in snapshots, and so do who is down now (`d`), the pickups on the
+ * floor (`f`) and the hive queen's marker or health (`q`), for a late joiner.
  */
-export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
@@ -147,6 +148,13 @@ export type SnapshotKill = [bug: number, by: number, x: number, y: number, point
 export type SnapshotDown = [id: number, secondsLeft: number, reviver: number, progress: number];
 /** A pickup on the floor (v7, #73): id, its index in PICKUP_IDS, x, y (to 0.1), ticks before it goes. */
 export type SnapshotPickup = [id: number, pickup: number, x: number, y: number, ticksLeft: number];
+/**
+ * The hive queen (v11, #85): empty with none; her marker while she arrives (stage 0: x, y, ticks
+ * before she appears); or her alive (stage 1: her bug id, x, y, hit points left and at the start).
+ * Her position travels here as well as in her bug row, so her arrow, minimap mark and health bar
+ * never depend on which bugs a snapshot carries.
+ */
+export type SnapshotQueen = [] | [stage: 0, x: number, y: number, ticksLeft: number] | [stage: 1, id: number, x: number, y: number, hp: number, maxHp: number];
 
 /** Your own numbers, in your snapshots only. */
 export type SnapshotMe = {
@@ -178,7 +186,7 @@ export type Snapshot = {
   ack: number;
   /** Every player in the arena (at most 20), so the minimap shows everyone. */
   p: SnapshotPlayer[];
-  /** Every bug in the arena (at most MAX_BUGS_PER_ARENA). */
+  /** Every bug in the arena (at most MAX_BUGS_PER_ARENA, plus a hive queen, #85). */
   b: SnapshotBug[];
   /** Shots fired, shots ended and bugs killed in this tick. */
   s: SnapshotShot[];
@@ -188,6 +196,8 @@ export type Snapshot = {
   d: SnapshotDown[];
   /** Every pickup on the floor now (at most MAX_PICKUPS_PER_ARENA; v7). */
   f: SnapshotPickup[];
+  /** The hive queen's marker or health (v11, #85). */
+  q: SnapshotQueen;
   /** The arena's wave. */
   w: number;
   me: SnapshotMe;
@@ -205,6 +215,8 @@ export type ArenaEvent = {
   points?: number;
   /** With "pickup": the pickup's index in PICKUP_IDS (v7). */
   pickup?: number;
+  /** With "queen" (v11): each rewarded player's id and points. */
+  paid?: [id: number, points: number][];
   /** With "over": the life's score, kills and length. */
   score?: number;
   kills?: number;
@@ -337,8 +349,10 @@ export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
 export type SharedSource = {
   tick: number;
   players: readonly PlayerRow[];
-  bugs: readonly { id: number; kind: string; x: number; y: number; phase: number; phaseTicks: number; dx: number; dy: number }[];
+  bugs: readonly { id: number; kind: string; x: number; y: number; hp: number; phase: number; phaseTicks: number; dx: number; dy: number }[];
   floor: readonly { id: number; kind: string; x: number; y: number; ticksLeft: number }[];
+  /** The hive queen (#85; sim.ts QueenState): stage 0 none, 1 her marker, 2 alive as bug `bugId`. */
+  queen: { stage: number; x: number; y: number; ticksLeft: number; bugId: number; maxHp: number };
   events: {
     shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number; laser: boolean; drone: boolean }[];
     shotsEnded: readonly { id: number; hit: boolean; blocked: boolean; travelled: number }[];
@@ -348,7 +362,7 @@ export type SharedSource = {
 
 /**
  * The part of a snapshot every socket in an arena shares, built once per tick: `"p":...,"b":...,
- * "s":...,"e":...,"k":...,"d":...,"f":...,"w":...` (no braces). `kinds` is BUG_KINDS and `pickups`
+ * "s":...,"e":...,"k":...,"d":...,"f":...,"q":...,"w":...` (no braces). `kinds` is BUG_KINDS and `pickups`
  * PICKUP_IDS, passed in so this file imports no simulation; `wave` is the arena's wave. `src.tick` is the tick after the step
  * (the snapshot's tick), so a player who went down in the step just run shows DOWN_S less one
  * tick left.
@@ -400,7 +414,16 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
     f += `[${x.id},${pickups.indexOf(x.kind)},${q1(x.x)},${q1(x.y)},${x.ticksLeft}]`;
   }
   f += "]";
-  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"d":${d},"f":${f},"w":${wave}`;
+  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"d":${d},"f":${f},"q":${encodeQueen(src)},"w":${wave}`;
+}
+
+/** The hive queen's `q` (SnapshotQueen, v11): `[]`, `[0,x,y,ticksLeft]` or `[1,id,x,y,hp,maxHp]`. */
+function encodeQueen(src: SharedSource): string {
+  const q = src.queen;
+  if (q.stage === 1) return `[0,${q1(q.x)},${q1(q.y)},${q.ticksLeft}]`;
+  if (q.stage !== 2) return "[]";
+  for (const g of src.bugs) if (g.id === q.bugId) return `[1,${g.id},${q1(g.x)},${q1(g.y)},${g.hp},${q.maxHp}]`;
+  return "[]";
 }
 
 /** One socket's snapshot: its own ack and numbers around the shared part. */
