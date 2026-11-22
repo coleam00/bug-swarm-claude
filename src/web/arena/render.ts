@@ -301,6 +301,8 @@ export type Scene = {
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
 
 const scoreFormat = new Intl.NumberFormat("en-US");
+/** The glob's index in BUG_KINDS (#72): left off the minimap. */
+const GLOB_KIND = BUG_KINDS.indexOf("glob");
 
 export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const canvas = ctx.canvas;
@@ -324,6 +326,10 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     top: 0,
     right: 0,
     bottom: 0,
+    screenLeft: 0,
+    screenTop: 0,
+    screenRight: 0,
+    screenBottom: 0,
     frames: [],
     glow: document.createElement("canvas"),
   };
@@ -356,6 +362,10 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let vt = 0;
   let vr = 0;
   let vb = 0;
+  let sl = 0;
+  let st = 0;
+  let sr = 0;
+  let sb = 0;
   const inView = (x: number, y: number) => x > vl && x < vr && y > vt && y < vb;
 
   const downText = (sec: number) => {
@@ -646,6 +656,10 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     f.top = vt;
     f.right = vr;
     f.bottom = vb;
+    f.screenLeft = sl;
+    f.screenTop = st;
+    f.screenRight = sr;
+    f.screenBottom = sb;
     for (let i = 0; i < b.count; i++) {
       const kind = b.kind[i]!;
       const d = BUG_DRAW[BUG_KINDS[kind] as BugKind];
@@ -953,6 +967,11 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     vt = top - margin;
     vr = left + cam.w + margin;
     vb = top + cam.h + margin;
+    // The screen inside the safe area, world units (cam.scale is CSS px per unit).
+    sl = left + safe.left / cam.scale;
+    st = top + safe.top / cam.scale;
+    sr = left + cam.w - safe.right / cam.scale;
+    sb = top + cam.h - safe.bottom / cam.scale;
 
     drawFloor(sc.floor, t);
     drawBugs(sc.bugs, t, k, ox, oy);
@@ -1089,6 +1108,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fillStyle = MINIMAP_BUG;
     const bugs = sc.bugs;
     for (let i = 0; i < bugs.count; i++) {
+      // A glob is a shot in flight, not a bug in the swarm: no dot.
+      if (bugs.kind[i] === GLOB_KIND) continue;
       toMinimap(m, bugs.x[i]!, bugs.y[i]!, dot);
       ctx.fillRect(dot.x - 1, dot.y - 1, 2, 2);
     }

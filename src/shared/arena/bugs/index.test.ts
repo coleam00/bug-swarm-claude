@@ -211,7 +211,9 @@ describe("fair drop-in: personal pacing", () => {
         p.invulnTicks = 1e9;
         const before = a.nextBugId;
         stepArena(a);
-        count += a.nextBugId - before;
+        // Spawns only: a glob a spitter launches (#72) takes an id but is not sent by anyone's budget.
+        for (const b of a.bugs) if (b.id >= before && b.kind !== "glob") count++;
+        for (const k of a.events.kills) if (k.bug >= before && k.kind !== "glob") count++;
       }
       expect(p.alive).toBe(true);
       return count;
