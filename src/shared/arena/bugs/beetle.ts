@@ -16,8 +16,12 @@ import { DT, WORLD_H, WORLD_W } from "../constants";
 import type { Bug, Player } from "../sim";
 import type { BugKindDef } from "./kind";
 
-/** Collision radius, units: a crawler's 12, the most any kind has (MAX_BUG_RADIUS; a larger one moves every spawn and view check, #72). It is drawn much bigger (draw/bugs/beetle.ts). */
-export const BEETLE_RADIUS = 12;
+/**
+ * Collision radius, units: big, against a crawler's 12, and drawn on the circle shots meet
+ * (draw/bugs/beetle.ts). The largest kind's, so it sets MAX_BUG_RADIUS and so every spawn clamp and
+ * view check; at 17 all three `bun run skill` gates still pass on 240 and 480 late seeds.
+ */
+export const BEETLE_RADIUS = 17;
 /** Its walking speed with its target dead ahead, units per second. */
 export const BEETLE_SPEED = 80;
 /** How fast it turns toward its target, radians per second, and per tick. */

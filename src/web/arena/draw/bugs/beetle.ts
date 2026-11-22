@@ -15,8 +15,8 @@ import { drawBody } from "./body";
 import type { BugDraw, BugFrame } from "./kind";
 
 const look: BugLook = {
-  // Its collision radius: with the sprite's head at 1.23x, the body stays inside the hit circle.
-  radius: BEETLE_RADIUS,
+  // Sized so the sprite's head (1.23x this, sprites.ts) reaches the hit circle and no further.
+  radius: (BEETLE_RADIUS + SHOT_RADIUS) / 1.23,
   shell: "#4b6a8a",
   shine: "#9fb8d0",
   head: "#1e2a38",
