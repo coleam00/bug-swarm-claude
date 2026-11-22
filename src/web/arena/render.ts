@@ -249,8 +249,9 @@ const QUEEN_BAR_EDGE = "rgba(248, 250, 252, 0.35)";
 /** The arrow to her: larger than a downed player's, in her colour, CSS px. */
 const QUEEN_ARROW_LENGTH = 34;
 const QUEEN_ARROW_WIDTH = 28;
-/** Her minimap mark, CSS px. */
-const QUEEN_MAP_DOT = 4.5;
+/** Her minimap mark, CSS px: at least twice a player dot (MINIMAP_DOT), ringed in white while she lives. */
+const QUEEN_MAP_DOT = 6;
+const QUEEN_MAP_RING = "#ffffff";
 const BANNER_FONT = "bold 30px system-ui, sans-serif";
 const BANNER_SUB_FONT = "bold 18px system-ui, sans-serif";
 const BANNER_COMING = "The hive queen is coming";
@@ -1458,15 +1459,23 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const alive = q[0] === 1;
       if (q[0] === 1) toMinimap(m, q[2], q[3], dot);
       else if (q[0] === 0) toMinimap(m, q[1], q[2], dot);
-      const r = QUEEN_MAP_DOT * (1 + 0.25 * Math.sin(t * TAU * 1.5));
+      // Pulses up from QUEEN_MAP_DOT, never down: at its smallest twice a player dot's size.
+      const r = QUEEN_MAP_DOT * (1 + 0.2 * (0.5 + 0.5 * Math.sin(t * TAU * 1.5)));
       ctx.beginPath();
       ctx.arc(dot.x, dot.y, r, 0, TAU);
       ctx.lineWidth = 2;
-      ctx.strokeStyle = alive ? TEXT_STROKE : QUEEN_COLOUR;
       if (alive) {
+        // Alive: an amber centre in a white ring in an amber ring, a shape no player or bug dot has.
         ctx.fillStyle = QUEEN_COLOUR;
         ctx.fill();
-      }
+        ctx.strokeStyle = QUEEN_MAP_RING;
+        ctx.stroke();
+        // And a second, amber ring outside it, so she never reads as your own white-ringed dot.
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, r + 3, 0, TAU);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = QUEEN_COLOUR;
+      } else ctx.strokeStyle = QUEEN_COLOUR;
       ctx.stroke();
     }
 

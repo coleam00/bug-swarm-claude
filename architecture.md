@@ -247,7 +247,7 @@ The fourth developer tool, #78's other half. It drops by #78's rule: each kind's
     - her marker, a pulsing ring on the floor with a countdown arc;
     - her health bar, labelled "Hive queen", under the HUD line and the pickup icons, from the safe left edge to 12 px short of the minimap and at most 420 px wide ("streak lost" and the F readout move down for it);
     - an arrow at the screen's edge whenever she is off screen, at any distance (`help.ts` `edgeArrow` with no range), larger than a downed player's and in her colour, held below the minimap's bottom so it never covers the HUD line, her bar or the minimap;
-    - a pulsing mark on the minimap (a ring while her marker shows);
+    - a pulsing mark on the minimap: an amber dot at least twice a player dot's size in a white ring and an amber ring, a shape no player, own-player or swarm dot has (an amber ring alone while her marker shows);
     - the banners, bold in the upper third: "The hive queen is coming" while her marker shows, and "Queen down!" with "<name> dealt the most" for 3 s after her kill. The name is canvas text from the roster. A banner sits under the minimap only when its text reaches the minimap's columns, so on a landscape phone it stays above your robot.
   - Her `queen` event bursts where she died and floats each reward over its robot. The start screen draws her marker and body only.
 - **Debug:** `BUG_SWARM_START_WAVE=<n>` (a whole number of at least 2; off by default and ignored otherwise; `serve.ts` `startTickFrom`) makes each new arena open 10 s before wave n (`createArena(seed, startTick)`). It is for evidence only, not a secret, and not in `.env.example`.
