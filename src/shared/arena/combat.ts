@@ -101,6 +101,17 @@ export function segmentHit(x: number, y: number, dx: number, dy: number, len: nu
   return t <= len ? t : -1;
 }
 
+/**
+ * Whether a shot travelling along unit (sdx, sdy) is blocked by a front shell facing unit (fx, fy)
+ * whose half-width has cosine `cosHalf` (#80, kind.ts `shell`): the shot comes at the shell's face
+ * within that half-width, -(f . s) >= cosHalf. Read from the shot's direction, not where it lands,
+ * so the rule is the same whether a shot starts inside the bug or grazes its edge, and a policy can
+ * apply it from where it stands. A zero facing (a bug not yet turned) blocks nothing.
+ */
+export function shellBlocks(fx: number, fy: number, sdx: number, sdy: number, cosHalf: number): boolean {
+  return fx * fx + fy * fy > 0 && -(fx * sdx + fy * sdy) >= cosHalf;
+}
+
 /** The player credited for `s`: its owner, still in the life that fired it; else null. */
 function creditFor(state: ArenaState, s: Shot): Player | null {
   for (const p of state.players) if (p.id === s.owner) return p.alive && p.lifeStartTick === s.life ? p : null;
@@ -116,8 +127,11 @@ function creditFor(state: ArenaState, s: Shot): Player | null {
  * shot that reaches SHOT_RANGE or a wall ends there (`hit` false: it did not end on a bug, so the
  * browser draws no spark), resetting its owner's streak only if it hit nothing (a laser shot that
  * hit fewer bugs than its pierce keeps the streak). A CI drone's shot (#84, pickups/drone.ts) never
- * touches its owner's streak, hit or miss, and its kill scores the kind's points at x1 (it goes in
- * events.droneKills too). Shots never touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
+ * touches its owner's streak, hit or miss (a shell block included), and its kill scores the kind's
+ * points at x1 (it goes in events.droneKills too). Shots never touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
+ * A bug with a shell (#80, kind.ts `shell`) hit from within it (shellBlocks) loses nothing: the shot
+ * ends there (`blocked`; a laser shot too, its earlier hits in this step standing, and it is not a
+ * laser hit), and the owner's streak still grows, so aiming at a shell is not punished twice.
  */
 export function stepShots(state: ArenaState): void {
   const ev = state.events;
@@ -141,6 +155,18 @@ export function stepShots(state: ArenaState): void {
         }
       }
       if (!hitBug) break;
+      const shell = bugDef(hitBug.kind).shell;
+      if (shell && shellBlocks(hitBug.dx, hitBug.dy, s.dx, s.dy, shell.cosHalf)) {
+        if (owner) {
+          if (!s.drone) owner.streak++;
+          ev.shellBlocks.push(owner.id);
+        }
+        s.hits++;
+        s.pierce = 0;
+        ev.shotsEnded.push({ id: s.id, hit: true, blocked: true, travelled: s.travelled + best });
+        ended = true;
+        break;
+      }
       hitBug.hp--;
       if (owner) {
         if (!s.drone) owner.streak++;
@@ -160,7 +186,7 @@ export function stepShots(state: ArenaState): void {
       s.hits++;
       s.pierce--;
       if (s.pierce === 0) {
-        ev.shotsEnded.push({ id: s.id, hit: true, travelled: s.travelled + best });
+        ev.shotsEnded.push({ id: s.id, hit: true, blocked: false, travelled: s.travelled + best });
         ended = true;
       }
     }
@@ -170,7 +196,7 @@ export function stepShots(state: ArenaState): void {
     s.travelled += len;
     if (s.travelled >= SHOT_RANGE - 1e-9 || s.x < 0 || s.x > WORLD_W || s.y < 0 || s.y > WORLD_H) {
       if (owner && s.hits === 0 && !s.drone) owner.streak = 0;
-      ev.shotsEnded.push({ id: s.id, hit: false, travelled: s.travelled });
+      ev.shotsEnded.push({ id: s.id, hit: false, blocked: false, travelled: s.travelled });
       continue;
     }
     state.shots[keep++] = s;

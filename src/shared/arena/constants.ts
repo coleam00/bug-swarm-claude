@@ -73,8 +73,8 @@ export const INPUT_STALE_TICKS = 10;
 export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
-/** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 9;
+/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's style 2, a CI drone's. */
+export const PROTOCOL_VERSION = 10;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
@@ -133,7 +133,7 @@ export const HEAT_WARN = 0.85;
  * Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). The first
  * is the base kind: a spawn is the base kind unless the mix picks another (bugs/index.ts).
  */
-export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob"] as const;
+export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
 
 // ---- Pickups (#73). Every pickup id in PICKUP_IDS; each pickup's numbers in its own file in pickups/. ----

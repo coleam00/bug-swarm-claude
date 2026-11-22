@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { crawler } from "./bugs/crawler";
 import { BARREL, DOWN_TICKS, DT, HEAT_LOCK_S, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
-import { mult, segmentHit, shotTravelAt } from "./combat";
+import { mult, segmentHit, shellBlocks, shotTravelAt } from "./combat";
 import { leavePlayer } from "./sim";
 import { arenaWith, hold, placeBug, stepQuiet } from "./testkit";
 
@@ -63,7 +63,7 @@ describe("shots", () => {
     placeBug(a, 1200 + BARREL + 14, 1200);
     hold(p, { fire: true });
     stepQuiet(a);
-    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: true, travelled: 0 }]);
+    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: true, blocked: false, travelled: 0 }]);
     expect(a.bugs).toEqual([]);
   });
 
@@ -82,7 +82,7 @@ describe("shots", () => {
     }
     expect(p.streak).toBe(7);
     stepQuiet(a);
-    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: false, travelled: SHOT_RANGE }]);
+    expect(a.events.shotsEnded).toEqual([{ id: 1, hit: false, blocked: false, travelled: SHOT_RANGE }]);
     expect(a.shots).toEqual([]);
     expect(p.streak).toBe(0);
   });
@@ -148,6 +148,21 @@ describe("shots", () => {
     }
     expect(kill).toMatchObject({ by: 0, points: 0 });
     expect([p.score, p.kills, p.streak]).toEqual([0, 0, 0]);
+  });
+});
+
+describe("shell (#80)", () => {
+  // A shell facing +x, 120 degrees wide (half 60): blocked when the shot comes against it within 60.
+  const HALF = Math.cos(Math.PI / 3);
+  const deg = (d: number) => (d * Math.PI) / 180;
+  /** A shot coming at a shell facing +x, `off` degrees off straight against it. */
+  const at = (off: number) => shellBlocks(1, 0, -Math.cos(deg(off)), Math.sin(deg(off)), HALF);
+
+  test("the shell's edge is 60 degrees either side of its facing", () => {
+    expect(at(59)).toBe(true);
+    expect(at(-59)).toBe(true);
+    expect(at(61)).toBe(false);
+    expect(at(-61)).toBe(false);
   });
 });
 

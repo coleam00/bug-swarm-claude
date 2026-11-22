@@ -39,15 +39,22 @@ export type BugKindDef = {
    */
   launches?: { kind: BugKind; speed: number };
   /**
+   * Optional (#80): a front shell centred on the bug's facing, its unit (b.dx, b.dy). A shot
+   * travelling within acos(cosHalf) of straight against that facing is blocked (combat.ts
+   * shellBlocks): no damage, the shot ends, the shooter's streak still grows. A zero facing blocks
+   * nothing. The policies read the same rule, so bots flank (policies.ts).
+   */
+  shell?: { cosHalf: number };
+  /**
    * One tick of its behaviour: sets b.x, b.y, b.vx, b.vy and its phase fields (phase,
    * phaseTicks, dx, dy, travel). `target` is the nearest player who is up, or null, and
    * `targetAge` that player's pressure age in seconds (index.ts pressureAge: the life's age, held
    * back on a session's first life; 0 with no target), so a kind can spare young lives as the
-   * spawn mix does (#72: a spitter does not start a tell at a target under 60 s). Pure, draws
-   * no randomness and allocates nothing. Contact is the stepper's, the same for every kind.
-   * Returns nothing (or STEP_KEEP) to stay as it is; STEP_LAUNCH to launch one `launches` bug from
-   * its muzzle along (b.dx, b.dy) this tick; STEP_EXPIRE to leave the arena now, untouched and
-   * unscored (a glob that fades or meets a wall).
+   * spawn mix does (#72: a spitter does not start a tell at a target under 60 s; #86: a beetle
+   * stands). Pure, draws no randomness and allocates nothing. Contact is the stepper's, the same
+   * for every kind. Returns nothing (or STEP_KEEP) to stay as it is; STEP_LAUNCH to launch one
+   * `launches` bug from its muzzle along (b.dx, b.dy) this tick; STEP_EXPIRE to leave the arena
+   * now, untouched and unscored (a glob that fades or meets a wall).
    */
   step(b: Bug, target: Player | null, targetAge: number): BugStepResult | void;
 };

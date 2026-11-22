@@ -124,19 +124,20 @@ export type SnapshotBug = [id: number, kind: number, x: number, y: number] | [id
 /**
  * A shot fired this tick: id, owner, where it left the barrel (a CI drone's shot: the drone), its
  * angle (to 0.001), and its style: the gun's (0), a review laser shot (1, v7) or a CI drone's (2,
- * v9, #84). It flies per shotTravelAt.
+ * v10, #84). It flies per shotTravelAt.
  */
 export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number, style: ShotStyle];
-/** A shot's style on the wire (v9): the field was 0 or 1 for laser in v7 and v8. */
+/** A shot's style on the wire (v10): the field was 0 or 1 for laser in v7 to v9. */
 export const SHOT_GUN = 0;
 export const SHOT_LASER = 1;
 export const SHOT_DRONE = 2;
 export type ShotStyle = typeof SHOT_GUN | typeof SHOT_LASER | typeof SHOT_DRONE;
 /**
- * A shot ended this tick: id, ended on a bug (1) or at its range or a wall (0; a review laser shot
- * may have hit bugs on the way, v7), units flown from the barrel (to 0.1).
+ * A shot ended this tick: id, ended on a bug (1), on a bug's shell, doing no damage (2, v8, #80), or
+ * at its range or a wall (0; a review laser shot may have hit bugs on the way, v7), units flown
+ * from the barrel (to 0.1).
  */
-export type SnapshotShotEnd = [id: number, hit: 0 | 1, travelled: number];
+export type SnapshotShotEnd = [id: number, hit: 0 | 1 | 2, travelled: number];
 /** A bug killed this tick: bug id, by (0: nobody scores), x, y, points, its kind's index in BUG_KINDS (v6). */
 export type SnapshotKill = [bug: number, by: number, x: number, y: number, points: number, kind: number];
 /**
@@ -340,7 +341,7 @@ export type SharedSource = {
   floor: readonly { id: number; kind: string; x: number; y: number; ticksLeft: number }[];
   events: {
     shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number; laser: boolean; drone: boolean }[];
-    shotsEnded: readonly { id: number; hit: boolean; travelled: number }[];
+    shotsEnded: readonly { id: number; hit: boolean; blocked: boolean; travelled: number }[];
     kills: readonly { bug: number; by: number; x: number; y: number; points: number; kind: string }[];
   };
 };
@@ -373,7 +374,7 @@ export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[]
   for (let i = 0; i < ev.shotsEnded.length; i++) {
     const x = ev.shotsEnded[i]!;
     if (i > 0) e += ",";
-    e += `[${x.id},${x.hit ? 1 : 0},${q1(x.travelled)}]`;
+    e += `[${x.id},${x.blocked ? 2 : x.hit ? 1 : 0},${q1(x.travelled)}]`;
   }
   e += "]";
   let k = "[";

@@ -14,8 +14,9 @@ export const shield: PickupDef = {
   label: "Test shield!",
   // Each kind's pickup chance, split evenly over the 3 pickups (#78): crawler 1.5%, dasher and spitter
   // 3% in all (half the item's starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72,
-  // drops as the dasher does). A glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0 },
+  // drops as the dasher does). A glob is a shot in flight and drops nothing. A beetle (#80) takes 8
+  // shots and drops twice what a dasher does: 6% in all.
+  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0, beetle: 0.02 },
   floorTicks: Math.round(SHIELD_FLOOR_S / DT),
   durationTicks: Math.round(SHIELD_S / DT),
 };

@@ -28,6 +28,7 @@ export type ClientShots = {
   endTick: Float64Array;
   /** How far it flew in all, once ended. */
   endTravel: Float32Array;
+  /** How it ended, as the snapshot says: 0 at its range or a wall, 1 on a bug, 2 on a bug's shell (v8, #80). */
   hit: Uint8Array;
   /** A review laser shot (#73): drawn as a longer, brighter beam. */
   laser: Uint8Array;
@@ -76,7 +77,7 @@ function free(s: ClientShots, i: number): void {
 
 /**
  * A shot fired, from a snapshot's `s`; `style` is its last field (protocol.ts SHOT_GUN, SHOT_LASER
- * for a review laser shot, SHOT_DRONE for a CI drone's, v9). A full pool overwrites the oldest slot.
+ * for a review laser shot, SHOT_DRONE for a CI drone's, v10). A full pool overwrites the oldest slot.
  */
 export function addShot(s: ClientShots, id: number, owner: number, x: number, y: number, angle: number, tick: number, style: number = SHOT_GUN): void {
   const cap = s.used.length;
@@ -100,13 +101,13 @@ export function addShot(s: ClientShots, id: number, owner: number, x: number, y:
   s.slots.set(id, i);
 }
 
-/** A shot ended, from a snapshot's `e`. An unknown id (fired before we joined) is ignored. */
-export function endShot(s: ClientShots, id: number, hit: boolean, travelled: number, tick: number): void {
+/** A shot ended, from a snapshot's `e` (`hit` 0, 1 or 2, as sent). An unknown id (fired before we joined) is ignored. */
+export function endShot(s: ClientShots, id: number, hit: number, travelled: number, tick: number): void {
   const i = s.slots.get(id);
   if (i === undefined) return;
   s.endTick[i] = tick;
   s.endTravel[i] = travelled;
-  s.hit[i] = hit ? 1 : 0;
+  s.hit[i] = hit;
 }
 
 /**
@@ -124,17 +125,24 @@ export function shotTravel(s: ClientShots, i: number, at: number): number {
 
 /**
  * Lets go of shots whose end the drawing time `at` has reached, calling `onHit` at the spot of
- * each one that hit (for its spark). `isMine(owner)` picks which shots this call handles: yours
- * are drawn at your own time, everyone else's 100 ms behind.
+ * each one that hit (for its spark), `blocked` when a shell stopped it (#80). `isMine(owner)`
+ * picks which shots this call handles: yours are drawn at your own time, everyone else's 100 ms
+ * behind.
  */
-export function pruneShots(s: ClientShots, at: number, isMine: (owner: number) => boolean, mine: boolean, onHit: (x: number, y: number) => void): void {
+export function pruneShots(
+  s: ClientShots,
+  at: number,
+  isMine: (owner: number) => boolean,
+  mine: boolean,
+  onHit: (x: number, y: number, blocked: boolean) => void,
+): void {
   if (s.live === 0) return;
   const cap = s.used.length;
   for (let i = 0; i < cap; i++) {
     if (!s.used[i] || isMine(s.owner[i]!) !== mine) continue;
     const end = s.endTick[i]!;
     if (end >= 0 && at >= end) {
-      if (s.hit[i]) onHit(s.x0[i]! + s.dx[i]! * s.endTravel[i]!, s.y0[i]! + s.dy[i]! * s.endTravel[i]!);
+      if (s.hit[i]) onHit(s.x0[i]! + s.dx[i]! * s.endTravel[i]!, s.y0[i]! + s.dy[i]! * s.endTravel[i]!, s.hit[i] === 2);
       free(s, i);
     }
   }

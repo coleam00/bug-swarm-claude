@@ -27,7 +27,7 @@ export const drone: PickupDef = {
   // Not dropping yet (#84): every drop set tried for it failed the late-joiner gate (architecture.md
   // "Built so far (#84)"), so how it drops waits on an owner ruling. At 0 it is inert: `bun run
   // skill` prints main's table with the drone's columns at 0.
-  drop: { crawler: 0, dasher: 0, spitter: 0, glob: 0 },
+  drop: { crawler: 0, dasher: 0, spitter: 0, glob: 0, beetle: 0 },
   floorTicks: Math.round(DRONE_FLOOR_S / DT),
   durationTicks: Math.round(DRONE_S / DT),
 };

@@ -38,7 +38,7 @@ import {
   type SnapshotDown,
   type SnapshotMe,
 } from "../../shared/arena/protocol";
-import { clampInput, type Input } from "../../shared/arena/sim";
+import { clampInput, wrapAngle, type Input } from "../../shared/arena/sim";
 import { isTeam, type Team } from "../../server/rules";
 import { createFpsMeter, tickFps } from "../game/fps";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "../game/fx/particles";
@@ -49,7 +49,7 @@ import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { GLOW_SHIELD, GLOW_SHOT } from "../game/look";
+import { GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createDrift, stepDrift } from "./drift";
@@ -88,11 +88,15 @@ import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile,
 import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 import { isBot } from "./tag";
+import { createTings, spawnTing, updateTings } from "./tings";
 
 /** Local steps one frame may run; a stalled tab drops the rest rather than burst inputs. */
 const MAX_STEPS_PER_FRAME = 3;
 /** Particles in a shot's spark (a kill bursts BURST_COUNT). */
 const SPARK_COUNT = 5;
+/** Particles in the spark off a beetle's shell (#80), in steel and in white. */
+const BLOCK_STEEL = 6;
+const BLOCK_WHITE = 3;
 /** A pickup's label floats up from this far above the robot that took it, world units (#73). */
 const LABEL_ABOVE = 46;
 
@@ -197,6 +201,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   const rings = createRings();
   // Score labels, and each pickup's word label (#73), built once.
   const texts = createTexts(TEXT_CAPACITY, PICKUP_LABELS);
+  const tings = createTings();
   const shake = createShake();
   const hudFx = createHudFx();
   // Effects draw from their own generator, never the simulation's.
@@ -263,7 +268,13 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   };
 
   const isMine = (owner: number) => owner === you;
-  const spark = (x: number, y: number) => spawnBurst(particles, x, y, SPARK_COUNT, GLOW_SHOT, fxRng);
+  const spark = (x: number, y: number, blocked: boolean) => {
+    if (!blocked) return spawnBurst(particles, x, y, SPARK_COUNT, GLOW_SHOT, fxRng);
+    // A shell blocked it (#80): a steel-white spark and a ting, never the yellow of a hit.
+    spawnBurst(particles, x, y, BLOCK_STEEL, GLOW_STEEL, fxRng);
+    spawnBurst(particles, x, y, BLOCK_WHITE, GLOW_WHITE, fxRng);
+    spawnTing(tings, x, y);
+  };
   const showKill = (x: number, y: number, points: number, _by: number, kind: number) => {
     spawnBurst(particles, x, y, BURST_COUNT, killGlows[kind] ?? killGlows[0]!, fxRng);
     if (points > 0) spawnText(texts, x, y, points);
@@ -303,7 +314,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5]);
-      for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
+      for (const e of m.e) endShot(shots, e[0], e[1], e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       if (watch) return setLive(true);
       Object.assign(me, m.me);
@@ -535,6 +546,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     particles,
     rings,
     texts,
+    tings,
     shake,
     me: null,
     wave: 0,
@@ -608,13 +620,16 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       }
       // v6: a bug out of its kind's first phase carries its phase, locked angle and ticks in it.
       const phase = row.length > 4 ? row[4]! : 0;
-      const angle = row.length > 4 ? row[5]! : 0;
+      let angle = row.length > 4 ? row[5]! : 0;
       let phaseS = 0;
       if (phase !== 0) {
+        const nextPhase = next && next.length > 4 ? next[4]! : 0;
+        // A bug that turns within a phase (a beetle, #80) turns smoothly between snapshots, the
+        // short way round; a locked angle (a dasher's tell) is the same at both ends.
+        if (nextPhase === phase) angle += wrapAngle(next![5]! - angle) * span.t;
         // It faces the angle its phase locked (standing in a tell, it has no movement to face).
         heading = angle;
         headings.set(id, heading);
-        const nextPhase = next && next.length > 4 ? next[4]! : 0;
         phaseS = (row[6]! + (nextPhase === phase ? span.t : 0)) * DT;
       }
       const i = bugs.count++;
@@ -663,6 +678,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     updateParticles(particles, dt);
     updateRings(rings, dt);
     updateTexts(texts, dt);
+    updateTings(tings, dt);
     updateShake(shake, dt, fxRng);
     updateHudFx(hudFx, dt);
 

@@ -1,6 +1,7 @@
 // The CI drone by stepping (#84): for 12 s it orbits its holder and fires 3 shots a second at the
 // nearest live bug within 400 units of them; its kills score x1 for the holder and never touch the streak.
 import { describe, expect, test } from "bun:test";
+import { WALK } from "../bugs/beetle";
 import { bugDef } from "../bugs/registry";
 import { mult } from "../combat";
 import { DT, PICKUP_IDS } from "../constants";
@@ -157,6 +158,23 @@ describe("the CI drone", () => {
       missed = a.events.shotsEnded.some((e) => !e.hit);
     }
     expect(missed).toBe(true);
+    expect(p.streak).toBe(7);
+  });
+
+  test("a drone shot off a beetle's shell (#80) leaves the streak alone too", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.streak = 7;
+    // A beetle 300 units right, its shell facing the shooter; a drone shot flying straight at it.
+    const b = placeBug(a, 1500, 1200, "beetle");
+    b.phase = WALK;
+    b.dx = -1;
+    b.dy = 0;
+    const hp = b.hp;
+    a.shots.push({ id: a.nextShotId++, owner: p.id, life: p.lifeStartTick, x: b.x - 40, y: b.y, dx: 1, dy: 0, travelled: 0, pierce: 1, laser: false, drone: true, hitA: 0, hitB: 0, hits: 0 });
+    stepQuiet(a);
+    expect(a.events.shotsEnded.map((e) => e.blocked)).toEqual([true]);
+    expect(b.hp).toBe(hp);
     expect(p.streak).toBe(7);
   });
 

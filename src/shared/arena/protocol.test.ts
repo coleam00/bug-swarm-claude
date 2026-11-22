@@ -165,8 +165,9 @@ describe("server messages", () => {
           { id: 13, owner: 1, x: 40, y: 22, angle: -1, laser: false, drone: true },
         ],
         shotsEnded: [
-          { id: 10, hit: true, travelled: 123.456 },
-          { id: 9, hit: false, travelled: 700 },
+          { id: 10, hit: true, blocked: false, travelled: 123.456 },
+          { id: 9, hit: false, blocked: false, travelled: 700 },
+          { id: 13, hit: true, blocked: true, travelled: 40 },
         ],
         kills: [
           { bug: 6, by: 2, x: 50.06, y: 60, points: 15, kind: "crawler" },
@@ -202,6 +203,7 @@ describe("server messages", () => {
       e: [
         [10, 1, 123.5],
         [9, 0, 700],
+        [13, 2, 40],
       ],
       k: [
         [6, 2, 50.1, 60, 15, 0],
