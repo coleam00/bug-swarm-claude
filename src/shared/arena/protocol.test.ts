@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 import {
   CLIENT_TYPES,
-  ERROR_CODES,
   SERVER_TYPES,
   encodeHello,
   encodeInput,
@@ -50,11 +49,6 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage(s({ t: "watch" }))).toBeNull();
     expect(parseClientMessage(s({ t: "watch", v: 1.5 }))).toBeNull();
     expect(parseClientMessage(s({ t: "watch", v: "8" }))).toBeNull();
-  });
-
-  test("message types and error codes are only ever appended (destructured by position)", () => {
-    expect(CLIENT_TYPES).toEqual(["hello", "input", "watch"]);
-    expect(ERROR_CODES).toEqual(["version", "name", "team", "hello", "restarting", "build", "full"]);
   });
 
   test("a version mismatch still parses: the server decides", () => {

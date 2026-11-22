@@ -4,6 +4,7 @@ import {
   DASH_SPAWN_LOCK_TICKS,
   DASH_TICKS,
   DEMO_BOTS,
+  DEMO_WARM_TICKS,
   FILL_TARGET,
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
@@ -541,13 +542,18 @@ describe("watchers (#79, the start screen)", () => {
     };
   }
 
-  test("on an empty server the first watcher opens a demo arena of DEMO_BOTS bots, off the board, that closes with its last watcher", () => {
+  test("on an empty server the first watcher opens a demo arena of DEMO_BOTS bots, already DEMO_WARM_S in and fighting, off the board, that closes with its last watcher", () => {
     const { rooms, timers, tick } = setup(undefined, FILL_TARGET);
     const w = rawClient();
     const watching = rooms.watch(w.send)!;
-    expect(watching.welcome).toMatchObject({ t: "welcome", you: 0, arena: 1, roster: [] });
+    // Warmed up before the watcher came: its bots are in the welcome's roster, bugs are out.
+    expect(watching.welcome).toMatchObject({ t: "welcome", you: 0, arena: 1, tick: DEMO_WARM_TICKS });
+    expect(watching.welcome.roster.length).toBe(DEMO_BOTS);
+    expect(rooms.room(1)!.state.bugs.length).toBeGreaterThan(10);
+    // None of the warm-up's ticks are in the stats.
+    expect(rooms.stats().tick.p50).toBeNull();
     tick();
-    expect(w.got.filter((m) => m.t === "event" && m.kind === "join").length).toBe(DEMO_BOTS);
+    expect(w.got.filter((m) => m.t === "event" && m.kind === "join")).toEqual([]);
     const snap = snapshots(w.got).at(-1)!;
     expect(snap.ack).toBe(0);
     expect(snap.me).toMatchObject({ sc: 0, al: 0, hl: 0 });

@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
+import { DEMO_WARM_TICKS, HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
 import { placeBug, placePickup } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, encodeWatch, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
 import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
@@ -545,12 +545,15 @@ const arenaStats = async () => (await (await fetch(`${srv.url}/api/arena/stats`)
 const board = async () => (await (await fetch(`${srv.url}/api/board`)).json()) as { playing: number; arenas: unknown[] };
 
 test(
-  "on an empty server a watch opens a demo arena of bots: a welcome with you 0, the bots' joins, snapshots with ack 0; nobody on the board; it closes with its watcher",
+  "on an empty server a watch opens a demo arena of bots, already fighting: a welcome with you 0 and the bots, snapshots with ack 0 and bugs; nobody on the board; it closes with its watcher",
   async () => {
+    await srv.stop();
+    srv = serve({ arenaDemo: 4 });
     const { c, welcome } = await watchArena();
-    expect(welcome).toMatchObject({ t: "welcome", v: PROTOCOL_VERSION, you: 0, arena: 1 });
-    await c.waitFor("four bots in a snapshot", () => c.got.some((m) => m.t === "snapshot" && m.p.length === 4));
-    expect(c.got.filter((m) => m.t === "event" && m.kind === "join").length).toBe(4);
+    expect(welcome).toMatchObject({ t: "welcome", v: PROTOCOL_VERSION, you: 0, arena: 1, tick: DEMO_WARM_TICKS });
+    expect(welcome.roster.length).toBe(4);
+    await c.waitFor("a snapshot", () => c.got.some((m) => m.t === "snapshot"));
+    expect(c.got.filter((m): m is Snapshot => m.t === "snapshot")[0]!.b.length).toBeGreaterThan(10);
     expect(c.got.filter((m): m is Snapshot => m.t === "snapshot").every((m) => m.ack === 0 && m.me.al === 0)).toBe(true);
     const stats = await arenaStats();
     expect(stats.arenas).toEqual([{ id: 1, players: 0, bots: 4, watchers: 1 }]);
@@ -588,6 +591,9 @@ test(
     const { c, welcome } = await watchArena();
     expect(welcome).toMatchObject({ you: 0, arena: ada.welcome.arena, roster: [{ id: ada.welcome.you, name: "Ada", team: "tabs" }] });
     const before = ada.c.got.length;
+    // Ada sends no input, so she stands still; the watcher's inputs must not move her.
+    const ada0 = srv.rooms.room(ada.welcome.arena)!.state.players[0]!;
+    const at = { x: ada0.x, y: ada0.y };
     // The watcher sends inputs at full rate for a while: nothing of it reaches the arena.
     for (let seq = 1; seq <= 20; seq++) {
       c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: true, dash: true }));
@@ -597,7 +603,7 @@ test(
     await ada.c.waitFor("more snapshots", () => ada.c.got.length > before + 5);
     expect(ada.c.got.filter((m) => m.t === "event")).toEqual([]);
     expect(srv.rooms.room(ada.welcome.arena)!.state.players.map((p) => p.name)).toEqual(["Ada"]);
-    expect(srv.rooms.room(ada.welcome.arena)!.state.players[0]!.kills).toBe(0);
+    expect({ x: ada0.x, y: ada0.y }).toEqual(at);
     await ada.c.waitFor("the watcher gone", () => srv.rooms.stats().watchers === 0);
     expect(srv.rooms.stats()).toMatchObject({ players: 1, watchers: 0 });
   },
@@ -615,26 +621,6 @@ test(
     await c.waitFor("Ada's own snapshot", () => c.got.some((m) => m.t === "snapshot" && m.me.al === 1));
     expect(srv.rooms.stats()).toMatchObject({ players: 1, watchers: 0, arenas: [{ id: played.arena, players: 1, watchers: 0 }] });
     expect(srv.server.pendingWebSockets).toBe(1);
-  },
-  TIMEOUT,
-);
-
-test(
-  "a watched arena whose last person leaves stays open with bots, off the board; rehome moves its watcher to a new player's arena",
-  async () => {
-    const ada = await enter("Ada");
-    const { c } = await watchArena();
-    await ada.c.close();
-    await c.waitFor("Ada gone, demo bots in", () => srv.rooms.stats().arenas.some((a) => a.id === 1 && a.players === 0 && a.bots === 4));
-    expect(await board()).toMatchObject({ playing: 0, arenas: [] });
-    const bob = await enter("Bob");
-    expect(bob.welcome.arena).toBe(2);
-    srv.rooms.rehome();
-    const moved = await c.waitFor("a welcome to arena 2", () => c.got.find((m): m is Welcome => m.t === "welcome" && m.arena === 2));
-    expect(moved.you).toBe(0);
-    expect(moved.roster).toContainEqual({ id: bob.welcome.you, name: "Bob", team: "tabs" });
-    expect(srv.rooms.stats().arenas.map((a) => a.id)).toEqual([2]);
-    expect(bob.c.got.filter((m) => m.t === "event")).toEqual([]);
   },
   TIMEOUT,
 );

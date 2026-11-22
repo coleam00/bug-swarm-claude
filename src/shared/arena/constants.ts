@@ -53,6 +53,14 @@ export const MAX_PLAYERS_PER_ARENA = 20;
 export const FILL_TARGET = 4;
 /** A people-less arena that someone is watching (the start screen's demo arena, #79) runs this many bots. */
 export const DEMO_BOTS = FILL_TARGET;
+/**
+ * A new demo arena is run this far forward before its first watcher sees it, seconds: a fresh
+ * arena's bots meet their first bugs about 40 s in (first-life pacing, spawns out of view), and
+ * the start screen should show the fight at once. Nobody ever joins a demo arena, so this skips no
+ * one's gentle opening.
+ */
+export const DEMO_WARM_S = 45;
+export const DEMO_WARM_TICKS = Math.round((DEMO_WARM_S * 1000) / TICK_MS);
 /** The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79). */
 export const MAX_WATCHERS = 40;
 /** How often watchers of a people-less arena are moved to the busiest arena with people, ms. */

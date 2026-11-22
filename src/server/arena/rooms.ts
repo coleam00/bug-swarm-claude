@@ -7,13 +7,15 @@
 //
 // Watchers (#79, the start screen): at most `maxWatchers` server-wide. A watch lands in the arena
 // with the most people, else the people-less arena with the most watchers, else a new arena (the
-// demo arena: `demoTo` bots and no people). An arena with no people is never picked for a join
+// demo arena: `demoTo` bots and no people, run DEMO_WARM_S forward first so its bots are already
+// fighting). An arena with no people is never picked for a join
 // (fair drop-in: a demo arena may be on a late wave) and never shown on the board. While anyone
 // watches, every WATCH_SWEEP_MS `rehome` moves the watchers of people-less arenas to the busiest
 // arena with people, with a fresh welcome, so a start screen opened on an empty server shows the
 // people once they come.
 import {
   DEMO_BOTS,
+  DEMO_WARM_TICKS,
   FILL_TARGET,
   MAX_PLAYERS_PER_ARENA,
   MAX_WATCHERS,
@@ -150,7 +152,12 @@ export class Rooms {
    */
   watch(send: Send): Watching | null {
     if (this.watchers.size >= this.maxWatchers) return null;
-    const room = this.busiest() ?? this.mostWatched() ?? this.open();
+    let room = this.busiest() ?? this.mostWatched();
+    if (!room) {
+      // A new demo arena. Nobody plays anywhere (else busiest() found them), so the warm-up holds up no one.
+      room = this.open();
+      if (this.demoTo > 0) room.warmUp(DEMO_WARM_TICKS, this.now());
+    }
     const watcher = this.nextWatcher++;
     this.watchers.set(watcher, { room: room.id, send });
     room.watch(watcher, send);

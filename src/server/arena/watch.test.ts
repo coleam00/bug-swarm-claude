@@ -18,17 +18,20 @@ let dir: string;
 let db: Database;
 let srv: RunningServer | null;
 let conn: WatchConnection | null;
+let fake: ReturnType<typeof Bun.serve> | null;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "arena-watch-test-"));
   db = openDb(join(dir, "app.db"));
   srv = null;
   conn = null;
+  fake = null;
 });
 
 afterEach(async () => {
   conn?.close();
   await srv?.stop();
+  await fake?.stop(true);
   db.close(); // close before deleting: Windows refuses to delete an open file
   rmSync(dir, { recursive: true, force: true });
 });
@@ -164,6 +167,43 @@ test(
     await until("the socket gone", () => srv!.server.pendingWebSockets === 0);
     await srv.stop();
     expect(computeStats(db).finishedRuns).toBe(0);
+  },
+  TIMEOUT,
+);
+
+test(
+  "a full server's reply to the watch, arriving after play(), does not refuse the player: the connection rejoins with the hello",
+  async () => {
+    // A stand-in server: it answers a watch with `full` only after 200 ms (by when play() has run)
+    // and ignores the hello on that socket; on any later socket it welcomes the hello.
+    let sockets = 0;
+    fake = Bun.serve<{ n: number }, never>({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: (req, server) => (server.upgrade(req, { data: { n: ++sockets } }) ? undefined : new Response("no", { status: 426 })),
+      websocket: {
+        message(ws, raw) {
+          const m = JSON.parse(String(raw)) as { t: string };
+          if (m.t === "watch") {
+            setTimeout(() => {
+              ws.send(JSON.stringify({ t: "error", code: "full" }));
+              ws.close(1008, "full");
+            }, 200);
+          } else if (m.t === "hello" && ws.data.n > 1) {
+            ws.send(JSON.stringify({ t: "welcome", v: 8, you: 1, arena: 1, build: "x", world: { w: 1, h: 1 }, tickMs: 50, tick: 0, roster: [] }));
+          }
+        },
+      },
+    });
+    const w = watch({ server: { port: fake.port } } as unknown as RunningServer);
+    await until("the socket open", () => conn!.open);
+    const p = player();
+    const refused: string[] = [];
+    conn!.play(hello, { ...p.on, refused: (code) => void refused.push(code) });
+    await until("the player's welcome on a rejoin", () => p.welcomes().length === 1);
+    expect(p.welcomes()[0]!.you).toBe(1);
+    expect(refused).toEqual([]);
+    expect(w.told.unavailable).toBe(0);
   },
   TIMEOUT,
 );

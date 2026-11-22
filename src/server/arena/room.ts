@@ -135,6 +135,8 @@ export class Room {
   /** Watching sockets by watcher id (rooms.ts numbers them). */
   private readonly watchers = new Map<number, Send>();
   private nextTickAt: number;
+  /** Running warmUp: the arena plays as a watched demo arena with nobody to send to. */
+  private warming = false;
   private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [] };
 
   constructor(
@@ -178,7 +180,7 @@ export class Room {
 
   /** People plus bots the arena should hold now (fill.ts botTarget). */
   private target(): number {
-    return botTarget(this.members.size, this.watchers.size, this.fillTo, this.demoTo);
+    return botTarget(this.members.size, this.warming ? 1 : this.watchers.size, this.fillTo, this.demoTo);
   }
 
   /** The arena's wave now (1 up), as the snapshot sends it. */
@@ -337,6 +339,25 @@ export class Room {
    */
   tick(nowMs: number): void {
     const t0 = this.clock();
+    this.step(nowMs);
+    this.ticks.record(nowMs, this.clock() - t0);
+  }
+
+  /**
+   * Runs `ticks` ticks at once, as a watched demo arena, before anyone is in it or watching it
+   * (#79), so its bots are already fighting when its first watcher arrives. Nothing is sent (there
+   * is nobody to send to) and the ticks are not in the stats. Rooms calls it only when nobody plays
+   * anywhere on the server, so the time it takes holds up no player.
+   */
+  warmUp(ticks: number, nowMs: number): void {
+    if (this.members.size > 0 || this.watchers.size > 0) return;
+    this.warming = true;
+    for (let i = 0; i < ticks; i++) this.step(nowMs);
+    this.warming = false;
+  }
+
+  /** One tick's work (see tick). */
+  private step(nowMs: number): void {
     this.driveBots();
     for (const m of this.members.values()) {
       const p = m.player;
@@ -370,7 +391,6 @@ export class Room {
       const watched = encodeSnapshot(this.state.tick, 0, WATCH_ME, shared);
       for (const send of this.watchers.values()) send(watched);
     }
-    this.ticks.record(nowMs, this.clock() - t0);
   }
 
   /** Hands a finished life on to be saved, and tells its player (if still connected) it is over. */

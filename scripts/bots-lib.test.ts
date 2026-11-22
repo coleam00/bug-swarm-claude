@@ -156,6 +156,10 @@ test("the summary gives each watcher's received KB/s, mean and max", () => {
   const tally = createTally();
   tally.watchers.push({ bytes: 650_000, seconds: 10 });
   const args = { url: "u", count: 0, seconds: 10, policy: "aimer" as const, watchers: 2 };
-  expect(formatSummary(args, tally, 10, null).at(-1)).toBe("watchers: 1 of 2 watching, 65.0 KB/s each on average, 65.0 KB/s max");
+  tally.watchers.push({ bytes: 250_000, seconds: 10 });
+  const text = formatSummary(args, tally, 10, null).join(" ");
+  expect(text).toContain("2 of 2");
+  expect(text).toContain("45.0"); // the mean
+  expect(text).toContain("65.0"); // the max
   expect(formatSummary({ ...args, watchers: 0 }, tally, 10, null).join(" ")).not.toContain("watchers:");
 });

@@ -47,12 +47,9 @@ export function reconnectDelay(attempt: number): number {
   return Math.min(RECONNECT_MAX_MS, RECONNECT_FIRST_MS * 2 ** Math.min(attempt, 10));
 }
 
-/**
- * Errors after which rejoining can't help: the player has to change something first, or (a
- * watch) the server has all the watchers it takes.
- */
+/** Errors after which rejoining can't help: the player has to change something first. */
 export function isFinalError(code: ErrorCode): boolean {
-  return code === ERROR_NAME || code === ERROR_TEAM || code === ERROR_VERSION || code === ERROR_FULL;
+  return code === ERROR_NAME || code === ERROR_TEAM || code === ERROR_VERSION;
 }
 
 /** The /ws URL for a page at `location`: wss on https. */
@@ -197,6 +194,10 @@ function connect(mode: Mode, url?: string): WatchConnection {
         firstBuild ??= m.build;
         attempt = 0;
         on.status(null);
+      } else if (m.t === ERROR && m.code === ERROR_FULL) {
+        // The reply to the watch this socket sent before play(): the server closes it, and the
+        // close rejoins with the hello. Only a watch is ever refused as full.
+        return;
       } else if (m.t === ERROR && m.code === ERROR_BUILD) {
         // Only a rejoin carries a build, so a first join can never loop on reloads.
         return outdated(on, socket, m.build ?? "");
