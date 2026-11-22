@@ -121,15 +121,17 @@ describe("bun run skill", () => {
     expect([dasher.score, dasher.seconds]).not.toEqual([aimer.score, aimer.seconds]);
   });
 
-  test("pickups are counted a life: the aimer takes some on 16 seeds, its shields block, its lasers hit and its bombs kill; the idle takes none", () => {
-    // 16 seeds, not 8: at these drop chances a shield block is rare, and the spitter (#72) moved
-    // the seeded lives so the first 8 hold none.
-    const r = runSkill(16, 180);
+  test("pickups are counted a life: the aimer takes some on 32 seeds, its shields block, its lasers hit, its bombs and drones kill; the idle takes none", () => {
+    // 32 seeds: at these drop chances a shield block is rare (the first 24 seeds hold none since the
+    // CI drone, #84, split each kind's chance over four pickups).
+    const r = runSkill(32, 180);
     const by = (n: string) => r.policies.find((p) => p.policy === n)!;
     const aim = by("aimer").pickups.mean;
     expect(aim.taken.shield + aim.taken.laser + aim.taken.bomb).toBeGreaterThan(0);
     expect(aim.laserHits).toBeGreaterThan(0);
     expect(aim.bombKills).toBeGreaterThan(0);
+    expect(aim.taken.drone).toBeGreaterThan(0);
+    expect(aim.droneKills).toBeGreaterThan(0);
     expect(aim.blocks).toBeGreaterThan(0);
     // A block is never a hit landed: the counts come from different events.
     expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0, bomb: 0, drone: 0 }, blocks: 0, laserHits: 0, bombKills: 0, droneKills: 0 });

@@ -161,7 +161,7 @@ describe("server messages", () => {
         shotsFired: [
           { id: 11, owner: 1, x: 30.123, y: 20.5, angle: 0.12345, laser: false, drone: false },
           { id: 12, owner: 2, x: 1, y: 2, angle: 3, laser: true, drone: false },
-          // A CI drone's shot (v9, #84): style 2.
+          // A CI drone's shot (v10, #84): style 2.
           { id: 13, owner: 1, x: 40, y: 22, angle: -1, laser: false, drone: true },
         ],
         shotsEnded: [

@@ -24,10 +24,12 @@ export const DRONE_SPIN = 3;
 export const drone: PickupDef = {
   id: "drone",
   label: "CI drone!",
-  // Not dropping yet (#84): every drop set tried for it failed the late-joiner gate (architecture.md
-  // "Built so far (#84)"), so how it drops waits on an owner ruling. At 0 it is inert: `bun run
-  // skill` prints main's table with the drone's columns at 0.
-  drop: { crawler: 0, dasher: 0, spitter: 0, glob: 0, beetle: 0 },
+  // Each kind's pickup chance, split evenly over the 4 pickups (#84, #78's rule: each kind's total
+  // unchanged): crawler 1.5%, dasher and spitter 3% in all, 0.375% and 0.75% each (half the item's
+  // starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72, drops as the dasher does).
+  // A glob is a shot in flight and drops nothing. A beetle (#80) takes 8 shots and drops twice what a
+  // dasher does: 6% in all, 1.5% each.
+  drop: { crawler: 0.00375, dasher: 0.0075, spitter: 0.0075, glob: 0, beetle: 0.015 },
   floorTicks: Math.round(DRONE_FLOOR_S / DT),
   durationTicks: Math.round(DRONE_S / DT),
 };
