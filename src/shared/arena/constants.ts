@@ -51,6 +51,12 @@ export const FIRST_LIFE_EASY_S = 10;
 export const MAX_PLAYERS_PER_ARENA = 20;
 /** An arena with people in it is topped up with server fill bots to this many players (#66). */
 export const FILL_TARGET = 4;
+/** A people-less arena that someone is watching (the start screen's demo arena, #79) runs this many bots. */
+export const DEMO_BOTS = FILL_TARGET;
+/** The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79). */
+export const MAX_WATCHERS = 40;
+/** How often watchers of a people-less arena are moved to the busiest arena with people, ms. */
+export const WATCH_SWEEP_MS = 5000;
 /** Inputs the server queues per player; one is applied each tick, the oldest dropped past this. */
 export const INPUT_BUFFER = 4;
 /** Ticks with no new input after which a player's move is zeroed (500 ms). */
@@ -60,7 +66,7 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 

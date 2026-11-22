@@ -14,17 +14,23 @@
 // When the server stops (a redeploy), `restart` sends every socket `error restarting` and closes it
 // (the lives were already ended and saved, Rooms.endAll); from then on any socket is refused the same
 // way, so a quick reconnect can't join an arena on a server that is going away.
+// A socket may `watch` instead of saying hello (#79, the start screen): it gets a welcome with
+// `you: 0` and the arena's events and snapshots, takes no player slot, and its inputs are dropped.
+// Over the watcher cap it gets `error full` and is closed. A hello on a watching socket stops the
+// watch and joins as a player on the same socket, checked exactly like a first hello.
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
   ERROR_BUILD,
+  ERROR_FULL,
   ERROR_HELLO,
   ERROR_NAME,
   ERROR_RESTARTING,
   ERROR_TEAM,
   ERROR_VERSION,
   HELLO,
+  WATCH,
   parseClientMessage,
   type ErrorCode,
   type Hello,
@@ -58,11 +64,13 @@ export type SocketData = {
   liveTimer: ReturnType<typeof setInterval> | null;
   /** The name the socket joined with, once welcomed. */
   name: string | null;
+  /** The watcher id while the socket watches an arena (Rooms.watch), else null. */
+  watcher: number | null;
 };
 
 /** The data a new socket starts with, passed to server.upgrade. */
 export function newSocketData(): SocketData {
-  return { limiter: createInputLimiter(), room: null, entity: null, helloTimer: null, lastHeard: 0, liveTimer: null, name: null };
+  return { limiter: createInputLimiter(), room: null, entity: null, helloTimer: null, lastHeard: 0, liveTimer: null, name: null, watcher: null };
 }
 
 /** How often to ping and when to give up; the defaults are the real ones, tests shorten them. */
@@ -135,6 +143,9 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     if (!isTeam(m.team)) return refuse(ws, ERROR_TEAM);
     if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
     ws.data.helloTimer = null;
+    // A watching socket becomes a player: no more watcher frames after the welcome below.
+    if (ws.data.watcher !== null) rooms.unwatch(ws.data.watcher);
+    ws.data.watcher = null;
     const entered = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => void ws.send(msg));
     ws.data.room = entered.room;
     ws.data.entity = entered.entity;
@@ -142,6 +153,16 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     ws.send(JSON.stringify(entered.welcome));
     joined.add(ws);
     if (!sweepTimer) sweepTimer = setInterval(sweep, sweepMs);
+  };
+
+  const watch = (ws: ServerWebSocket<SocketData>, v: number) => {
+    if (v !== PROTOCOL_VERSION) return refuse(ws, ERROR_VERSION);
+    const watching = rooms.watch((msg) => void ws.send(msg));
+    if (!watching) return refuse(ws, ERROR_FULL);
+    if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
+    ws.data.helloTimer = null;
+    ws.data.watcher = watching.watcher;
+    ws.send(JSON.stringify(watching.welcome));
   };
 
   return {
@@ -153,6 +174,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
         // The arenas are gone (Rooms.endAll): the close must not leave one again.
         ws.data.room = null;
         ws.data.entity = null;
+        ws.data.watcher = null;
         sendRestarting(ws);
       }
     },
@@ -184,6 +206,11 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
         else if (room === null) hello(ws, m);
         return;
       }
+      if (m.t === WATCH) {
+        if (restarting) sendRestarting(ws);
+        else if (room === null && ws.data.watcher === null) watch(ws, m.v);
+        return;
+      }
       if (room === null || entity === null) return;
       if (!ws.data.limiter.allow(now())) return;
       rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash });
@@ -197,8 +224,10 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       if (ws.data.liveTimer) clearInterval(ws.data.liveTimer);
       ws.data.liveTimer = null;
       if (ws.data.room !== null && ws.data.entity !== null) rooms.leave(ws.data.room, ws.data.entity);
+      if (ws.data.watcher !== null) rooms.unwatch(ws.data.watcher);
       ws.data.room = null;
       ws.data.entity = null;
+      ws.data.watcher = null;
     },
   };
 }

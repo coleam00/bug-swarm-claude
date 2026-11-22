@@ -42,11 +42,21 @@ export function botTeam(players: readonly { team: Team }[]): Team {
 }
 
 /**
+ * How many players (people plus bots) an arena should hold: `fillTo` while people play in it;
+ * `demoTo` while nobody plays but someone watches (the start screen's demo arena, #79); else 0
+ * (it is closing).
+ */
+export function botTarget(people: number, watchers: number, fillTo: number, demoTo: number): number {
+  if (people > 0) return fillTo;
+  return watchers > 0 ? demoTo : 0;
+}
+
+/**
  * How many bots an arena with `people` and `bots` should gain (above 0) or lose (below 0) to
- * reach `target` players. An arena with no people gains none: it closes.
+ * reach `target` players (botTarget). A target of 0 manages nothing.
  */
 export function fillDelta(people: number, bots: number, target: number): number {
-  if (people === 0) return 0;
+  if (target <= 0) return 0;
   const total = people + bots;
   if (total < target) return target - total;
   const retire = Math.min(bots, total - target);

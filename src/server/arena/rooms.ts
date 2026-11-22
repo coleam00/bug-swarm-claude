@@ -1,10 +1,28 @@
 // The room manager: which arena a player joins, one tick timer per arena, and the stats. A player
-// joins the fullest arena that still has room for a person (ties: the oldest), else a new one
-// opens; an arena closes, timer, fill bots and all, when its last person leaves. Arenas are
-// topped up to `fillTo` with server fill bots (room.ts); capacity, "fullest" and closing count
-// people only, so a bot never takes a slot a person needs. The timer and the clock are injected, so
-// tests step arenas by hand and never wait on real time.
-import { FILL_TARGET, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, TICK_MS, WORLD_H, WORLD_W } from "../../shared/arena/constants";
+// joins the fullest arena with people that still has room for a person (ties: the oldest), else a
+// new one opens; an arena closes, timer, fill bots and all, once its last person and its last
+// watcher have left. Arenas are topped up to `fillTo` with server fill bots (room.ts); capacity and
+// "fullest" count people only, so a bot never takes a slot a person needs. The timer and the clock
+// are injected, so tests step arenas by hand and never wait on real time.
+//
+// Watchers (#79, the start screen): at most `maxWatchers` server-wide. A watch lands in the arena
+// with the most people, else the people-less arena with the most watchers, else a new arena (the
+// demo arena: `demoTo` bots and no people). An arena with no people is never picked for a join
+// (fair drop-in: a demo arena may be on a late wave) and never shown on the board. While anyone
+// watches, every WATCH_SWEEP_MS `rehome` moves the watchers of people-less arenas to the busiest
+// arena with people, with a fresh welcome, so a start screen opened on an empty server shows the
+// people once they come.
+import {
+  DEMO_BOTS,
+  FILL_TARGET,
+  MAX_PLAYERS_PER_ARENA,
+  MAX_WATCHERS,
+  PROTOCOL_VERSION,
+  TICK_MS,
+  WATCH_SWEEP_MS,
+  WORLD_H,
+  WORLD_W,
+} from "../../shared/arena/constants";
 import { WELCOME, type Welcome } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import type { Team } from "../rules";
@@ -30,13 +48,18 @@ export type RoomsOptions = {
   saveLife?: (r: LifeRecord) => void;
   /** People plus fill bots each arena with people is topped up to (default FILL_TARGET; 0: no bots). */
   fillTo?: number;
+  /** Sockets that may watch at once, server-wide (default MAX_WATCHERS). */
+  maxWatchers?: number;
+  /** Bots a watched arena with no people runs (default DEMO_BOTS; 0: none). */
+  demoTo?: number;
 };
 
-/** `players` counts people only; `bots` the server's fill bots. */
+/** `players` counts people only; `bots` the server's fill bots; `watchers` the watching sockets. */
 export type ArenaStats = {
-  arenas: { id: number; players: number; bots: number }[];
+  arenas: { id: number; players: number; bots: number; watchers: number }[];
   players: number;
   bots: number;
+  watchers: number;
   tick: { p50: number | null; p95: number | null };
 };
 
@@ -46,6 +69,7 @@ export type LiveArena = { id: number; players: number; wave: number };
 export type LiveArenas = { playing: number; arenas: LiveArena[] };
 
 export type Joined = { room: number; entity: number; welcome: Welcome };
+export type Watching = { watcher: number; welcome: Welcome };
 
 const realTimer: StartTimer = (fn, ms) => {
   const t = setInterval(fn, ms);
@@ -67,6 +91,13 @@ export class Rooms {
   readonly ticks: TickLog = createTickLog();
   private readonly saveLife: (r: LifeRecord) => void;
   private readonly fillTo: number;
+  private readonly maxWatchers: number;
+  private readonly demoTo: number;
+  /** Every watcher: the arena it watches and its socket's send. */
+  private readonly watchers = new Map<number, { room: number; send: Send }>();
+  private nextWatcher = 1;
+  /** Stops the rehome timer; set while anyone watches. */
+  private stopSweep: (() => void) | null = null;
 
   constructor(opts: RoomsOptions = {}) {
     this.now = opts.now ?? Date.now;
@@ -75,16 +106,15 @@ export class Rooms {
     this.buildId = opts.buildId ?? String(Date.now());
     this.saveLife = opts.saveLife ?? (() => {});
     this.fillTo = opts.fillTo ?? FILL_TARGET;
+    this.maxWatchers = opts.maxWatchers ?? MAX_WATCHERS;
+    this.demoTo = opts.demoTo ?? DEMO_BOTS;
   }
 
-  /** Puts a player in an arena; everyone already there gets a join event. */
-  join(name: string, team: Team, info: MemberInfo, send: Send): Joined {
-    const room = this.pick();
-    const player = room.add(name, team, info, send);
-    const welcome: Welcome = {
+  private welcome(room: Room, you: number): Welcome {
+    return {
       t: WELCOME,
       v: PROTOCOL_VERSION,
-      you: player.id,
+      you,
       arena: room.id,
       build: this.buildId,
       world: { w: WORLD_W, h: WORLD_H },
@@ -92,22 +122,70 @@ export class Rooms {
       tick: room.state.tick,
       roster: room.roster(),
     };
-    return { room: room.id, entity: player.id, welcome };
   }
 
-  /** Takes a player out; everyone left gets a leave event. The last person out closes the arena, bots and all. */
+  /** Puts a player in an arena; everyone already there gets a join event. */
+  join(name: string, team: Team, info: MemberInfo, send: Send): Joined {
+    const room = this.pick();
+    const player = room.add(name, team, info, send);
+    return { room: room.id, entity: player.id, welcome: this.welcome(room, player.id) };
+  }
+
+  /** Takes a player out; everyone left gets a leave event. The arena closes once nobody plays in or watches it. */
   leave(roomId: number, entity: number): void {
     const entry = this.rooms.get(roomId);
     if (!entry) return;
     entry.room.remove(entity, this.now());
-    if (entry.room.size === 0) {
-      entry.stop();
-      this.rooms.delete(roomId);
-    }
+    this.closeIfEmpty(roomId);
   }
 
   input(roomId: number, entity: number, input: Input): void {
     this.rooms.get(roomId)?.room.pushInput(entity, input);
+  }
+
+  /**
+   * Starts a socket watching an arena (the start screen): the busiest arena with people, else the
+   * watched arena with none, else a new demo arena. Returns null at the watcher cap. Nobody in the
+   * arena is told. The caller sends the welcome (`you` 0) before anything else reaches `send`.
+   */
+  watch(send: Send): Watching | null {
+    if (this.watchers.size >= this.maxWatchers) return null;
+    const room = this.busiest() ?? this.mostWatched() ?? this.open();
+    const watcher = this.nextWatcher++;
+    this.watchers.set(watcher, { room: room.id, send });
+    room.watch(watcher, send);
+    if (!this.stopSweep) this.stopSweep = this.startTimer(() => this.rehome(), WATCH_SWEEP_MS);
+    return { watcher, welcome: this.welcome(room, 0) };
+  }
+
+  /** Stops a watcher; its arena closes if nobody plays in or watches it any more. */
+  unwatch(watcher: number): void {
+    const w = this.watchers.get(watcher);
+    if (!w) return;
+    this.watchers.delete(watcher);
+    this.rooms.get(w.room)?.room.unwatch(watcher);
+    this.closeIfEmpty(w.room);
+    if (this.watchers.size === 0) this.endSweep();
+  }
+
+  /**
+   * Moves every watcher of an arena with no people to the busiest arena with people, if there is
+   * one, and sends it that arena's welcome; the arenas left empty close. Runs every WATCH_SWEEP_MS
+   * while anyone watches (tests call it directly).
+   */
+  rehome(): void {
+    const to = this.busiest();
+    if (!to) return;
+    for (const [id, w] of this.watchers) {
+      const from = this.rooms.get(w.room)?.room;
+      if (!from || from.size > 0) continue;
+      from.unwatch(id);
+      w.room = to.id;
+      // The welcome first: the next tick's snapshot must not reach the watcher before it.
+      w.send(JSON.stringify(this.welcome(to, 0)));
+      to.watch(id, w.send);
+      this.closeIfEmpty(from.id);
+    }
   }
 
   /** The arena with this id, for tests. */
@@ -116,30 +194,32 @@ export class Rooms {
   }
 
   stats(): ArenaStats {
-    const arenas = [...this.rooms.values()].map(({ room }) => ({ id: room.id, players: room.size, bots: room.botCount }));
+    const arenas = [...this.rooms.values()].map(({ room }) => ({ id: room.id, players: room.size, bots: room.botCount, watchers: room.watcherCount }));
     return {
       arenas,
       players: arenas.reduce((n, a) => n + a.players, 0),
       bots: arenas.reduce((n, a) => n + a.bots, 0),
+      watchers: this.watchers.size,
       tick: this.ticks.percentiles(this.now()),
     };
   }
 
   /**
    * The open arenas for the stream board, by id, with their people (bots never count) and wave.
-   * Read per HTTP request, never in the tick. Every open arena has at least one person.
+   * Read per HTTP request, never in the tick. An arena nobody plays in (only watched: the start
+   * screen's demo arena) is left out, so every arena listed has at least one person.
    */
   live(): LiveArenas {
     const arenas: LiveArena[] = [];
-    for (const { room } of this.rooms.values()) arenas.push({ id: room.id, players: room.size, wave: room.wave });
+    for (const { room } of this.rooms.values()) if (room.size > 0) arenas.push({ id: room.id, players: room.size, wave: room.wave });
     arenas.sort((a, b) => a.id - b.id);
     return { playing: arenas.reduce((n, a) => n + a.players, 0), arenas };
   }
 
   /**
    * The server is stopping: takes every player out of every arena, which ends and saves each life
-   * in progress with its score so far (Room.remove), then stops every timer and forgets the arenas.
-   * Returns how many lives it ended. Sends nothing to the players.
+   * in progress with its score so far (Room.remove), then stops every timer and forgets the arenas
+   * and the watchers. Returns how many lives it ended. Sends nothing to the sockets.
    */
   endAll(): number {
     let ended = 0;
@@ -148,21 +228,62 @@ export class Rooms {
       stop();
     }
     this.rooms.clear();
+    this.watchers.clear();
+    this.endSweep();
     return ended;
   }
 
-  /** The fullest arena with room for a person (people only; ties: the lowest id), else a new one. */
+  /**
+   * The fullest arena with people and room for one more (ties: the lowest id), else a new one. An
+   * arena with no people (only watched) is never picked: it may be on a late wave.
+   */
   private pick(): Room {
     let best: Room | null = null;
     for (const { room } of this.rooms.values()) {
-      if (room.size >= MAX_PLAYERS_PER_ARENA) continue;
+      if (room.size === 0 || room.size >= MAX_PLAYERS_PER_ARENA) continue;
       if (!best || room.size > best.size || (room.size === best.size && room.id < best.id)) best = room;
     }
-    if (best) return best;
+    return best ?? this.open();
+  }
+
+  /** The arena with the most people, full or not (ties: the lowest id); null when nobody plays. */
+  private busiest(): Room | null {
+    let best: Room | null = null;
+    for (const { room } of this.rooms.values()) {
+      if (room.size === 0) continue;
+      if (!best || room.size > best.size || (room.size === best.size && room.id < best.id)) best = room;
+    }
+    return best;
+  }
+
+  /** The arena with no people and the most watchers (ties: the lowest id), or null. */
+  private mostWatched(): Room | null {
+    let best: Room | null = null;
+    for (const { room } of this.rooms.values()) {
+      if (room.size > 0 || room.watcherCount === 0) continue;
+      if (!best || room.watcherCount > best.watcherCount || (room.watcherCount === best.watcherCount && room.id < best.id)) best = room;
+    }
+    return best;
+  }
+
+  /** Opens a new arena and starts its tick timer. */
+  private open(): Room {
     const id = this.nextId++;
-    const room = new Room(id, arenaSeed(id), this.now(), this.ticks, this.clock, this.saveLife, this.fillTo);
+    const room = new Room(id, arenaSeed(id), this.now(), this.ticks, this.clock, this.saveLife, this.fillTo, this.demoTo);
     const stop = this.startTimer(() => room.advance(this.now()), TICK_MS);
     this.rooms.set(id, { room, stop });
     return room;
+  }
+
+  private closeIfEmpty(roomId: number): void {
+    const entry = this.rooms.get(roomId);
+    if (!entry || entry.room.size > 0 || entry.room.watcherCount > 0) return;
+    entry.stop();
+    this.rooms.delete(roomId);
+  }
+
+  private endSweep(): void {
+    this.stopSweep?.();
+    this.stopSweep = null;
   }
 }

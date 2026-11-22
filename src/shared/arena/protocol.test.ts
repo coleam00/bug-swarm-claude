@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 import {
   CLIENT_TYPES,
+  ERROR_CODES,
   SERVER_TYPES,
   encodeHello,
   encodeInput,
   encodeSnapshot,
   encodeSnapshotPlayers,
   encodeSnapshotShared,
+  encodeWatch,
   parseClientMessage,
   parseServerMessage,
   utf8Bytes,
@@ -40,6 +42,19 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage(encodeHello(1, "Robo", "tabs", PLAYER, false, "abc"))).toEqual({ ...hello, build: "abc" } as never);
     expect(parseClientMessage(s({ ...hello, build: 7 }))).toBeNull();
     expect(parseClientMessage(s({ ...hello, build: "x".repeat(65) }))).toBeNull();
+  });
+
+  test("a watch (v8) parses to its version; a missing or fractional version drops it; extra fields are ignored", () => {
+    expect(parseClientMessage(encodeWatch(8))).toEqual({ t: "watch", v: 8 });
+    expect(parseClientMessage(s({ t: "watch", v: 3, name: "x" }))).toEqual({ t: "watch", v: 3 });
+    expect(parseClientMessage(s({ t: "watch" }))).toBeNull();
+    expect(parseClientMessage(s({ t: "watch", v: 1.5 }))).toBeNull();
+    expect(parseClientMessage(s({ t: "watch", v: "8" }))).toBeNull();
+  });
+
+  test("message types and error codes are only ever appended (destructured by position)", () => {
+    expect(CLIENT_TYPES).toEqual(["hello", "input", "watch"]);
+    expect(ERROR_CODES).toEqual(["version", "name", "team", "hello", "restarting", "build", "full"]);
   });
 
   test("a version mismatch still parses: the server decides", () => {

@@ -5,9 +5,9 @@
 import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES, REVIVE_TICKS, TICK_MS } from "./constants";
 
 /** Client to server. */
-export const CLIENT_TYPES = ["hello", "input"] as const;
+export const CLIENT_TYPES = ["hello", "input", "watch"] as const;
 export type ClientType = (typeof CLIENT_TYPES)[number];
-export const [HELLO, INPUT] = CLIENT_TYPES;
+export const [HELLO, INPUT, WATCH] = CLIENT_TYPES;
 
 /** Server to client. */
 export const SERVER_TYPES = ["welcome", "snapshot", "event", "error"] as const;
@@ -27,12 +27,13 @@ export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
- * rejoin from a page of another build: reload), or the server stopping for a redeploy
- * (restarting: reconnect). The socket closes after each.
+ * rejoin from a page of another build: reload), the server stopping for a redeploy (restarting:
+ * reconnect), or a watch refused because the server has MAX_WATCHERS watching already (full, v8).
+ * The socket closes after each.
  */
-export const ERROR_CODES = ["version", "name", "team", "hello", "restarting", "build"] as const;
+export const ERROR_CODES = ["version", "name", "team", "hello", "restarting", "build", "full"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
-export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO, ERROR_RESTARTING, ERROR_BUILD] = ERROR_CODES;
+export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO, ERROR_RESTARTING, ERROR_BUILD, ERROR_FULL] = ERROR_CODES;
 
 /** The longest name a hello may carry before the server's name rules (rules.ts) even look at it. */
 export const HELLO_NAME_MAX = 64;
@@ -67,14 +68,22 @@ export type InputMessage = {
   dash: boolean;
 };
 
-export type ClientMessage = Hello | InputMessage;
+/**
+ * A spectator (v8, #79): the start screen asks to watch an arena instead of saying hello. A
+ * watcher takes no player slot and sends no inputs; it gets a welcome with `you: 0` and the
+ * arena's events and snapshots (`ack` 0, `me` zeroed). A hello on a watching socket turns it into
+ * a player on the same socket.
+ */
+export type Watch = { t: typeof WATCH; v: number };
+
+export type ClientMessage = Hello | InputMessage | Watch;
 
 export type RosterEntry = { id: number; name: string; team: string };
 
 export type Welcome = {
   t: typeof WELCOME;
   v: number;
-  /** Your entity id. */
+  /** Your entity id; 0 on a watching socket (player ids start at 1). */
   you: number;
   arena: number;
   build: string;
@@ -254,6 +263,10 @@ export function parseClientMessage(raw: string | ArrayBuffer | Uint8Array): Clie
     if (typeof build !== "string" || build.length > HELLO_NAME_MAX) return null;
     return { t: HELLO, v: v as number, name, team, player, touch, build };
   }
+  if (m.t === WATCH) {
+    if (!Number.isInteger(m.v)) return null;
+    return { t: WATCH, v: m.v as number };
+  }
   return null;
 }
 
@@ -390,6 +403,11 @@ export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean, build = ""): string {
   const m: Hello = { t: HELLO, v, name, team, player, touch, build };
+  return JSON.stringify(m);
+}
+
+export function encodeWatch(v: number): string {
+  const m: Watch = { t: WATCH, v };
   return JSON.stringify(m);
 }
 

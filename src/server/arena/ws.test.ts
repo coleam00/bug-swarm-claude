@@ -7,10 +7,10 @@ import { join } from "node:path";
 import type { Database } from "bun:sqlite";
 import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
 import { placeBug, placePickup } from "../../shared/arena/testkit";
-import { encodeHello, encodeInput, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
+import { encodeHello, encodeInput, encodeWatch, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
 import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
 import { TOP_CACHE_MS } from "../app";
-import { startServer, type RunningServer } from "../serve";
+import { startServer, type RunningServer, type ServerOptions } from "../serve";
 import { HIDE_SWEEP_MS as REAL_HIDE_SWEEP_MS } from "./sockets";
 import type { ArenaStats } from "./rooms";
 
@@ -25,10 +25,13 @@ let db: Database;
 let srv: RunningServer;
 let clients: Client[];
 
+const serve = (extra: Partial<ServerOptions> = {}) =>
+  startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS, hideSweepMs: HIDE_SWEEP_MS, arenaFill: 0, ...extra });
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "arena-ws-test-"));
   db = openDb(join(dir, "app.db"));
-  srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "test", liveness: LIVENESS, hideSweepMs: HIDE_SWEEP_MS, arenaFill: 0 });
+  srv = serve();
   clients = [];
 });
 
@@ -152,8 +155,8 @@ test(
     expect(joined[MAX_PLAYERS_PER_ARENA]!.welcome.arena).toBe(2);
     const stats = (await (await fetch(`${srv.url}/api/arena/stats`)).json()) as ArenaStats;
     expect(stats.arenas).toEqual([
-      { id: 1, players: 20, bots: 0 },
-      { id: 2, players: 1, bots: 0 },
+      { id: 1, players: 20, bots: 0, watchers: 0 },
+      { id: 2, players: 1, bots: 0, watchers: 0 },
     ]);
     expect(stats.players).toBe(21);
     await joined[0]!.c.waitFor("a tick time", () => srv.rooms.stats().tick.p50 !== null);
@@ -524,6 +527,129 @@ test(
     expect(mine.me.fx[PICKUP_IDS.indexOf("shield")]).toBeGreaterThan(0);
     const his = await b.c.waitFor("Bob's numbers", () => b.c.got.slice(eventIndex(b.c, "pickup")).find((m): m is Snapshot => m.t === "snapshot"));
     expect(his.me.fx).toEqual(PICKUP_IDS.map(() => 0));
+  },
+  TIMEOUT,
+);
+
+// ---- Watchers (#79): the start screen's spectator connection. ----
+
+/** Connects and watches; resolves with the client and its welcome. */
+async function watchArena(): Promise<{ c: Client; welcome: Welcome }> {
+  const c = await connect();
+  c.send(encodeWatch(PROTOCOL_VERSION));
+  const welcome = await c.waitFor("a watch welcome", () => c.got.find((m): m is Welcome => m.t === "welcome"));
+  return { c, welcome };
+}
+
+const arenaStats = async () => (await (await fetch(`${srv.url}/api/arena/stats`)).json()) as ArenaStats;
+const board = async () => (await (await fetch(`${srv.url}/api/board`)).json()) as { playing: number; arenas: unknown[] };
+
+test(
+  "on an empty server a watch opens a demo arena of bots: a welcome with you 0, the bots' joins, snapshots with ack 0; nobody on the board; it closes with its watcher",
+  async () => {
+    const { c, welcome } = await watchArena();
+    expect(welcome).toMatchObject({ t: "welcome", v: PROTOCOL_VERSION, you: 0, arena: 1 });
+    await c.waitFor("four bots in a snapshot", () => c.got.some((m) => m.t === "snapshot" && m.p.length === 4));
+    expect(c.got.filter((m) => m.t === "event" && m.kind === "join").length).toBe(4);
+    expect(c.got.filter((m): m is Snapshot => m.t === "snapshot").every((m) => m.ack === 0 && m.me.al === 0)).toBe(true);
+    const stats = await arenaStats();
+    expect(stats.arenas).toEqual([{ id: 1, players: 0, bots: 4, watchers: 1 }]);
+    expect(stats).toMatchObject({ players: 0, watchers: 1 });
+    expect(await board()).toMatchObject({ playing: 0, arenas: [] });
+    await c.close();
+    await c.waitFor("the demo arena closed", () => srv.rooms.stats().arenas.length === 0 && srv.rooms.stats().watchers === 0);
+  },
+  TIMEOUT,
+);
+
+test(
+  "the watcher cap: one more watch gets error full and close 1008; once a watcher leaves, a new one gets in",
+  async () => {
+    await srv.stop();
+    srv = serve({ arenaWatchers: 2 });
+    const first = await watchArena();
+    await watchArena();
+    const third = await connect();
+    third.send(encodeWatch(PROTOCOL_VERSION));
+    expect(await third.closed).toBe(1008);
+    expect(third.got).toEqual([{ t: "error", code: "full" }]);
+    await first.c.close();
+    await first.c.waitFor("the slot freed", () => srv.rooms.stats().watchers === 1);
+    const again = await watchArena();
+    expect(again.welcome.you).toBe(0);
+  },
+  TIMEOUT,
+);
+
+test(
+  "a watch lands in the arena with people; the players never hear of it and its inputs move nothing",
+  async () => {
+    const ada = await enter("Ada");
+    const { c, welcome } = await watchArena();
+    expect(welcome).toMatchObject({ you: 0, arena: ada.welcome.arena, roster: [{ id: ada.welcome.you, name: "Ada", team: "tabs" }] });
+    const before = ada.c.got.length;
+    // The watcher sends inputs at full rate for a while: nothing of it reaches the arena.
+    for (let seq = 1; seq <= 20; seq++) {
+      c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: true, dash: true }));
+      await Bun.sleep(20);
+    }
+    await c.close();
+    await ada.c.waitFor("more snapshots", () => ada.c.got.length > before + 5);
+    expect(ada.c.got.filter((m) => m.t === "event")).toEqual([]);
+    expect(srv.rooms.room(ada.welcome.arena)!.state.players.map((p) => p.name)).toEqual(["Ada"]);
+    expect(srv.rooms.room(ada.welcome.arena)!.state.players[0]!.kills).toBe(0);
+    await ada.c.waitFor("the watcher gone", () => srv.rooms.stats().watchers === 0);
+    expect(srv.rooms.stats()).toMatchObject({ players: 1, watchers: 0 });
+  },
+  TIMEOUT,
+);
+
+test(
+  "a hello on a watching socket joins as a player on the same socket, never in the people-less demo arena, which then closes",
+  async () => {
+    const { c } = await watchArena();
+    await c.waitFor("a demo snapshot", () => c.got.some((m) => m.t === "snapshot"));
+    c.send(hello("Ada"));
+    const played = await c.waitFor("a player welcome", () => c.got.find((m): m is Welcome => m.t === "welcome" && m.you > 0));
+    expect(played.arena).not.toBe(1);
+    await c.waitFor("Ada's own snapshot", () => c.got.some((m) => m.t === "snapshot" && m.me.al === 1));
+    expect(srv.rooms.stats()).toMatchObject({ players: 1, watchers: 0, arenas: [{ id: played.arena, players: 1, watchers: 0 }] });
+    expect(srv.server.pendingWebSockets).toBe(1);
+  },
+  TIMEOUT,
+);
+
+test(
+  "a watched arena whose last person leaves stays open with bots, off the board; rehome moves its watcher to a new player's arena",
+  async () => {
+    const ada = await enter("Ada");
+    const { c } = await watchArena();
+    await ada.c.close();
+    await c.waitFor("Ada gone, demo bots in", () => srv.rooms.stats().arenas.some((a) => a.id === 1 && a.players === 0 && a.bots === 4));
+    expect(await board()).toMatchObject({ playing: 0, arenas: [] });
+    const bob = await enter("Bob");
+    expect(bob.welcome.arena).toBe(2);
+    srv.rooms.rehome();
+    const moved = await c.waitFor("a welcome to arena 2", () => c.got.find((m): m is Welcome => m.t === "welcome" && m.arena === 2));
+    expect(moved.you).toBe(0);
+    expect(moved.roster).toContainEqual({ id: bob.welcome.you, name: "Bob", team: "tabs" });
+    expect(srv.rooms.stats().arenas.map((a) => a.id)).toEqual([2]);
+    expect(bob.c.got.filter((m) => m.t === "event")).toEqual([]);
+  },
+  TIMEOUT,
+);
+
+test(
+  "a watch speaks the protocol version or is refused; a restart tells watchers it is restarting",
+  async () => {
+    const old = await connect();
+    old.send(encodeWatch(PROTOCOL_VERSION - 1));
+    expect(await old.closed).toBe(1008);
+    expect(old.got).toEqual([{ t: "error", code: "version" }]);
+    const { c } = await watchArena();
+    await srv.stop();
+    expect(await c.closed).toBe(1012);
+    expect(c.got.at(-1)).toEqual({ t: "error", code: "restarting" });
   },
   TIMEOUT,
 );
