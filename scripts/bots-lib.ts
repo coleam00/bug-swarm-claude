@@ -195,6 +195,21 @@ export const KBPS_PER_PLAYER_BUDGET = 40;
 export type BotBytes = { first: number; second: number; welcomedAt: number | null };
 
 /**
+ * Counts one message's payload `bytes`, received at `nowMs`, toward a bot's run: nothing before its
+ * welcome, the first half before `midMs`, the gated second half from it.
+ */
+export function countBytes(b: BotBytes, bytes: number, nowMs: number, midMs: number): void {
+  if (b.welcomedAt === null) return;
+  if (nowMs >= midMs) b.second += bytes;
+  else b.first += bytes;
+}
+
+/** The process exit code for a run: 1 when budgetVerdict named any miss, else 0. */
+export function exitCode(misses: readonly string[]): 0 | 1 {
+  return misses.length > 0 ? 1 : 0;
+}
+
+/**
  * A bot's KB/s (1 KB = 1000 B) over the second half of the run, `midMs` to `endMs`, or over its
  * share of it when it was welcomed later. The first half is left out: bugs are still ramping up to
  * the arena's cap then, so it under-reads. Null for a bot never welcomed or welcomed too late.

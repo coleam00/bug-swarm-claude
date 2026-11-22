@@ -97,6 +97,8 @@ export type ArenaFrame = {
   fx: number[];
   fy: number[];
   fgone: number[];
+  /** Per pickup, the stamp of the last encode whose recipient already held it (like bmark). */
+  fmark: number[];
   /** Every downed player, as the wire's `d`. */
   downs: string;
   /** This tick's events as JSON rows, with where each happened for culling. */
@@ -104,7 +106,7 @@ export type ArenaFrame = {
   sx: number[];
   sy: number[];
   ends: string[];
-  /** A shot end's shot's origin (NaN: unknown, always sent). */
+  /** Where a shot end's shot started (every shot fires in a quantized tick, so it is known). */
   ex: number[];
   ey: number[];
   kills: string[];
@@ -143,6 +145,7 @@ export function createArenaFrame(): ArenaFrame {
     fx: [],
     fy: [],
     fgone: [],
+    fmark: [],
     downs: "[]",
     shots: [],
     sx: [],
@@ -224,6 +227,7 @@ export function quantizeArena(state: ArenaState, wave: number, f: ArenaFrame): A
     f.fx[i] = Math.round(x.x * 10);
     f.fy[i] = Math.round(x.y * 10);
     f.fgone[i] = state.tick + x.ticksLeft;
+    f.fmark[i] = 0;
   }
   const ev = state.events;
   f.shots.length = 0;
@@ -239,15 +243,10 @@ export function quantizeArena(state: ArenaState, wave: number, f: ArenaFrame): A
   for (let i = 0; i < ev.shotsEnded.length; i++) {
     const e = ev.shotsEnded[i]!;
     f.ends.push(`[${e.id},${e.blocked ? 2 : e.hit ? 1 : 0},${q1(e.travelled)}]`);
-    f.ex[i] = f.originX.get(e.id) ?? NaN;
-    f.ey[i] = f.originY.get(e.id) ?? NaN;
+    f.ex[i] = f.originX.get(e.id)!;
+    f.ey[i] = f.originY.get(e.id)!;
     f.originX.delete(e.id);
     f.originY.delete(e.id);
-  }
-  // Every shot ends within SHOT_RANGE, so this only trips if one never reports an end.
-  if (f.originX.size > 10_000) {
-    f.originX.clear();
-    f.originY.clear();
   }
   f.kills.length = 0;
   for (let i = 0; i < ev.kills.length; i++) {
@@ -372,7 +371,7 @@ function eventsJson(f: ArenaFrame, box: ViewBox | null, you: number): string {
   let s = "";
   for (let i = 0; i < f.shots.length; i++) if (inBox(box, f.sx[i]!, f.sy[i]!, SHOT_RANGE)) s += (s ? "," : "") + f.shots[i];
   let e = "";
-  for (let i = 0; i < f.ends.length; i++) if (Number.isNaN(f.ex[i]) || inBox(box, f.ex[i]!, f.ey[i]!, SHOT_RANGE)) e += (e ? "," : "") + f.ends[i];
+  for (let i = 0; i < f.ends.length; i++) if (inBox(box, f.ex[i]!, f.ey[i]!, SHOT_RANGE)) e += (e ? "," : "") + f.ends[i];
   let k = "";
   for (let i = 0; i < f.kills.length; i++) if ((you !== 0 && f.kby[i] === you) || inBox(box, f.kx[i]!, f.ky[i]!)) k += (k ? "," : "") + f.kills[i];
   return `"s":[${s}],"e":[${e}],"k":[${k}]`;
@@ -452,18 +451,23 @@ export function encodeView(f: ArenaFrame, vs: ViewState, box: ViewBox | null, yo
   }
   vs.players = w;
   // Pickups: they never move or change, so a delta only says which came and went.
+  // Which pickups the recipient already holds is stamped on the frame first (fmark), before the
+  // loop below writes over vs.fid.
   let gf = "";
   for (let i = 0; i < vs.floor; i++) {
     let gone = true;
-    for (let j = 0; j < f.floor; j++) if (f.fid[j] === vs.fid[i] && inBox(box, f.fx[j]! / 10, f.fy[j]! / 10)) gone = false;
+    for (let j = 0; j < f.floor; j++) {
+      if (f.fid[j] !== vs.fid[i] || !inBox(box, f.fx[j]! / 10, f.fy[j]! / 10)) continue;
+      gone = false;
+      f.fmark[j] = stamp;
+    }
     if (gone && !key) gf += (gf ? "," : "") + vs.fid[i];
   }
   let nf = "";
   w = 0;
   for (let j = 0; j < f.floor; j++) {
     if (!inBox(box, f.fx[j]! / 10, f.fy[j]! / 10)) continue;
-    let had = false;
-    for (let i = 0; i < vs.floor; i++) if (vs.fid[i] === f.fid[j]) had = true;
+    const had = f.fmark[j] === stamp;
     vs.fid[w] = f.fid[j]!;
     vs.fkind[w] = f.fkind[j]!;
     vs.fx[w] = f.fx[j]!;

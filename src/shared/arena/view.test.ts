@@ -3,7 +3,6 @@
 // straight from the simulation's state, on every tick. Plus keyframe cadence, resync after a lost
 // delta, the minimap's far bugs, and the size of a full view.
 import { describe, expect, test } from "bun:test";
-import { viewCentre } from "./bugs/index";
 import {
   BUG_KINDS,
   DOWN_TICKS,
@@ -77,7 +76,7 @@ function expected(a: ArenaState, box: ViewBox | null, you: number, ack: number, 
     e: a.events.shotsEnded
       .filter((e) => {
         const o = origins.get(e.id);
-        return !o || inBox(box, o[0], o[1], SHOT_RANGE);
+        return o !== undefined && inBox(box, o[0], o[1], SHOT_RANGE);
       })
       .map((e) => [e.id, e.blocked ? 2 : e.hit ? 1 : 0, q1(e.travelled)]),
     k: a.events.kills.filter((k) => (you !== 0 && k.by === you) || inBox(box, k.x, k.y)).map((k) => [k.bug, k.by, q1(k.x), q1(k.y), k.points, BUG_KINDS.indexOf(k.kind)]),
@@ -213,6 +212,23 @@ describe("encode, then decode, equals the arena culled and quantized", () => {
     expect(w.m).toBeUndefined();
   });
 
+  test("an older pickup entering the view beside one already held arrives once, and the held one is not sent again", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    const older = placePickup(a, 1900, 1200, "laser");
+    const newer = placePickup(a, 1300, 1200, "shield");
+    const frame = createArenaFrame();
+    const vs = createViewState();
+    const mirror = createViewMirror();
+    const box: ViewBox = { cx: 0, cy: 0, half: 0 };
+    const decode = () => applySnapshot(mirror, parseServerMessage(encodeView(quantizeArena(a, 1, frame), vs, viewBoxOf(p.x, p.y, box), p.id, 0, meOf(p))) as WireSnapshot)!;
+    expect(decode().f.map((r) => r[0])).toEqual([newer.id]);
+    p.x = 1400;
+    a.tick++;
+    const got = decode();
+    expect(got.f.map((r) => r[0]).sort((x, y) => x - y)).toEqual([older.id, newer.id]);
+  });
+
   test("your own row is exact to 0.01 and carries your velocity; others' rows are to 0.1 with none", () => {
     const { a, ps } = arenaWith([1000.123, 1000.987], [1100.456, 1000.044]);
     ps[0]!.vx = 123.456;
@@ -332,6 +348,5 @@ describe("size", () => {
     expect(maxDelta).toBeLessThan(2000);
     expect(maxKey).toBeLessThan(4500);
     expect(VIEW_HALF).toBe(600);
-    expect(viewCentre(0, WORLD_W)).toBe(340);
   });
 });

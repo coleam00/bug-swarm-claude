@@ -32,6 +32,8 @@ import {
   createTally,
   createWander,
   budgetVerdict,
+  countBytes,
+  exitCode,
   firstHalfKbps,
   formatSummary,
   rateStats,
@@ -108,10 +110,7 @@ function open(i: number): void {
   ws.addEventListener("message", (e) => {
     tally.messages++;
     const raw = String(e.data);
-    if (bot.bytes.welcomedAt !== null) {
-      if (performance.now() >= midAt) bot.bytes.second += utf8Bytes(raw);
-      else bot.bytes.first += utf8Bytes(raw);
-    }
+    countBytes(bot.bytes, utf8Bytes(raw), performance.now(), midAt);
     const wire = parseServerMessage(raw);
     if (!wire) return;
     const m = read(wire);
@@ -239,4 +238,4 @@ await Promise.race([Promise.all([...bots.map((b) => b.closed), ...watchers.map((
 
 for (const line of formatSummary(args, tally, seconds, tick)) console.log(line);
 const misses = budgetVerdict({ errors: tally.errors.length, joins: tally.joins, count: args.count, tick, kbps: rateStats(tally.kbps) });
-process.exit(misses.length > 0 ? 1 : 0);
+process.exit(exitCode(misses));

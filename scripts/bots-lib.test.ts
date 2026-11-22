@@ -13,6 +13,8 @@ import {
   botName,
   botTeam,
   budgetVerdict,
+  countBytes,
+  exitCode,
   createTally,
   firstHalfKbps,
   createWander,
@@ -222,6 +224,23 @@ describe("the budget gate (#89)", () => {
     // The first half, printed only: from the welcome to the middle.
     expect(firstHalfKbps({ first: 500_000, second: 0, welcomedAt: 10_000 }, 60_000)).toBe(10);
     expect(firstHalfKbps({ first: 0, second: 0, welcomedAt: null }, 60_000)).toBeNull();
+  });
+
+  test("a message counts nowhere before the welcome, in the first half before the middle, in the gated second half from it", () => {
+    const b = { first: 0, second: 0, welcomedAt: null as number | null };
+    countBytes(b, 100, 1000, 60_000);
+    expect(b).toEqual({ first: 0, second: 0, welcomedAt: null });
+    b.welcomedAt = 2000;
+    countBytes(b, 10, 59_999, 60_000);
+    countBytes(b, 20, 60_000, 60_000);
+    countBytes(b, 30, 90_000, 60_000);
+    expect([b.first, b.second]).toEqual([10, 50]);
+  });
+
+  test("the run exits 1 on any miss, 0 with none", () => {
+    expect(exitCode(budgetVerdict(pass))).toBe(0);
+    expect(exitCode(budgetVerdict({ ...pass, errors: 1 }))).toBe(1);
+    expect(exitCode(budgetVerdict({ ...pass, kbps: rateStats([41]) }))).toBe(1);
   });
 
   test("rates: mean, p95 and max", () => {

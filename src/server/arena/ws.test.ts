@@ -645,6 +645,8 @@ test(
     for (const at of c.welcomes) expect(c.wire[at]!.key).toBe(1);
     expect(c.wire[c.welcomes[1]!]!.you).toBe(played.you);
     for (let i = 1; i < c.wire.length; i++) if (c.wire[i]!.key !== 1) expect(c.wire[i]!.base).toBe(c.wire[i - 1]!.tick);
+    // ...and deltas do come: a socket layer that reported every send as dropped would send only keyframes.
+    expect(c.wire.slice(c.welcomes[1]! + 1).some((w) => w.key !== 1)).toBe(true);
   },
   TIMEOUT,
 );

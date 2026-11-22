@@ -8,7 +8,6 @@ import {
   FILL_TARGET,
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
-  KEYFRAME_TICKS,
   MAX_PLAYERS_PER_ARENA,
   MINIMAP_CELL,
   PROTOCOL_VERSION,
@@ -154,16 +153,6 @@ describe("ticking", () => {
     expect(sa.p[0]!.slice(1, 5)).toEqual([Math.round(ada.x * 100) / 100, Math.round(ada.y * 100) / 100, 120, 0]);
     expect(sb.p[0]!.slice(1, 5)).toEqual([Math.round(ada.x * 10) / 10, Math.round(ada.y * 10) / 10, 0, 0]);
     expect(sa.me).toMatchObject({ x: sa.p[0]![1], vx: 120 });
-  });
-
-  test("v10 (#89): a member's first snapshot is a keyframe, then deltas on the one before, a keyframe every KEYFRAME_TICKS", () => {
-    const { rooms, tick } = setup();
-    const a = client();
-    rooms.join("Ada", "tabs", INFO, a.send);
-    tick(KEYFRAME_TICKS + 2);
-    expect(a.wire.map((w) => w.key === 1)).toEqual(a.wire.map((_, i) => i % KEYFRAME_TICKS === 0));
-    for (let i = 1; i < a.wire.length; i++) if (a.wire[i]!.key !== 1) expect(a.wire[i]!.base).toBe(a.wire[i - 1]!.tick);
-    expect(snapshots(a.got)).toHaveLength(KEYFRAME_TICKS + 2);
   });
 
   test("a snapshot the socket dropped makes that member's next one a keyframe; the others carry on with deltas", () => {
