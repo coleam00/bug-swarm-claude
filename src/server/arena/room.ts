@@ -1,7 +1,7 @@
 // One arena on the server: the authoritative simulation, its members' input queues, and the tick
 // that steps it and sends every member a snapshot. No timers and no clock of its own: rooms.ts
-// drives `advance` from its timer, so tests step it by hand. A player going down and a revive are
-// broadcast to everyone. A life that ends (bled out while down, or its player leaving) is handed
+// drives `advance` from its timer, so tests step it by hand. A player going down, a revive, a
+// pickup taken and a shield blocking a hit (#73) are broadcast to everyone. A life that ends (bled out while down, or its player leaving) is handed
 // to `onLifeEnd` as a LifeRecord; the server saves it off the tick (lives.ts).
 //
 // Fill bots (#66): with `fillTo` above 0, an arena with people in it is topped up with server
@@ -12,6 +12,7 @@
 import {
   BUG_KINDS,
   HITS_PER_LIFE,
+  PICKUP_IDS,
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
   MAX_PLAYERS_PER_ARENA,
@@ -21,11 +22,13 @@ import {
 } from "../../shared/arena/constants";
 import { mult } from "../../shared/arena/combat";
 import {
+  BLOCK,
   DOWN,
   EVENT,
   JOIN,
   LEAVE,
   OVER,
+  PICKUP,
   REVIVE,
   encodeSnapshot,
   encodeSnapshotShared,
@@ -110,6 +113,9 @@ export function meOf(p: Player, out: SnapshotMe): SnapshotMe {
   out.dk = p.dashTicks;
   out.dc = p.dashCooldown;
   out.dn = p.down ? 1 : 0;
+  // Filled in place: the array is the room's, reused every snapshot.
+  out.fx.length = p.effect.length;
+  for (let i = 0; i < p.effect.length; i++) out.fx[i] = p.effect[i]!;
   return out;
 }
 
@@ -119,7 +125,7 @@ export class Room {
   /** Fill bots by player id, oldest first. */
   private readonly bots = new Map<number, Bot>();
   private nextTickAt: number;
-  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0 };
+  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [] };
 
   constructor(
     readonly id: number,
@@ -142,6 +148,11 @@ export class Room {
 
   get botCount(): number {
     return this.bots.size;
+  }
+
+  /** The arena's wave now (1 up), as the snapshot sends it. */
+  get wave(): number {
+    return wave(this.state.tick);
   }
 
   /** Adds a fill bot now and tells everyone. The tick tops arenas up; tests call it directly. */
@@ -287,7 +298,8 @@ export class Room {
    * while the queue is empty, its move and fire stopped once INPUT_STALE_TICKS pass with nothing
    * new), the arena steps, everyone is told of each player who went down and then of each
    * revive, every life that ended is handed on and its player told, and every member gets a
-   * snapshot with its own ack and numbers. Events of a tick are sent before its snapshot. The
+   * snapshot with its own ack and numbers (pickups taken and shield blocks are broadcast with the
+   * downs and revives). Events of a tick are sent before its snapshot. The
    * shared part of the snapshot is encoded once for everyone.
    */
   tick(nowMs: number): void {
@@ -312,12 +324,14 @@ export class Room {
     const ev = this.state.events;
     for (const id of ev.downs) this.broadcast({ t: EVENT, kind: DOWN, id });
     for (const r of ev.revives) this.broadcast({ t: EVENT, kind: REVIVE, id: r.id, by: r.by, points: r.points });
+    for (const x of ev.pickups) this.broadcast({ t: EVENT, kind: PICKUP, id: x.player, pickup: PICKUP_IDS.indexOf(x.kind) });
+    for (const id of ev.blocks) this.broadcast({ t: EVENT, kind: BLOCK, id });
     for (const life of this.state.events.livesEnded) {
       // A fill bot is not a member, so its lives end here unsaved and unannounced.
       const m = this.members.get(life.id);
       if (m) this.lifeEnded(m, life, nowMs);
     }
-    const shared = encodeSnapshotShared(this.state, BUG_KINDS, wave(this.state.tick));
+    const shared = encodeSnapshotShared(this.state, BUG_KINDS, wave(this.state.tick), PICKUP_IDS);
     for (const m of this.members.values()) m.send(encodeSnapshot(this.state.tick, m.ack, meOf(m.player, this.me), shared));
     this.ticks.record(nowMs, this.clock() - t0);
   }

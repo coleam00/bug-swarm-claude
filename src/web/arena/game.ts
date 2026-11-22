@@ -11,12 +11,17 @@
 // `respawn()`, which sends the respawn press once RESTART_DELAY_MS has passed. `stop()` undoes
 // everything `startArena` did: the frame loop, every listener, the probe and the socket, so a
 // remount never leaves a second socket (each one's leaving would save a life).
-import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, TICK_MS } from "../../shared/arena/constants";
+// Pickups (#73): the floor comes in each snapshot's `f` and is drawn with the bugs; a `pickup`
+// event floats the pickup's label over whoever took it, and a `block` event pops their shield.
+import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
+import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
+  BLOCK,
   EVENT,
   JOIN,
   LEAVE,
   OVER,
+  PICKUP,
   REVIVE,
   SNAPSHOT,
   WELCOME,
@@ -31,15 +36,16 @@ import { isTeam, type Team } from "../../server/rules";
 import { createFpsMeter, tickFps } from "../game/fps";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "../game/fx/particles";
 import { HIT_SHAKE, createShake, kick, updateShake } from "../game/fx/shake";
-import { createTexts, setTextScale, spawnText, updateTexts } from "../game/fx/text";
+import { TEXT_CAPACITY, createTexts, setTextScale, spawnText, spawnWord, updateTexts } from "../game/fx/text";
 import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { GLOW_SHOT } from "../game/look";
+import { GLOW_SHIELD, GLOW_SHOT } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { BUG_DRAW } from "./draw/bugs";
+import { PICKUP_DRAW } from "./draw/pickups";
 import {
   DASH_KEYS,
   createControls,
@@ -70,7 +76,7 @@ import {
 import { markUpdateReload } from "../player";
 import { connectArena } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
-import { createArenaRenderer, type BugsView, type Robot, type Scene } from "./render";
+import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 import { isBot } from "./tag";
 
@@ -78,6 +84,8 @@ import { isBot } from "./tag";
 const MAX_STEPS_PER_FRAME = 3;
 /** Particles in a shot's spark (a kill bursts BURST_COUNT). */
 const SPARK_COUNT = 5;
+/** A pickup's label floats up from this far above the robot that took it, world units (#73). */
+const LABEL_ABOVE = 46;
 
 /** Who joins: the local player's id, name and team (player.ts). */
 export type ArenaPlayer = { id: string; name: string; team: Team };
@@ -127,7 +135,8 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   const shots = createShots();
   const kills = createKillQueue();
   const particles = createParticles();
-  const texts = createTexts();
+  // Score labels, and each pickup's word label (#73), built once.
+  const texts = createTexts(TEXT_CAPACITY, PICKUP_LABELS);
   const shake = createShake();
   const hudFx = createHudFx();
   // Effects draw from their own generator, never the simulation's.
@@ -147,7 +156,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   let seq = 0;
   let wave = 0;
   /** Your numbers from the last snapshot. */
-  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0 };
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [] };
   let haveMe = false;
   /** Your last life's end, performance.now ms, until you are in a life again. */
   let overAt: number | null = null;
@@ -178,6 +187,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
         revBy: 0,
         bot: false,
         tag: { x: 0, w: 0 },
+        fx: 0,
       };
       roster.set(id, r);
     }
@@ -218,9 +228,9 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       resetHudFx(hudFx);
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
     } else if (m.t === SNAPSHOT) {
-      pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d);
+      pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
-      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick);
+      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5] === 1);
       for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       Object.assign(me, m.me);
@@ -258,6 +268,18 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
         // Everyone sees the reviver's points float up over the robot they brought back.
         const r = roster.get(m.id);
         if (r && (m.points ?? 0) > 0) spawnText(texts, r.x, r.y, m.points);
+      } else if (m.kind === PICKUP) {
+        // Everyone sees what was taken: its label over the robot that took it, and a burst in its glow.
+        const r = roster.get(m.id);
+        const id = PICKUP_IDS[m.pickup ?? -1];
+        if (r && id) {
+          spawnWord(texts, r.x, r.y - LABEL_ABOVE, m.pickup!);
+          spawnBurst(particles, r.x, r.y, SPARK_COUNT * 2, PICKUP_DRAW[id].glow, fxRng);
+        }
+      } else if (m.kind === BLOCK) {
+        // A shield blocked a hit: the bubble pops, for everyone.
+        const r = roster.get(m.id);
+        if (r) spawnBurst(particles, r.x, r.y, BURST_COUNT, GLOW_SHIELD, fxRng);
       }
     }
   };
@@ -374,7 +396,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
 
   const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false };
   const self = { x: 0, y: 0 };
-  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false };
+  const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false, fx: 0 };
   const span: BugSpan = { from: null, to: null, t: 0 };
   const bugs: BugsView = {
     x: new Float32Array(MAX_BUGS_PER_ARENA),
@@ -387,6 +409,13 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     phaseS: new Float32Array(MAX_BUGS_PER_ARENA),
     count: 0,
   };
+  const floor: FloorView = {
+    x: new Float32Array(MAX_PICKUPS_PER_ARENA),
+    y: new Float32Array(MAX_PICKUPS_PER_ARENA),
+    kind: new Uint8Array(MAX_PICKUPS_PER_ARENA),
+    left: new Float32Array(MAX_PICKUPS_PER_ARENA),
+    count: 0,
+  };
   /** Each bug's last heading, so a bug standing still keeps facing where it was going. */
   const headings = new Map<number, number>();
   const scene: Scene = {
@@ -395,6 +424,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     self: -1,
     t: 0,
     bugs,
+    floor,
     shots,
     mineAt: 0,
     othersAt: 0,
@@ -440,8 +470,18 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   const fillBugs = (rt: number) => {
     bugSpan(interp, rt, span);
     bugs.count = 0;
+    floor.count = 0;
     const from = span.from;
     if (!from) return;
+    // The floor's pickups (#73), from the same snapshot as the bugs, so a drop shows as its bug dies.
+    for (const row of from.f) {
+      if (floor.count >= MAX_PICKUPS_PER_ARENA) break;
+      const i = floor.count++;
+      floor.x[i] = row[2];
+      floor.y[i] = row[3];
+      floor.kind[i] = row[1];
+      floor.left[i] = (row[4] - Math.max(0, rt - from.tick)) * DT;
+    }
     for (const row of from.b) {
       if (bugs.count >= MAX_BUGS_PER_ARENA) break;
       const id = row[0];
@@ -546,6 +586,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
         setDown(r, dn);
         r.inv = row[7] === 1;
         r.prot = row[9] === 1;
+        r.fx = row[10] ?? 0;
         r.dashing = !r.down && predictor.dashTicks > 0;
         selfIndex = drawn.length;
       } else if (sample(interp, row[0], rt, at) && at.alive) {
@@ -556,6 +597,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
         r.aim = at.aim;
         r.inv = at.inv;
         r.prot = at.prot;
+        r.fx = at.fx;
         setDown(r, downAt(interp, row[0], rt));
       } else {
         r.dashing = false;

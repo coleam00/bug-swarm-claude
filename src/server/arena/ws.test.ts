@@ -5,8 +5,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
-import { placeBug } from "../../shared/arena/testkit";
+import { HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
+import { placeBug, placePickup } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, type ServerMessage, type Snapshot, type Welcome } from "../../shared/arena/protocol";
 import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
 import { TOP_CACHE_MS } from "../app";
@@ -178,6 +178,9 @@ test(
     expect(four.p.map((p) => p[0]).sort((x, y) => x - y)).toEqual([a.welcome.you, a.welcome.you + 1, a.welcome.you + 2, a.welcome.you + 3]);
     const stats = (await (await fetch(`${srv.url}/api/arena/stats`)).json()) as ArenaStats;
     expect(stats).toMatchObject({ arenas: [{ id: 1, players: 1, bots: 3 }], players: 1, bots: 3 });
+    // The stream board reads the same rooms (serve.ts wires them in) and counts the person only (#74).
+    const board = (await (await fetch(`${srv.url}/api/board`)).json()) as { playing: number; arenas: unknown[] };
+    expect(board).toMatchObject({ playing: 1, arenas: [{ id: a.welcome.arena, players: 1, wave: 1 }] });
   },
   TIMEOUT,
 );
@@ -472,6 +475,55 @@ test(
     const after = (c: Client) => c.waitFor("a snapshot after the revive", () => c.got.slice(eventIndex(c, "revive")).find((m): m is Snapshot => m.t === "snapshot"));
     expect((await after(b.c)).me).toMatchObject({ al: 1, dn: 0, hl: 1 });
     expect((await after(a.c)).me.sc).toBeGreaterThanOrEqual(REVIVE_POINTS);
+  },
+  TIMEOUT,
+);
+
+test(
+  "two clients (#73): both see a pickup on the floor, then a pickup event and the taker's effect bit when one walks over it",
+  async () => {
+    const a = await enter("Ada", "tabs");
+    const b = await enter("Bob", "spaces");
+    const ida = a.welcome.you;
+    const room = srv.rooms.room(a.welcome.arena)!;
+    const pa = room.state.players.find((p) => p.id === ida)!;
+    const pb = room.state.players.find((p) => p.id === b.welcome.you)!;
+    // Between ticks: no bugs, Bob well to Ada's left, and a shield 200 units to her right.
+    room.state.bugs.length = 0;
+    pa.budget = 0;
+    pb.budget = 0;
+    pa.invulnTicks = 400;
+    pb.x = Math.max(20, pa.x - 300);
+    pb.y = pa.y;
+    const f = placePickup(room.state, pa.x + 200, pa.y, "shield");
+    for (const c of [a.c, b.c]) {
+      const seen = await c.waitFor("the pickup in a snapshot", () => c.got.find((m): m is Snapshot => m.t === "snapshot" && m.f.some((r) => r[0] === f.id)));
+      const row = seen.f.find((r) => r[0] === f.id)!;
+      expect(row[1]).toBe(PICKUP_IDS.indexOf("shield"));
+      expect(row[2]).toBeCloseTo(f.x, 0);
+    }
+    // Ada walks right with real inputs until both see her take it.
+    const taken = Promise.all([a.c, b.c].map((c) => c.waitFor("Ada's pickup event", () => eventIndex(c, "pickup") >= 0)));
+    let done = false;
+    void taken.finally(() => (done = true));
+    let seq = 0;
+    while (!done) {
+      a.c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+      await Bun.sleep(50);
+    }
+    await taken;
+    for (const c of [a.c, b.c]) {
+      expect(c.got[eventIndex(c, "pickup")]).toEqual({ t: "event", kind: "pickup", id: ida, pickup: PICKUP_IDS.indexOf("shield") });
+      // The next snapshot: the floor is empty, and Ada's row carries the shield's bit.
+      const next = await c.waitFor("a snapshot after the pickup", () => c.got.slice(eventIndex(c, "pickup")).find((m): m is Snapshot => m.t === "snapshot"));
+      expect(next.f).toEqual([]);
+      expect(next.p.find((r) => r[0] === ida)![10]).toBe(1 << PICKUP_IDS.indexOf("shield"));
+    }
+    // Only the taker's own numbers carry the timer.
+    const mine = await a.c.waitFor("Ada's timer", () => a.c.got.slice(eventIndex(a.c, "pickup")).find((m): m is Snapshot => m.t === "snapshot"));
+    expect(mine.me.fx[PICKUP_IDS.indexOf("shield")]).toBeGreaterThan(0);
+    const his = await b.c.waitFor("Bob's numbers", () => b.c.got.slice(eventIndex(b.c, "pickup")).find((m): m is Snapshot => m.t === "snapshot"));
+    expect(his.me.fx).toEqual(PICKUP_IDS.map(() => 0));
   },
   TIMEOUT,
 );

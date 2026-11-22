@@ -7,10 +7,14 @@
 // HELP over it, a ring fills between it and whoever is reviving it, an arrow at the screen's edge
 // points to each one out of view nearby, its minimap dot blinks, and your own HUD says DOWN with
 // the seconds left. A server fill bot (#66) has a small BOT pill left of its name, which is drawn
-// dimmer. It reuses release 1's sprites and pooled
+// dimmer. Pickups (#73): each on the floor as a halo, a disc and its glyph, blinking in its last
+// 3 s; on every robot that has one, its look (a shield bubble, a glow at a laser's barrel); a laser
+// shot as a longer, brighter beam; your active ones as timer icons under the HUD line, each with a
+// ring draining as it runs out. It reuses release 1's sprites and pooled
 // effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
 // built on resize only; a frame allocates nothing but the strings of a value that changed.
-import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
+import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
+import { pickupDef } from "../../shared/arena/pickups/registry";
 import type { SnapshotMe } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
@@ -20,6 +24,7 @@ import { TRAIL_SECONDS, trailSlot, type Trail } from "../game/fx/trail";
 import type { Insets } from "../game/hud";
 import { hudLayout } from "../game/hud";
 import {
+  GLOW_LASER,
   GLOW_SHOT,
   GLOW_WHITE,
   LETTERBOX,
@@ -43,9 +48,23 @@ import type { Camera } from "./camera";
 import type { DashButton } from "./controls";
 import { BUG_DRAW } from "./draw/bugs";
 import type { BugFrame } from "./draw/bugs/kind";
+import { PICKUP_DRAW } from "./draw/pickups";
+import { floorAlpha } from "./draw/pickups/kind";
 import { edgeArrow, minimapDotOn, type EdgeArrow } from "./help";
 import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
-import { HUD_GLYPH_GAP, HUD_GLYPH_WIDTH, HUD_PIP_RADIUS, HUD_PIP_STEP, createHudLine, layoutHudLine, type HudWidths } from "./hudline";
+import {
+  HUD_GLYPH_GAP,
+  HUD_GLYPH_WIDTH,
+  HUD_ICONS_BELOW,
+  HUD_ICON_SIZE,
+  HUD_PIP_RADIUS,
+  HUD_PIP_STEP,
+  createHudLine,
+  hudIconX,
+  hudIconsShift,
+  layoutHudLine,
+  type HudWidths,
+} from "./hudline";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import { shotTravel, type ClientShots } from "./shots";
 import { BOT_TAG, botTagBox, type TagBox } from "./tag";
@@ -86,6 +105,20 @@ const SHOT_GLOW_LENGTH = 28;
 const SHOT_GLOW_WIDTH = 14;
 const SHOT_CORE_LENGTH = 18;
 const SHOT_CORE_WIDTH = 2.4;
+/** A review laser shot (#73): this many times longer, its glow wider, its core whiter and wider. */
+const LASER_LENGTH = 3;
+const LASER_GLOW_WIDTH = 18;
+const LASER_CORE_WIDTH = 3.2;
+const LASER_CORE = "#ffffff";
+/** A floor pickup: its halo's radius (pickup radii) and pulse (cycles a second), and its disc. */
+const PICKUP_HALO = 2.6;
+const PICKUP_HALO_HZ = 1.2;
+const PICKUP_DISC = "rgba(5, 7, 13, 0.85)";
+const PICKUP_RIM_WIDTH = 2;
+/** Your pickup timer icons: the disc behind each and the track its ring drains along. */
+const ICON_DISC = "rgba(5, 7, 13, 0.7)";
+const ICON_TRACK = "rgba(248, 250, 252, 0.18)";
+const ICON_RING_WIDTH = 2.5;
 /** The heat arc around your robot: its radius, width and the most it sweeps (270 degrees, open at the bottom). */
 const HEAT_RADIUS = PLAYER_RADIUS + 8;
 const HEAT_WIDTH = 3.5;
@@ -174,6 +207,7 @@ const DOWN_HINT = "A player next to you revives you";
  * scene seconds (-1: never), from `dashFromX, dashFromY`. `down`: waiting for a revive, with
  * `left` seconds before bleeding out, `rev` (0 to 1) of a revive by player `revBy` (0: none).
  * `bot`: a server fill bot, drawn with a BOT pill at `tag` (its width 0 until first measured).
+ * `fx`: its active pickups, bit i for PICKUP_IDS[i] (#73).
  */
 export type Robot = {
   id: number;
@@ -195,6 +229,16 @@ export type Robot = {
   revBy: number;
   bot: boolean;
   tag: TagBox;
+  fx: number;
+};
+
+/** The pickups on the floor to draw this frame, world units, filled by game.ts: kind (an index in PICKUP_IDS) and seconds left. */
+export type FloorView = {
+  x: Float32Array;
+  y: Float32Array;
+  kind: Uint8Array;
+  left: Float32Array;
+  count: number;
 };
 
 /**
@@ -224,6 +268,7 @@ export type Scene = {
   /** Seconds, for pulses and leg frames. */
   t: number;
   bugs: BugsView;
+  floor: FloorView;
   shots: ClientShots;
   /** The ticks shots are drawn at: yours, and everyone else's. */
   mineAt: number;
@@ -557,6 +602,44 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fill();
   }
 
+  /** Every floor pickup in view: a pulsing halo in its glow, a dark disc with a rim, its glyph; blinking near its end. */
+  function drawFloor(f: FloorView, t: number): void {
+    for (let i = 0; i < f.count; i++) {
+      const x = f.x[i]!;
+      const y = f.y[i]!;
+      if (!inView(x, y)) continue;
+      const d = PICKUP_DRAW[PICKUP_IDS[f.kind[i]!]!];
+      if (!d) continue;
+      const alpha = floorAlpha(f.left[i]!);
+      const k = 0.5 + 0.5 * Math.sin(t * TAU * PICKUP_HALO_HZ + i);
+      const h = PICKUP_RADIUS * PICKUP_HALO * (0.85 + 0.15 * k);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = alpha * (0.6 + 0.3 * k);
+      ctx.drawImage(glows[d.glow]!, x - h, y - h, h * 2, h * 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = PICKUP_DISC;
+      ctx.beginPath();
+      ctx.arc(x, y, PICKUP_RADIUS, 0, TAU);
+      ctx.fill();
+      ctx.lineWidth = PICKUP_RIM_WIDTH;
+      ctx.strokeStyle = PALETTE[d.glow]!;
+      ctx.stroke();
+      d.glyph(ctx, x, y, PICKUP_RADIUS * 1.25);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** What each robot's active pickups draw on it (a shield bubble, a laser's barrel glow), for everyone. */
+  function drawEffects(r: Robot, t: number): void {
+    if (r.fx === 0 || r.down) return;
+    for (let i = 0; i < PICKUP_IDS.length; i++) {
+      if (!(r.fx & (1 << i))) continue;
+      const d = PICKUP_DRAW[PICKUP_IDS[i]!];
+      d.on?.(ctx, r.x, r.y, r.aim, t, glows[d.glow]!);
+    }
+  }
+
   /** Every bug: first what each kind draws under the bodies (aim lines), then the bodies in view. */
   function drawBugs(b: BugsView, t: number, k: number, ox: number, oy: number): void {
     const f = bugFrame;
@@ -597,6 +680,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalCompositeOperation = "lighter";
     ctx.fillStyle = SHOT_CORE;
     const glow = glows[GLOW_SHOT]!;
+    const beam = glows[GLOW_LASER]!;
     for (let i = 0; i < s.used.length; i++) {
       if (!s.used[i]) continue;
       const travel = shotTravel(s, i, s.owner[i] === sc.you ? sc.mineAt : sc.othersAt);
@@ -606,10 +690,21 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const x = s.x0[i]! + dx * travel;
       const y = s.y0[i]! + dy * travel;
       if (!inView(x, y)) continue;
+      ctx.setTransform(k * dx, k * dy, -k * dy, k * dx, k * x + ox, k * y + oy);
+      if (s.laser[i]) {
+        // A review laser shot: a beam three times as long, in the laser's glow, twice over, with a white core.
+        const tail = Math.min(SHOT_GLOW_LENGTH * LASER_LENGTH, travel + 6);
+        const core = Math.min(SHOT_CORE_LENGTH * LASER_LENGTH, travel + 2);
+        ctx.drawImage(beam, 6 - tail, -LASER_GLOW_WIDTH / 2, tail, LASER_GLOW_WIDTH);
+        ctx.drawImage(beam, 6 - tail, -LASER_GLOW_WIDTH / 4, tail, LASER_GLOW_WIDTH / 2);
+        ctx.fillStyle = LASER_CORE;
+        ctx.fillRect(2 - core, -LASER_CORE_WIDTH / 2, core, LASER_CORE_WIDTH);
+        ctx.fillStyle = SHOT_CORE;
+        continue;
+      }
       // The streak never reaches back behind the barrel.
       const tail = Math.min(SHOT_GLOW_LENGTH, travel + 6);
       const core = Math.min(SHOT_CORE_LENGTH, travel + 2);
-      ctx.setTransform(k * dx, k * dy, -k * dy, k * dx, k * x + ox, k * y + oy);
       ctx.drawImage(glow, 6 - tail, -SHOT_GLOW_WIDTH / 2, tail, SHOT_GLOW_WIDTH);
       ctx.fillRect(2 - core, -SHOT_CORE_WIDTH / 2, core, SHOT_CORE_WIDTH);
     }
@@ -704,10 +799,44 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fill();
   }
 
+  /** Your active pickups (from `me.fx`), as many as there are, at most one per pickup. */
+  function iconCount(me: SnapshotMe | null): number {
+    if (!me || !me.fx) return 0;
+    let n = 0;
+    for (let i = 0; i < me.fx.length; i++) if (me.fx[i]! > 0) n++;
+    return n;
+  }
+
+  /** Your pickup timers (#73): a disc with the pickup's glyph and a ring in its colour draining as it runs out. */
+  function drawIcons(me: SnapshotMe, y: number): void {
+    let n = 0;
+    const r = HUD_ICON_SIZE / 2;
+    for (let i = 0; i < me.fx.length; i++) {
+      const left = me.fx[i]!;
+      if (left <= 0) continue;
+      const id = PICKUP_IDS[i]!;
+      const d = PICKUP_DRAW[id];
+      const x = hudIconX(hud.left, n++);
+      ctx.fillStyle = ICON_DISC;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, TAU);
+      ctx.fill();
+      ctx.lineWidth = ICON_RING_WIDTH;
+      ctx.strokeStyle = ICON_TRACK;
+      ctx.stroke();
+      ctx.strokeStyle = PALETTE[d.glow]!;
+      ctx.beginPath();
+      ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, left / pickupDef(id).durationTicks));
+      ctx.stroke();
+      d.glyph(ctx, x, y, HUD_ICON_SIZE * 0.6);
+    }
+  }
+
   /**
    * The HUD line: score and multiplier (pulsing when it rises), three hit pips (flashing as one
-   * goes), the wave and the players in your arena; "streak lost" flicks up under the score. While
-   * down, DOWN and the seconds left with one line on how to get up, under your robot (#59).
+   * goes), the wave and the players in your arena; your pickup timers under it (#73); "streak lost"
+   * flicks up under the score (under the timers while any show). While down, DOWN and the seconds
+   * left with one line on how to get up, under your robot (#59).
    */
   function drawHud(sc: Scene): void {
     const me = sc.me;
@@ -760,6 +889,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.fillText(playersLong, line.players, 0);
     }
     ctx.restore();
+    const icons = iconCount(me);
+    if (icons > 0) drawIcons(me, y + HUD_ICONS_BELOW);
     // "streak lost", flicking up and out under the score.
     if (sc.hud.lost > 0) {
       const f = sc.hud.lost / STREAK_LOST_S;
@@ -769,7 +900,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.textBaseline = "middle";
       ctx.lineWidth = 4;
       ctx.fillStyle = LOST_FILL;
-      const ly = y + LOST_BELOW - (1 - f) * 8;
+      const ly = y + LOST_BELOW + hudIconsShift(icons) - (1 - f) * 8;
       ctx.strokeText("streak lost", hud.left, ly);
       ctx.fillText("streak lost", hud.left, ly);
       ctx.globalAlpha = 1;
@@ -837,6 +968,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     sr = left + cam.w - safe.right / cam.scale;
     sb = top + cam.h - safe.bottom / cam.scale;
 
+    drawFloor(sc.floor, t);
     drawBugs(sc.bugs, t, k, ox, oy);
     drawShots(sc, k, ox, oy);
     ctx.setTransform(k, 0, 0, k, ox, oy);
@@ -847,7 +979,11 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const r = robots[i]!;
       if (r.down && inView(r.x, r.y)) drawRevive(r, robots, count);
     }
-    for (let i = 0; i < count; i++) if (i !== self && inView(robots[i]!.x, robots[i]!.y)) drawRobot(robots[i]!, t);
+    for (let i = 0; i < count; i++) {
+      if (i === self || !inView(robots[i]!.x, robots[i]!.y)) continue;
+      drawRobot(robots[i]!, t);
+      drawEffects(robots[i]!, t);
+    }
     const me = self >= 0 ? robots[self] : undefined;
     if (me) {
       ctx.globalCompositeOperation = "lighter";
@@ -856,6 +992,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
       drawRobot(me, t);
+      drawEffects(me, t);
       if (!me.down) {
         const mh = PLAYER_RADIUS * ROBOT_MARK_HALF;
         ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);
@@ -992,7 +1129,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText(sc.stats, hud.left, hud.top + LINE_MIDDLE + STATS_BELOW);
+      ctx.fillText(sc.stats, hud.left, hud.top + LINE_MIDDLE + STATS_BELOW + (sc.out ? 0 : hudIconsShift(iconCount(sc.me))));
     }
   }
 

@@ -22,7 +22,7 @@ import {
   type BugKind,
 } from "../constants";
 import { nextRandom } from "../rng";
-import { canAct, canBeHit, hitPlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
+import { canAct, canBeHit, strikePlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
 import { STEP_EXPIRE, STEP_LAUNCH } from "./kind";
 import { BASE_KIND, MAX_BUG_RADIUS, bugDef } from "./registry";
 
@@ -196,8 +196,8 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
  *    a step may launch a bug (launch: it is not stepped until the next tick, but it can touch in
  *    this one) or expire (it leaves with no touch, kill or score);
  * 3. a bug touching a player who is up and can be hit (within PLAYER_RADIUS plus its kind's
- *    radius) costs them a hit and is gone, with no score, whatever its kind and phase; bugs pass
- *    over downed players.
+ *    radius) strikes them (sim.ts strikePlayer: a hit, or a test shield spent) and is gone, with
+ *    no score, whatever its kind and phase; bugs pass over downed players.
  */
 export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
@@ -231,8 +231,7 @@ export function stepBugs(state: ArenaState): void {
       const dx = p.x - b.x;
       const dy = p.y - b.y;
       if (dx * dx + dy * dy < touch * touch) {
-        state.events.touches.push({ player: p.id, kind: b.kind });
-        hitPlayer(state, p);
+        strikePlayer(state, p, b.kind);
         gone = true;
         break;
       }

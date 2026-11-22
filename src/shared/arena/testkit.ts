@@ -1,10 +1,12 @@
-// Helpers for the arena's simulation tests (combat, bugs, lives): arenas with players placed by
-// hand, bugs placed by hand, and stepping with the personal spawn budget held at zero so only
+// Helpers for the arena's simulation tests (combat, bugs, lives, pickups): arenas with players placed by
+// hand, bugs and pickups placed by hand, and stepping with the personal spawn budget held at zero so only
 // the bugs a test places are in play. Players placed by hand start without spawn protection.
 // Test-only; nothing in the game imports it.
 import { newBug } from "./bugs/index";
-import { BUG_KINDS, DOWN_TICKS, HITS_PER_LIFE, type BugKind } from "./constants";
-import { clampInput, createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Player } from "./sim";
+import { BUG_KINDS, DOWN_TICKS, HITS_PER_LIFE, PICKUP_IDS, type BugKind, type PickupId } from "./constants";
+import { pickupDef } from "./pickups/registry";
+import { nextRandom } from "./rng";
+import { clampInput, createArena, joinPlayer, stepArena, type ArenaState, type Bug, type FloorPickup, type Player } from "./sim";
 
 export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Player[] } {
   const a = createArena(1);
@@ -48,5 +50,28 @@ export function stepQuiet(a: ArenaState, n = 1): void {
   for (let i = 0; i < n; i++) {
     for (const p of a.players) p.budget = 0;
     stepArena(a);
+  }
+}
+
+/** Places a pickup of `kind` on the floor at (x, y), as a drop would start it (#73). */
+export function placePickup(a: ArenaState, x: number, y: number, kind: PickupId): FloorPickup {
+  const f: FloorPickup = { id: a.nextPickupId++, kind, x, y, ticksLeft: pickupDef(kind).floorTicks };
+  a.floor.push(f);
+  return f;
+}
+
+/** Ticks left of `p`'s effect of `kind` (0: not active). */
+export function effectOf(p: Player, kind: PickupId): number {
+  return p.effect[PICKUP_IDS.indexOf(kind)]!;
+}
+
+/** Sets the drop generator so its next draw is under `limit` (a drop) or, with `above`, at least `limit`. */
+export function nextDrop(a: ArenaState, limit: number, above = false): void {
+  for (let s = 0; ; s++) {
+    const r = nextRandom({ state: s });
+    if (above ? r >= limit : r < limit) {
+      a.dropRng.state = s;
+      return;
+    }
   }
 }

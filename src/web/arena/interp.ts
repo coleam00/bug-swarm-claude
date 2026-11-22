@@ -3,7 +3,7 @@
 // server, between two snapshots, and move smoothly at any frame rate. Pure: the frame time comes
 // in as a number.
 import { INTERP_DELAY_MS, TICK_MS } from "../../shared/arena/constants";
-import type { SnapshotBug, SnapshotDown, SnapshotPlayer } from "../../shared/arena/protocol";
+import type { SnapshotBug, SnapshotDown, SnapshotPickup, SnapshotPlayer } from "../../shared/arena/protocol";
 
 /** Snapshots kept: half a second at 20 Hz. */
 export const INTERP_BUFFER = 10;
@@ -22,6 +22,8 @@ type Frame = {
   bi: Map<number, SnapshotBug>;
   /** Who is down, with seconds left and revive progress. */
   d: SnapshotDown[];
+  /** The pickups on the floor (v7, #73). */
+  f: SnapshotPickup[];
 };
 
 export type Interp = {
@@ -51,12 +53,13 @@ export function pushSnapshot(
   nowMs: number,
   bugs: SnapshotBug[] = [],
   downs: SnapshotDown[] = [],
+  floor: SnapshotPickup[] = [],
 ): void {
   const newest = it.frames[it.frames.length - 1];
   if (newest && tick <= newest.tick) return;
   const bi = new Map<number, SnapshotBug>();
   for (const b of bugs) bi.set(b[0], b);
-  it.frames.push({ tick, p: players, b: bugs, bi, d: downs });
+  it.frames.push({ tick, p: players, b: bugs, bi, d: downs, f: floor });
   if (it.frames.length > INTERP_BUFFER) it.frames.shift();
   const target = tick - nowMs / TICK_MS;
   if (it.offset === null || Math.abs(target - it.offset) > CLOCK_RESET_TICKS) {
@@ -87,10 +90,10 @@ function lerpAngle(a: number, b: number, t: number): number {
 
 /**
  * Where a player is drawn: position, aim, and whether they are in a life, untouchable, dashing and
- * spawn-protected then. Past a snapshot, `dash` is the next one's, so a dash shows from where it
- * starts.
+ * spawn-protected then, and their active pickups' bits (v7, #73). Past a snapshot, `dash` is the
+ * next one's, so a dash shows from where it starts.
  */
-export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; dash: boolean; prot: boolean };
+export type Sampled = { x: number; y: number; aim: number; alive: boolean; inv: boolean; dash: boolean; prot: boolean; fx: number };
 
 /**
  * Where player `id` is at server tick `at`, into `out`: between the two snapshots around it (aim
@@ -120,6 +123,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.inv = rb[7] === 1;
     out.dash = rb[8] === 1;
     out.prot = rb[9] === 1;
+    out.fx = rb[10] ?? 0;
     return true;
   }
   if (ra[6] !== rb[6]) {
@@ -130,6 +134,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
     out.inv = ra[7] === 1;
     out.dash = ra[8] === 1;
     out.prot = ra[9] === 1;
+    out.fx = ra[10] ?? 0;
     return true;
   }
   const t = Math.min(1, Math.max(0, (at - fa.tick) / (fb.tick - fa.tick)));
@@ -140,6 +145,7 @@ export function sample(it: Interp, id: number, at: number, out: Sampled): boolea
   out.inv = ra[7] === 1;
   out.dash = (t > 0 ? rb : ra)[8] === 1;
   out.prot = ra[9] === 1;
+  out.fx = ra[10] ?? 0;
   return true;
 }
 

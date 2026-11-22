@@ -9,6 +9,7 @@ import {
   MAX_PLAYERS_PER_ARENA,
   PROTOCOL_VERSION,
   TICK_MS,
+  WAVE_S,
 } from "../../shared/arena/constants";
 import type { ServerMessage, Snapshot } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
@@ -365,8 +366,12 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.hits = 1;
   p.dashTicks = 2;
   p.dashCooldown = 27;
-  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1 };
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0 });
+  p.effect[1] = 37;
+  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[] };
+  const fx = me.fx;
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37] });
+  // The effects are copied into the same array every snapshot.
+  expect(me.fx).toBe(fx);
   p.lockTicks = 0;
   p.streak = 20;
   expect(meOf(p, me)).toMatchObject({ mu: 3, lk: 0 });
@@ -486,5 +491,36 @@ describe("fill bots (#66)", () => {
     expect(room.state.players.length).toBe(MAX_PLAYERS_PER_ARENA);
     // The PRD's budget, loosely: `check` must stay green on a loaded machine.
     expect(p95!).toBeLessThan(10);
+  });
+});
+
+describe("the stream board's live read (#74)", () => {
+  test("no arenas: nobody playing", () => {
+    expect(setup().rooms.live()).toEqual({ playing: 0, arenas: [] });
+  });
+
+  test("one person topped up with fill bots counts 1: bots never count; the wave moves with the arena's clock", () => {
+    const { rooms, tick } = setup(undefined, FILL_TARGET);
+    rooms.join("Ada", "tabs", INFO, client().send);
+    tick();
+    expect(rooms.stats().bots).toBe(FILL_TARGET - 1);
+    expect(rooms.live()).toEqual({ playing: 1, arenas: [{ id: 1, players: 1, wave: 1 }] });
+    tick(Math.round((WAVE_S * 1000) / TICK_MS));
+    expect(rooms.live()).toEqual({ playing: 1, arenas: [{ id: 1, players: 1, wave: 2 }] });
+  });
+
+  test("21 people make two arenas, by id; an arena whose last person leaves is gone", () => {
+    const { rooms } = setup();
+    const joined = Array.from({ length: MAX_PLAYERS_PER_ARENA + 1 }, (_, i) => rooms.join(`P${i}`, "tabs", INFO, client().send));
+    expect(rooms.live()).toEqual({
+      playing: MAX_PLAYERS_PER_ARENA + 1,
+      arenas: [
+        { id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1 },
+        { id: 2, players: 1, wave: 1 },
+      ],
+    });
+    const last = joined[MAX_PLAYERS_PER_ARENA]!;
+    rooms.leave(last.room, last.entity);
+    expect(rooms.live()).toEqual({ playing: MAX_PLAYERS_PER_ARENA, arenas: [{ id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1 }] });
   });
 });
