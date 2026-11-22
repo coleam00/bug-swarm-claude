@@ -2,9 +2,10 @@
 // A policy reads an Observation (filled in-process by `observe`, or by bots from snapshots) and
 // writes one tick's input. Pure: randomness comes from the rng it is handed, never the arena's.
 //
-// The specs below are fixed. Tuning the game changes constants.ts and the bug kinds' files
-// (bugs/), never these: a gate that
-// fails is not passed by weakening the mover (engineering.md, "Skill is measured").
+// The specs below are fixed. Tuning the game changes constants.ts, the bug kinds' files (bugs/)
+// and the pickups' files (pickups/), never these: a gate that fails is not passed by weakening the
+// mover (engineering.md, "Skill is measured"). Going for pickups (#73) was added to the aimer as
+// a strength, never to pass a gate.
 //
 // - idle: never moves, never fires.
 // - mover: runs from bugs and fires straight ahead. Its move is the threat vector, the sum over
@@ -17,11 +18,15 @@
 //   where the nearest bug within AIM_RANGE will be (leading it with SHOT_SPEED from the barrel)
 //   and fires in bursts: while heat is under BURST_HEAT and fewer than BURST_SHOTS have left,
 //   then it releases for BURST_REST_S. It never fires while locked or with no bug in range.
+//   Pickups (#73): while the nearest bug is not within KEEP_DIST and a pickup lies within
+//   PICKUP_SEEK, it walks to the nearest pickup at full speed instead (aim and fire unchanged).
+//   `aimerBase` is the aimer without this.
 // - dasher (#60): the aimer, plus the dash. When its dash is ready and a bug is about to touch it
 //   (within DASH_CONTACT of touching, now or after one more tick of the bug's velocity), it
 //   presses dash along the evasion (its aim when there is none), on that tick only.
 //
-// - fillBot (#66): the server's fill bots. The aimer, with a human layer on top: when its target
+// - fillBot (#66): the server's fill bots. The aimer without going for pickups (aimerBase, so
+//   viewers get them; it still takes one it walks over), with a human layer on top: when its target
 //   changes (its aim jumps by more than FILL_RETARGET) or a bug comes inside KEEP_DIST, it reacts
 //   only after FILL_REACT_MIN_TICKS to FILL_REACT_MAX_TICKS (drawn per reaction), keeping its last
 //   move and holding fire meanwhile; its aim turns at most FILL_TURN_RATE toward the aimer's plus a
@@ -31,7 +36,8 @@
 //   passes near, in a swarm too. Not in POLICY_NAMES: `bun run skill` reports it on its own
 //   line, never in a gate.
 //
-// Every policy presses dash while out, so it respawns; only the dasher presses it in a life.
+// Every policy presses dash while out, so it respawns; only the dasher presses it in a life. The
+// idle and the mover never go for pickups; they take one only when they walk over it.
 import { MAX_BUG_RADIUS } from "./bugs/registry";
 import { BARREL, DT, PLAYER_RADIUS, REVIVE_RANGE, SHOT_SPEED } from "./constants";
 import { nextRandom, type Rng } from "./rng";
@@ -51,6 +57,9 @@ export type Observation = {
   /** Every other player who is down. Only the first `downCount` entries are current. */
   downs: { x: number; y: number }[];
   downCount: number;
+  /** Every pickup on the floor (#73). Only the first `pickupCount` entries are current. */
+  pickups: { x: number; y: number }[];
+  pickupCount: number;
   world: { w: number; h: number };
 };
 
@@ -92,6 +101,8 @@ export const BURST_REST_S = 0.3;
 export const STRAFE = 0.35;
 /** The dasher dashes when a bug is this close to touching it, units (centre gap minus both radii). */
 export const DASH_CONTACT = 30;
+/** The aimer walks to a pickup within this, units, when no bug is within KEEP_DIST (#73). */
+export const PICKUP_SEEK = 300;
 
 export function createMemory(): PolicyMemory {
   return { aim: 0, burst: 0, rest: 0, lastHeat: 0, strafe: 1, strafeFor: 0 };
@@ -104,6 +115,8 @@ export function createObservation(): Observation {
     bugCount: 0,
     downs: [],
     downCount: 0,
+    pickups: [],
+    pickupCount: 0,
     world: { w: 0, h: 0 },
   };
 }
@@ -117,6 +130,15 @@ export function setObservedBug(obs: Observation, i: number, x: number, y: number
     b.vx = vx;
     b.vy = vy;
   } else obs.bugs[i] = { x, y, vx, vy };
+}
+
+/** Sets the observed pickup at index `i`, growing the list only when it must. */
+export function setObservedPickup(obs: Observation, i: number, x: number, y: number): void {
+  const f = obs.pickups[i];
+  if (f) {
+    f.x = x;
+    f.y = y;
+  } else obs.pickups[i] = { x, y };
 }
 
 /** Fills `out` with what player `playerId` sees in `state` (everything: perfect information). */
@@ -153,6 +175,8 @@ export function observe(state: ArenaState, playerId: number, w: number, h: numbe
     downs++;
   }
   out.downCount = downs;
+  out.pickupCount = state.floor.length;
+  for (let i = 0; i < state.floor.length; i++) setObservedPickup(out, i, state.floor[i]!.x, state.floor[i]!.y);
   out.world.w = w;
   out.world.h = h;
   return out;
@@ -265,7 +289,8 @@ function intercept(sx: number, sy: number, bx: number, by: number, vx: number, v
   return t > 0 ? t : -1;
 }
 
-export const aimer: Policy = (obs, mem, rng, out) => {
+/** The aimer without going for pickups: what the fill bot builds on. */
+export const aimerBase: Policy = (obs, mem, rng, out) => {
   out.dash = !obs.self.alive;
   if (!obs.self.alive) {
     mem.burst = 0;
@@ -323,6 +348,34 @@ export const aimer: Policy = (obs, mem, rng, out) => {
     mem.burst = 0;
     mem.rest = BURST_REST_S;
   }
+};
+
+/**
+ * The aimer: aimerBase, then, while up with no bug within KEEP_DIST, a walk at full speed to the
+ * nearest pickup within PICKUP_SEEK (its aim and fire stay aimerBase's).
+ */
+export const aimer: Policy = (obs, mem, rng, out) => {
+  aimerBase(obs, mem, rng, out);
+  if (!obs.self.alive || obs.pickupCount === 0) return;
+  const { x, y } = obs.self;
+  const n = nearestBug(obs);
+  if (n >= 0) {
+    const b = obs.bugs[n]!;
+    if ((b.x - x) ** 2 + (b.y - y) ** 2 < KEEP_DIST * KEEP_DIST) return;
+  }
+  let best = -1;
+  let bestD = PICKUP_SEEK * PICKUP_SEEK;
+  for (let i = 0; i < obs.pickupCount; i++) {
+    const f = obs.pickups[i]!;
+    const d = (f.x - x) ** 2 + (f.y - y) ** 2;
+    if (d <= bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  if (best < 0) return;
+  const f = obs.pickups[best]!;
+  moveAlong(out, f.x - x, f.y - y, 1);
 };
 
 /** Whether a bug is within DASH_CONTACT of touching the policy's robot, now or one tick on. */
@@ -387,7 +440,7 @@ export function createFillMemory(): FillMemory {
 }
 
 export function fillBot(obs: Observation, mem: FillMemory, rng: Rng, out: PolicyInput): void {
-  aimer(obs, mem, rng, out);
+  aimerBase(obs, mem, rng, out);
   if (!obs.self.alive) {
     mem.react = 0;
     mem.evading = false;

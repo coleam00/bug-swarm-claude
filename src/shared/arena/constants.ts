@@ -60,7 +60,7 @@ export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
 /** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
@@ -121,6 +121,21 @@ export const HEAT_WARN = 0.85;
  */
 export const BUG_KINDS = ["crawler", "dasher"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
+
+// ---- Pickups (#73). Every pickup id in PICKUP_IDS; each pickup's numbers in its own file in pickups/. ----
+
+/**
+ * Every pickup id, in protocol order (a snapshot carries a pickup's index in this list, and a
+ * player's active effects as a bitmask over it).
+ */
+export const PICKUP_IDS = ["shield", "laser"] as const;
+export type PickupId = (typeof PICKUP_IDS)[number];
+/** The most pickups lying on the floor of one arena; a drop past it is lost, never queued. */
+export const MAX_PICKUPS_PER_ARENA = 6;
+/** A floor pickup blinks for this long before it goes, seconds (drawn only; the sim ignores it). */
+export const PICKUP_BLINK_S = 3;
+/** A floor pickup's radius, units: a player who is up takes it within PLAYER_RADIUS plus this. */
+export const PICKUP_RADIUS = 12;
 
 // ---- Spawning (#55). Pressure is personal: each player who is up brings their own spawn budget. ----
 

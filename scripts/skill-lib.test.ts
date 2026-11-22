@@ -10,6 +10,7 @@ import {
   lateGate,
   parseSkillArgs,
   playLife,
+  pickupStats,
   playNewcomer,
   quantile,
   runDropIn,
@@ -115,6 +116,27 @@ describe("bun run skill", () => {
     const aimer = playLife("aimer", 4, 120);
     expect(dasher.dashes).toBeGreaterThan(0);
     expect([dasher.score, dasher.seconds]).not.toEqual([aimer.score, aimer.seconds]);
+  });
+
+  test("pickups are counted a life: the aimer takes some on 8 seeds, its shields block and its lasers hit; the idle takes none", () => {
+    const r = runSkill(8, 180);
+    const by = (n: string) => r.policies.find((p) => p.policy === n)!;
+    const aim = by("aimer").pickups.mean;
+    expect(aim.taken.shield + aim.taken.laser).toBeGreaterThan(0);
+    expect(aim.laserHits).toBeGreaterThan(0);
+    expect(aim.blocks).toBeGreaterThan(0);
+    // A block is never a hit landed: the counts come from different events.
+    expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0 }, blocks: 0, laserHits: 0 });
+    // One life's counts replay exactly.
+    expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
+  });
+
+  test("pickupStats: the median and mean of each count", () => {
+    const c = (shield: number, laser: number, blocks: number, laserHits: number) => ({ taken: { shield, laser }, blocks, laserHits });
+    expect(pickupStats([c(0, 1, 0, 3), c(2, 1, 1, 0), c(1, 4, 0, 6)])).toEqual({
+      median: c(1, 1, 0, 3),
+      mean: c(1, 2, 1 / 3, 3),
+    });
   });
 
   test("quantiles and arguments", () => {

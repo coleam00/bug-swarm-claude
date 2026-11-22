@@ -1,6 +1,18 @@
 import { expect, test } from "bun:test";
 import { NO_INSETS, hudLayout } from "../game/hud";
-import { HUD_CLEAR, createHudLine, layoutHudLine, type HudWidths } from "./hudline";
+import { PICKUP_IDS } from "../../shared/arena/constants";
+import {
+  HUD_CLEAR,
+  HUD_ICONS_BELOW,
+  HUD_ICONS_SHIFT,
+  HUD_ICON_GAP,
+  HUD_ICON_SIZE,
+  createHudLine,
+  hudIconX,
+  hudIconsShift,
+  layoutHudLine,
+  type HudWidths,
+} from "./hudline";
 import { minimapLayout } from "./minimap";
 
 // Widths about as the canvas measures them (bold system-ui): a 6-digit score at 26 px, "x1.5" at
@@ -59,4 +71,17 @@ test("parts are laid out left to right in order", () => {
   expect(line.wave).toBeGreaterThan(line.pips);
   expect(line.players).toBeGreaterThan(line.wave + TYPICAL.wave);
   expect(line.width).toBeGreaterThan(line.players);
+});
+
+test("pickup timers (#73): a row of icons under the line from its left edge, pushing what sits under the line down", () => {
+  const hud = hudLayout(360, NO_INSETS);
+  expect(hudIconsShift(0)).toBe(0);
+  expect(hudIconsShift(1)).toBe(HUD_ICONS_SHIFT);
+  expect(hudIconsShift(2)).toBe(HUD_ICONS_SHIFT);
+  expect(hudIconX(hud.left, 0)).toBe(hud.left + HUD_ICON_SIZE / 2);
+  expect(hudIconX(hud.left, 1) - hudIconX(hud.left, 0)).toBe(HUD_ICON_SIZE + HUD_ICON_GAP);
+  // Every pickup's icon fits on a 360 px phone, left of the minimap and clear of the line's text.
+  const map = minimapLayout(360, 640, NO_INSETS);
+  expect(hudIconX(hud.left, PICKUP_IDS.length - 1) + HUD_ICON_SIZE / 2).toBeLessThan(map.x);
+  expect(HUD_ICONS_BELOW - HUD_ICON_SIZE / 2).toBeGreaterThan(13);
 });

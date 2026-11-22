@@ -22,7 +22,7 @@ import {
   type BugKind,
 } from "../constants";
 import { nextRandom } from "../rng";
-import { canAct, canBeHit, hitPlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
+import { canAct, canBeHit, strikePlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
 import { BASE_KIND, MAX_BUG_RADIUS, bugDef } from "./registry";
 
 /**
@@ -161,8 +161,8 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
  *    has room; its kind is picked by the mix (pickKind); a downed player's budget waits;
  * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one up);
  * 3. a bug touching a player who is up and can be hit (within PLAYER_RADIUS plus its kind's
- *    radius) costs them a hit and is gone, with no score, whatever its kind and phase; bugs pass
- *    over downed players.
+ *    radius) strikes them (sim.ts strikePlayer: a hit, or a test shield spent) and is gone, with
+ *    no score, whatever its kind and phase; bugs pass over downed players.
  */
 export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
@@ -189,8 +189,7 @@ export function stepBugs(state: ArenaState): void {
       const dx = p.x - b.x;
       const dy = p.y - b.y;
       if (dx * dx + dy * dy < touch * touch) {
-        state.events.touches.push({ player: p.id, kind: b.kind });
-        hitPlayer(state, p);
+        strikePlayer(state, p, b.kind);
         gone = true;
         break;
       }

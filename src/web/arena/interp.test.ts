@@ -3,17 +3,29 @@ import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
 import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, downAt, newestDown, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
-const row = (id: number, x: number, y: number, aim = 0, dash: 0 | 1 = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, dash, 0];
-const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false });
+const row = (id: number, x: number, y: number, aim = 0, dash: 0 | 1 = 0, fx = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, dash, 0, fx];
+const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false, fx: 0 });
 
 describe("sampling", () => {
+  test("a player's pickup effects (#73) come from the snapshot it is drawn from, and so does the floor", () => {
+    const it = createInterp();
+    pushSnapshot(it, 10, [row(1, 100, 200, 0, 0, 0)], 0, [], [], []);
+    pushSnapshot(it, 11, [row(1, 110, 180, 0, 0, 3)], 50, [], [], [[4, 1, 500, 600, 200]]);
+    const o = out();
+    sample(it, 1, 10.5, o);
+    expect(o.fx).toBe(0);
+    sample(it, 1, 11, o);
+    expect(o.fx).toBe(3);
+    expect(bugSpan(it, 11, { from: null, to: null, t: 0 }).from!.f).toEqual([[4, 1, 500, 600, 200]]);
+  });
+
   test("halfway between two snapshots is halfway between their positions", () => {
     const it = createInterp();
     pushSnapshot(it, 10, [row(1, 100, 200)], 0);
     pushSnapshot(it, 11, [row(1, 110, 180)], 50);
     const o = out();
     expect(sample(it, 1, 10.5, o)).toBe(true);
-    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false, dash: false, prot: false });
+    expect(o).toEqual({ x: 105, y: 190, aim: 0, alive: true, inv: false, dash: false, prot: false, fx: 0 });
   });
 
   test("aim turns along the shorter arc, across the -pi/pi seam", () => {
@@ -101,8 +113,8 @@ describe("lives and bugs", () => {
 
   test("a respawn does not slide across the map: the out snapshot holds until the new one", () => {
     const it = createInterp();
-    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0, 0, 0]], 0);
-    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1, 0, 1]], 50);
+    pushSnapshot(it, 10, [[1, 100, 100, 0, 0, 0, 0, 0, 0, 0, 0]], 0);
+    pushSnapshot(it, 11, [[1, 2000, 2000, 0, 0, 0, 1, 1, 0, 1, 0]], 50);
     const o = out();
     sample(it, 1, 10.9, o);
     expect([o.x, o.alive]).toEqual([100, false]);

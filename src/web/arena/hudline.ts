@@ -2,8 +2,9 @@
 // wave and how many are playing in your arena, left to right from the safe left edge, ending at
 // least HUD_CLEAR before the minimap. When the long form ("Wave 3", "12 playing") does not fit,
 // the short form ("W3", a small person glyph and "12"); when even that does not fit (a narrow
-// phone and a big score), the line is scaled down to fit. Pure: render.ts measures each text only
-// when its value changes and draws at the places this lays out.
+// phone and a big score), the line is scaled down to fit. Under it, a timer icon for each pickup
+// you have active (#73). Pure: render.ts measures each text only when its value changes and draws
+// at the places this lays out.
 import { HITS_PER_LIFE } from "../../shared/arena/constants";
 
 /** Between the score and its multiplier, CSS px. */
@@ -67,4 +68,24 @@ export function layoutHudLine(left: number, minimapX: number, w: HudWidths, out:
   }
   out.scale = Math.min(1, room / out.width);
   return out;
+}
+
+// ---- Pickup timers (#73): your active pickups as small icons in a row under the line. ----
+
+/** An icon's size and the gap between icons, CSS px. */
+export const HUD_ICON_SIZE = 18;
+export const HUD_ICON_GAP = 6;
+/** The icons' centres, CSS px below the line's middle. */
+export const HUD_ICONS_BELOW = 30;
+/** What sits under the line ("streak lost", the F readout) moves down this far while any icon shows. */
+export const HUD_ICONS_SHIFT = HUD_ICON_SIZE + HUD_ICON_GAP;
+
+/** The centre of icon `i` (0 up, in the order the active pickups come in PICKUP_IDS), CSS px from the screen's left. */
+export function hudIconX(left: number, i: number): number {
+  return left + HUD_ICON_SIZE / 2 + i * (HUD_ICON_SIZE + HUD_ICON_GAP);
+}
+
+/** How far "streak lost" and the F readout move down with `count` icons showing. */
+export function hudIconsShift(count: number): number {
+  return count > 0 ? HUD_ICONS_SHIFT : 0;
 }
