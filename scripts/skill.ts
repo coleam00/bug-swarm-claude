@@ -5,8 +5,7 @@
 // the mover and the aimer (#66, not a gate), and each policy's pickups a life (#73: taken in all and by
 // id, shield blocks, laser hits, bomb kills, drone kills), and how long 4 aimers (and 1) take to kill
 // the wave-5 hive queen (#85, reported, not a gate). Pickups drop in every gate's arenas. Exits 1
-// unless all three gates pass (PRD.md, "Skill is
-// measured"). The work is in skill-lib.ts.
+// unless all three gates pass (PRD.md, "Skill is measured"). The work is in skill-lib.ts.
 import { QUEEN_AIMERS, QUEEN_SEEDS, formatDropIn, formatFill, formatQueen, formatSkill, parseSkillArgs, runDropIn, runFill, runQueen, runSkill } from "./skill-lib";
 
 const args = parseSkillArgs(process.argv.slice(2));

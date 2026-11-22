@@ -10,8 +10,8 @@
 //   (groupGoal), written into her gx, gy for her step.
 // - Damage (bugs/queen.ts creditQueen): every hit on her credits the player whose life dealt it, at
 //   most the hit points she had left. Every damage source calls it: shots (combat.ts) and the
-//   refactor bomb (pickups/bomb.ts). A new source (the CI drone, #84) must call it too, or its
-//   damage is never paid.
+//   refactor bomb (pickups/bomb.ts); the CI drone's (#84) are shots. A new source that is not a
+//   shot must call it too, or its damage is never paid.
 // - Reward (payQueen, after pickups, the step she dies): every person (not a fill bot) still in the
 //   life that damaged her, up or down, gets QUEEN_REWARD_EACH plus a share of QUEEN_REWARD_POOL by
 //   damage dealt, rounded down (queenRewards), on their life's score. A life that ended before the

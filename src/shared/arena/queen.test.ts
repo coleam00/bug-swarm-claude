@@ -3,7 +3,7 @@
 // brood, ring, contact) is in bugs/queen.test.ts.
 import { describe, expect, test } from "bun:test";
 import { BROOD_TICKS, QUEEN_EVERY_WAVES } from "./bugs/queen";
-import { DT, WAVE_S, WORLD_H, WORLD_W } from "./constants";
+import { DT, PICKUP_IDS, WAVE_S, WORLD_H, WORLD_W } from "./constants";
 import { BOMB_DAMAGE } from "./pickups/bomb";
 import {
   GROUP_R,
@@ -306,6 +306,20 @@ describe("the reward (stepping)", () => {
     killWithShot(a, ps[0]!, q);
     expect(ps[0]!.queenDmg).toBe(1);
     expect(q.hp).toBe(hp - 1);
+  });
+
+  test("a CI drone's shots (#84) credit the life holding it, as the gun's do", () => {
+    const { a, ps } = arenaWith([200, 200]);
+    shield(ps);
+    const q = arrive(a);
+    const p = ps[0]!;
+    p.x = q.x - 200;
+    p.y = q.y;
+    p.effect[PICKUP_IDS.indexOf("drone")] = 100;
+    const hp = q.hp;
+    for (let i = 0; i < 40; i++) stepQuiet(a);
+    expect(hp - q.hp).toBeGreaterThan(0);
+    expect(p.queenDmg).toBe(hp - q.hp);
   });
 
   test("a bomb kill pays in the same step, its damage credited to the taker", () => {

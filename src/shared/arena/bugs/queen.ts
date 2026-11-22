@@ -72,9 +72,10 @@ function drift(b: Bug): void {
 /**
  * Credits `p` with `dmg` hit points dealt to bug `b` when `b` is the queen, at most the `hpBefore`
  * she had (#85). Every damage source calls it where it hits: shots (combat.ts stepShots, for the
- * life that fired) and the refactor bomb (pickups/bomb.ts). A new damage source (the CI drone,
- * #84) must call it too, or its damage is never paid (queen.ts payQueen). Here, not in queen.ts,
- * so combat.ts and bomb.ts import nothing that imports the simulation.
+ * life that fired; the CI drone's, #84, are shots too) and the refactor bomb (pickups/bomb.ts). A
+ * new damage source that is not a shot must call it too, or its damage is never paid (queen.ts
+ * payQueen). Here, not in queen.ts, so combat.ts and bomb.ts import nothing that imports the
+ * simulation.
  */
 export function creditQueen(p: Player, b: Bug, dmg: number, hpBefore: number): void {
   if (b.kind === "queen") p.queenDmg += Math.min(dmg, hpBefore);
