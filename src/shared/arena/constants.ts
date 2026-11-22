@@ -119,7 +119,7 @@ export const HEAT_WARN = 0.85;
  * Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). The first
  * is the base kind: a spawn is the base kind unless the mix picks another (bugs/index.ts).
  */
-export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob"] as const;
+export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
 
 // ---- Pickups (#73). Every pickup id in PICKUP_IDS; each pickup's numbers in its own file in pickups/. ----
