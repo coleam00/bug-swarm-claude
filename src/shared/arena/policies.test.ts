@@ -254,8 +254,9 @@ describe("going for pickups (#73)", () => {
 describe("flanking a beetle (#80)", () => {
   /**
    * One aimer at (1200, 1200), untouchable, its life 300 s old (a beetle stands at a life under
-   * 60 s, #86), and a beetle 300 units off at `angle`, walking and facing it; nothing spawns. Steps up to 20 s; `blind` zeroes every bug's shell facing in the
-   * aimer's observation, an aimer that does not know about shells. Returns when the beetle died
+   * 60 s, #86), and a beetle 300 units off at `angle`, walking and facing it; nothing spawns.
+   * Steps up to 20 s; `blind` zeroes every bug's shell facing in the aimer's observation, an
+   * aimer that does not know about shells. Returns when the beetle died
    * (seconds, -1: alive at 20 s) and the aimer's shots that hurt it and that its shell blocked.
    */
   function duel(angle: number, seed: number, blind: boolean): { killedAt: number; hits: number; blocks: number } {

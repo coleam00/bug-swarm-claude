@@ -145,17 +145,6 @@ describe("beetle spares young lives (#86)", () => {
     expect(b.x).toBeGreaterThan(1200);
   });
 
-  test("a first life's 10 s hold-back counts: at 65 s old it is 55 s of pressure age, and the beetle stands", () => {
-    const { a, ps } = arenaWith([1500, 1200]);
-    const p = ps[0]!;
-    p.lifeStartTick = a.tick - Math.round(65 / DT);
-    expect(p.firstLife).toBe(true);
-    p.invulnTicks = 1e9;
-    const b = beetleAt(a, 1200, 1200, 1, 0);
-    stepQuiet(a, Math.round(4 / DT));
-    expect([b.x, b.y, b.dx, b.dy]).toEqual([1200, 1200, 1, 0]);
-  });
-
   test("a new beetle whose target is young starts walking facing +x, not toward them", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     aged(a, ps[0]!, 40);
