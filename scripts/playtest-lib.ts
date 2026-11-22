@@ -668,14 +668,30 @@ export function checkSameArena(logs: PageLog[]): CheckResult {
   return { name: "same arena", pass, detail: missing.length > 0 ? `never joined: ${missing.join(", ")}` : parts.join("; ") };
 }
 
-/** b. At the end every page's roster holds every page, by id and name. */
+/**
+ * b. At the end of each server lifetime every page's roster holds every page, by its id in that
+ * lifetime and its name. An earlier lifetime is read at the page's last snapshot from it: a
+ * stopping server ends every life and sends each member's leave after its last snapshot (the
+ * last lifetime is read at the end of the run).
+ */
 export function checkRoster(logs: PageLog[]): CheckResult {
   const wrong: string[] = [];
-  for (const l of logs) {
-    const r = rosterOf(l);
-    for (const o of logs) if (o.you !== 0 && r.get(o.you) !== o.name) wrong.push(`${l.name} lacks ${o.name}`);
+  const all = gens(logs);
+  const last = all[all.length - 1] ?? 0;
+  for (const g of all) {
+    const ids = logs.map((o) => o.welcomes.filter((w) => w.gen === g).at(-1)?.you ?? 0);
+    for (const l of logs) {
+      const end = g === last ? Infinity : Math.max(...l.frames.filter((f) => f.gen === g).map((f) => f.at));
+      const r = rosterAt(l, end);
+      logs.forEach((o, i) => {
+        const id = ids[i]!;
+        if (id === 0) wrong.push(`${o.name} never joined${all.length > 1 ? ` server ${g}` : ""}`);
+        else if (r.get(id) !== o.name) wrong.push(`${l.name} lacks ${o.name}${all.length > 1 ? ` on server ${g}` : ""}`);
+      });
+    }
   }
-  return { name: "roster", pass: wrong.length === 0 && logs.every((l) => l.you !== 0), detail: wrong.length === 0 ? `${logs.length} pages see all ${logs.length}` : wrong.slice(0, 4).join("; ") };
+  const lifetimes = all.length > 1 ? ` on each of ${all.length} servers` : "";
+  return { name: "roster", pass: all.length > 0 && wrong.length === 0, detail: wrong.length === 0 ? `${logs.length} pages see all ${logs.length}${lifetimes}` : [...new Set(wrong)].slice(0, 4).join("; ") };
 }
 
 function pct(sorted: number[], q: number): number {

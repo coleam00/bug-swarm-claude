@@ -528,6 +528,20 @@ describe("server lifetimes (restart)", () => {
     expect(byName.score).toContain("4 life spans");
   });
 
+  test("roster is checked on each server: a page missing before the restart fails though the last roster is whole", () => {
+    expect(checkRoster(restartGame()).detail).toBe("2 pages see all 2 on each of 2 servers");
+    // The stopping server's own leaves come after each page's last snapshot from it: not counted.
+    const stopped = restartGame();
+    for (const l of stopped) l.events.push({ at: 40 * 50 + 50, tick: 41, you: l.you, gen: 0, ev: { t: "event", kind: "leave", id: 3 - l.you } });
+    expect(checkRoster(stopped).pass).toBe(true);
+    const dropped = restartGame();
+    // On server 0, PT-B hears PT-A leave mid-game.
+    dropped[1]!.events.push({ at: 30 * 50 + 1, tick: 30, you: 2, gen: 0, ev: { t: "event", kind: "leave", id: 1 } });
+    const r = checkRoster(dropped);
+    expect(r.pass).toBe(false);
+    expect(r.detail).toContain("PT-B lacks PT-A on server 0");
+  });
+
   test("same arena fails when the pages land in different arenas on the new server, or one never rejoins", () => {
     const split = restartGame();
     split[1]!.welcomes[1]!.arena = 2;

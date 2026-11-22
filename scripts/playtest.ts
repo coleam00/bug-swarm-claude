@@ -725,7 +725,7 @@ try {
   for (const pg of pages) {
     const l = pg.log;
     const file = join(outDir, `${args.scenario}-${pg.spec.name}.log`);
-    const lines = [JSON.stringify({ page: l.index, name: l.name, team: l.team, touch: l.touch, role: l.role, you: l.you }), ...l.welcomes.map((x) => JSON.stringify({ welcome: x })), ...l.frames.map((x) => JSON.stringify(x)), ...l.events.map((x) => JSON.stringify({ event: x })), ...l.tops.map((x) => JSON.stringify({ top: x })), ...l.screens.map((x) => JSON.stringify({ screen: x })), ...l.sent.map((x) => JSON.stringify({ sent: x })), ...l.intents.map((x) => JSON.stringify({ intent: x }))];
+    const lines = [JSON.stringify({ page: l.index, name: l.name, team: l.team, touch: l.touch, role: l.role, you: l.you }), ...l.welcomes.map((x) => JSON.stringify({ welcome: x })), ...l.frames.map((x) => JSON.stringify(x)), ...l.events.map((x) => JSON.stringify({ event: x })), ...l.tops.map((x) => JSON.stringify({ top: x })), ...l.screens.map((x) => JSON.stringify({ screen: x })), ...l.errors.map((x) => JSON.stringify({ error: x })), ...l.sent.map((x) => JSON.stringify({ sent: x })), ...l.intents.map((x) => JSON.stringify({ intent: x }))];
     writeFileSync(file, lines.join("\n") + "\n");
     const kills = l.events.filter((e) => e.ev.kind === OVER).reduce((a, e) => a + (e.ev.kills ?? 0), 0);
     say(`${l.name}: id ${l.you}, ${l.touch ? "touch" : "mouse"}, ${pg.overs} lives over, ${kills} kills, ${l.frames.length} ticks, ${l.sent.length} inputs sent, ${l.tops.length} top 10 reads, at most ${pg.maxBots} fill bots seen`);
