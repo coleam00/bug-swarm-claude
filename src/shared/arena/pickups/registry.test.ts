@@ -4,13 +4,15 @@ import { BUG_KINDS, PICKUP_IDS } from "../constants";
 import { PICKUP_LABELS, pickupDef } from "./registry";
 
 describe("pickups", () => {
-  test("every pickup's definition carries its own id, a label, chances in [0, 1] and positive times", () => {
+  test("every pickup's definition carries its own id, a label, chances in [0, 1] and times (0 lasting only for an instant one)", () => {
     for (const id of PICKUP_IDS) {
       const d = pickupDef(id);
       expect(d.id).toBe(id);
       expect(d.label.length).toBeGreaterThan(0);
       expect(d.floorTicks).toBeGreaterThan(0);
-      expect(d.durationTicks).toBeGreaterThan(0);
+      // The refactor bomb is instant (#78): its effect is at the take, so nothing lasts.
+      if (id === "bomb") expect(d.durationTicks).toBe(0);
+      else expect(d.durationTicks).toBeGreaterThan(0);
       for (const k of BUG_KINDS) {
         expect(d.drop[k]).toBeGreaterThanOrEqual(0);
         expect(d.drop[k]).toBeLessThanOrEqual(1);

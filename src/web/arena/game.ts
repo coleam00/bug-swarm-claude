@@ -12,8 +12,10 @@
 // everything `startArena` did: the frame loop, every listener, the probe and the socket, so a
 // remount never leaves a second socket (each one's leaving would save a life).
 // Pickups (#73): the floor comes in each snapshot's `f` and is drawn with the bugs; a `pickup`
-// event floats the pickup's label over whoever took it, and a `block` event pops their shield.
+// event floats the pickup's label over whoever took it (and a refactor bomb's ring goes out from
+// them, #78), and a `block` event pops their shield.
 import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
+import { BOMB_RADIUS, bomb } from "../../shared/arena/pickups/bomb";
 import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
   BLOCK,
@@ -35,6 +37,7 @@ import { clampInput, type Input } from "../../shared/arena/sim";
 import { isTeam, type Team } from "../../server/rules";
 import { createFpsMeter, tickFps } from "../game/fps";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "../game/fx/particles";
+import { createRings, spawnRing, updateRings } from "../game/fx/rings";
 import { HIT_SHAKE, createShake, kick, updateShake } from "../game/fx/shake";
 import { TEXT_CAPACITY, createTexts, setTextScale, spawnText, spawnWord, updateTexts } from "../game/fx/text";
 import { createTrail, updateTrail } from "../game/fx/trail";
@@ -135,6 +138,8 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   const shots = createShots();
   const kills = createKillQueue();
   const particles = createParticles();
+  // Refactor bombs going off (#78).
+  const rings = createRings();
   // Score labels, and each pickup's word label (#73), built once.
   const texts = createTexts(TEXT_CAPACITY, PICKUP_LABELS);
   const shake = createShake();
@@ -275,6 +280,9 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
         if (r && id) {
           spawnWord(texts, r.x, r.y - LABEL_ABOVE, m.pickup!);
           spawnBurst(particles, r.x, r.y, SPARK_COUNT * 2, PICKUP_DRAW[id].glow, fxRng);
+          // A refactor bomb goes off at the take: its ring sweeps out from the taker (your own
+          // robot is where you see it, predicted), its kills arriving as ordinary kill rows.
+          if (id === bomb.id) spawnRing(rings, r.x, r.y, BOMB_RADIUS);
         }
       } else if (m.kind === BLOCK) {
         // A shield blocked a hit: the bubble pops, for everyone.
@@ -430,6 +438,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     othersAt: 0,
     you: null,
     particles,
+    rings,
     texts,
     shake,
     me: null,
@@ -553,6 +562,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     drainKills(kills, mineAt, isMine, true, showKill);
     drainKills(kills, rt, isMine, false, showKill);
     updateParticles(particles, dt);
+    updateRings(rings, dt);
     updateTexts(texts, dt);
     updateShake(shake, dt, fxRng);
     updateHudFx(hudFx, dt);

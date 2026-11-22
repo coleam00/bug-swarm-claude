@@ -5,7 +5,9 @@
 // is lives in its own file (kind.ts, registry.ts); this file treats every pickup the same.
 import { MAX_PICKUPS_PER_ARENA, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind, type PickupId } from "../constants";
 import { nextRandom } from "../rng";
+import { sweepDeadBugs } from "../combat";
 import { canAct, type ArenaState } from "../sim";
+import { bomb, bombGoesOff } from "./bomb";
 import { PICKUP_DEFS } from "./registry";
 
 /**
@@ -34,7 +36,11 @@ const TOUCH = PLAYER_RADIUS + PICKUP_RADIUS;
  *    the floor (then it is lost, never queued);
  * 4. touch: each floor pickup, in order, goes to the first player in the list who is up and within
  *    PLAYER_RADIUS + PICKUP_RADIUS: its effect is set to its full duration (taking one you already
- *    have refreshes it), events.pickups says who took what, and it leaves the floor.
+ *    have refreshes it; an instant pickup's is 0), events.pickups says who took what, and it leaves
+ *    the floor. A refactor bomb goes off there and then (#78, bomb.ts bombGoesOff);
+ * 5. after a bomb: its kills draw their drops as in 3 (landing on the floor after this step's
+ *    touches, so they can be taken from the next step on), and the bugs it killed leave the arena
+ *    now (combat.ts sweepDeadBugs), so none takes another step.
  * The floor is compacted in place.
  */
 export function stepPickups(state: ArenaState): void {
@@ -51,13 +57,8 @@ export function stepPickups(state: ArenaState): void {
     if (--f.ticksLeft > 0) floor[keep++] = f;
   }
   floor.length = keep;
-  for (const k of ev.kills) {
-    const id = dropFor(k.kind, nextRandom(state.dropRng));
-    if (id === null || floor.length >= MAX_PICKUPS_PER_ARENA) continue;
-    const x = Math.min(WORLD_W - PICKUP_RADIUS, Math.max(PICKUP_RADIUS, k.x));
-    const y = Math.min(WORLD_H - PICKUP_RADIUS, Math.max(PICKUP_RADIUS, k.y));
-    floor.push({ id: state.nextPickupId++, kind: id, x, y, ticksLeft: PICKUP_DEFS[id].floorTicks });
-  }
+  dropKills(state, 0);
+  const shotKills = ev.kills.length;
   keep = 0;
   for (let i = 0; i < floor.length; i++) {
     const f = floor[i]!;
@@ -69,10 +70,29 @@ export function stepPickups(state: ArenaState): void {
       if (dx * dx + dy * dy > TOUCH * TOUCH) continue;
       p.effect[PICKUP_IDS.indexOf(f.kind)] = PICKUP_DEFS[f.kind].durationTicks;
       ev.pickups.push({ player: p.id, kind: f.kind });
+      if (f.kind === bomb.id) bombGoesOff(state, p);
       taken = true;
       break;
     }
     if (!taken) floor[keep++] = f;
   }
   floor.length = keep;
+  if (ev.kills.length > shotKills) {
+    dropKills(state, shotKills);
+    sweepDeadBugs(state);
+  }
+}
+
+/** Each kill from index `from` of this step's kills draws one number and maybe drops (step 3). */
+function dropKills(state: ArenaState, from: number): void {
+  const kills = state.events.kills;
+  const floor = state.floor;
+  for (let i = from; i < kills.length; i++) {
+    const k = kills[i]!;
+    const id = dropFor(k.kind, nextRandom(state.dropRng));
+    if (id === null || floor.length >= MAX_PICKUPS_PER_ARENA) continue;
+    const x = Math.min(WORLD_W - PICKUP_RADIUS, Math.max(PICKUP_RADIUS, k.x));
+    const y = Math.min(WORLD_H - PICKUP_RADIUS, Math.max(PICKUP_RADIUS, k.y));
+    floor.push({ id: state.nextPickupId++, kind: id, x, y, ticksLeft: PICKUP_DEFS[id].floorTicks });
+  }
 }

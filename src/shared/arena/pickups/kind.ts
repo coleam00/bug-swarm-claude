@@ -17,6 +17,10 @@ export type PickupDef = {
   drop: Record<BugKind, number>;
   /** Ticks it lies on the floor before it goes. */
   floorTicks: number;
-  /** Ticks its effect lasts once taken (a shield also ends when it blocks a hit). */
+  /**
+   * Ticks its effect lasts once taken (a shield also ends when it blocks a hit). 0 for an instant
+   * pickup (the refactor bomb, #78): its effect happens at the take, it sets no effects bit and
+   * shows no HUD timer.
+   */
   durationTicks: number;
 };
