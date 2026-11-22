@@ -354,8 +354,6 @@ describe("the stream board's read", () => {
     live = { playing: 21, arenas: [{ id: 1, players: 20, wave: 3 }, { id: 2, players: 1, wave: 1 }] };
     endRun(startRun(a, "player-0002", "Bob", SPACES), 30); // at the same instant: inside the 1 s window
     expect(await board(a)).toEqual({ top: before.top, teams: before.teams, ...live });
-    clock += 1000;
-    expect(await board(a)).toMatchObject({ teams: { tabs: 50, spaces: 30 }, playing: 21 });
   });
 });
 

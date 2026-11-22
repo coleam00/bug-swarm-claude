@@ -3,7 +3,7 @@
 // parsed as HTML (engineering.md, "Anything viewers type is untrusted").
 import { TEAMS, type Team } from "../../server/rules";
 import { TEAM_LOOK } from "../teams";
-import { PILL_SLOTS, TOP_SIZE, nameScale, type BoardView } from "./data";
+import { TOP_SIZE, arenaPills, nameScale, type BoardView, type LiveArena } from "./data";
 import type { BoardStatus } from "./poll";
 
 const EMPTY = "-";
@@ -84,23 +84,53 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
   live.append(liveCount, el("span", "live-label", "playing now"));
   race.append(el("h1", "title", "Bug Swarm"), live, el("p", "race-title", "Tabs vs Spaces"), teamsBox, bar, join);
 
-  // The arena strip across the bottom: PILL_SLOTS chips at most (the last may be '+N more'), and a
-  // note while no arena is open, so the strip never collapses.
+  // The arena strip across the bottom: one pill per open arena while they fit on its line, else as
+  // many as fit with the last chip '+N more' (fitPills). A note while no arena is open, so the strip
+  // never collapses. Pills are made as needed and kept.
   const strip = el("ul", "arenas");
   const pills: HTMLElement[] = [];
-  for (let i = 0; i < PILL_SLOTS; i++) {
-    const pill = el("li", "pill");
-    pill.hidden = true;
-    pills.push(pill);
-  }
   const none = el("li", "pill empty-note", "No arenas open");
-  strip.append(...pills, none);
+  strip.append(none);
+  let arenas: LiveArena[] = [];
+
+  /** Shows `slots` chips' worth of the arenas. */
+  const showPills = (slots: number): void => {
+    const { pills: shown, more } = arenaPills(arenas, slots);
+    while (pills.length < shown.length + 1) {
+      const pill = el("li", "pill");
+      strip.insertBefore(pill, none);
+      pills.push(pill);
+    }
+    pills.forEach((pill, i) => {
+      const p = shown[i];
+      const isMore = !p && more > 0 && i === shown.length;
+      pill.hidden = !p && !isMore;
+      pill.classList.toggle("more", isMore);
+      pill.textContent = p ? p.text : isMore ? `+${more} more` : "";
+    });
+    none.hidden = shown.length > 0 || more > 0;
+  };
+  /**
+   * Every arena if their pills fit the strip's width, else the most chips that fit, '+N more'
+   * included: measured, like fitName, since pill widths grow with arena ids and waves over a stream.
+   * Where the strip wraps (portrait) everything fits.
+   */
+  const fitPills = (): void => {
+    for (let slots = arenas.length; slots > 1; slots--) {
+      showPills(slots);
+      if (strip.scrollWidth <= strip.clientWidth) return;
+    }
+    showPills(Math.min(1, arenas.length));
+  };
 
   const status = el("p", "status", "reconnecting...");
   status.hidden = true;
   root.replaceChildren(top, race, strip, status);
   // The stream frame can change size; names are fitted again to the new width.
-  addEventListener("resize", () => rows.forEach((r) => fitName(r.name)));
+  addEventListener("resize", () => {
+    rows.forEach((r) => fitName(r.name));
+    fitPills();
+  });
 
   return {
     render(view) {
@@ -121,15 +151,8 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
       if (view.overtook && view.leader) flash(teams[view.leader].root);
 
       liveCount.textContent = view.playing;
-      const { pills: shown, more } = view.arenas;
-      pills.forEach((pill, i) => {
-        const p = shown[i];
-        const isMore = !p && more > 0 && i === shown.length;
-        pill.hidden = !p && !isMore;
-        pill.classList.toggle("more", isMore);
-        pill.textContent = p ? p.text : isMore ? `+${more} more` : "";
-      });
-      none.hidden = shown.length > 0 || more > 0;
+      arenas = view.arenas;
+      fitPills();
     },
     setStatus(s) {
       status.hidden = s === "live";

@@ -13,14 +13,6 @@ export const TOP_SIZE = 10;
  */
 export const NAME_MIN_SCALE = 5 / 8;
 
-/**
- * How many chips the arena strip holds, '+N more' included. Measured in Chrome on #74 at 1280x720:
- * a worst-case pill ("Arena 999 · 20 · wave 999", 3.5vh bold) is 332 px (46vh) and the strip
- * 1222 px, so three fit (1018 px) and four do not (1361 px). Every size is in vh, so the ratio holds
- * at any 16:9 frame.
- */
-export const PILL_SLOTS = 3;
-
 /** `playing` and `arenas` count people only: fill bots never reach the board. */
 export type Board = { top: TopRow[]; teams: Record<Team, number>; playing: number; arenas: LiveArena[] };
 export type { LiveArena };
@@ -38,7 +30,8 @@ export type BoardView = {
   overtook: boolean;
   /** People playing now, formatted. */
   playing: string;
-  arenas: ArenaPills;
+  /** The open arenas, by id. view.ts fits as many pills as the strip holds (arenaPills). */
+  arenas: LiveArena[];
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -67,11 +60,11 @@ export function parseBoard(body: unknown): Board | null {
 }
 
 /**
- * The arena strip: one pill per open arena, by id (the busy arenas have the low ids, and the
- * order holds still on stream), at most `slots` chips. With more arenas than slots, the last slot
- * becomes '+N more' for the rest.
+ * The arena strip with room for `slots` chips: one pill per open arena, by id (the order holds still
+ * on stream). With more arenas than slots, the last slot becomes '+N more' for the rest. view.ts
+ * finds the largest `slots` whose chips fit the strip's measured width.
  */
-export function arenaPills(arenas: LiveArena[], slots = PILL_SLOTS): ArenaPills {
+export function arenaPills(arenas: LiveArena[], slots: number): ArenaPills {
   const sorted = [...arenas].sort((a, b) => a.id - b.id);
   const shown = sorted.length <= slots ? sorted : sorted.slice(0, Math.max(0, slots - 1));
   return {
@@ -122,7 +115,7 @@ export function boardView(prev: Board | null, next: Board): BoardView {
     leader,
     overtook: was !== null && leader !== null && leader !== was,
     playing: formatScore(next.playing),
-    arenas: arenaPills(next.arenas),
+    arenas: [...next.arenas].sort((a, b) => a.id - b.id),
   };
 }
 

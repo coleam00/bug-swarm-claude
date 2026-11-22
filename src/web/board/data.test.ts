@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TEAMS } from "../../server/rules";
 import { TEAM_LOOK } from "../teams";
-import { NAME_MIN_SCALE, PILL_SLOTS, arenaPills, boardView, joinHost, nameScale, parseBoard, type Board, type LiveArena } from "./data";
+import { NAME_MIN_SCALE, arenaPills, boardView, joinHost, nameScale, parseBoard, type Board, type LiveArena } from "./data";
 
 const [TABS, SPACES] = TEAMS;
 const board = (names: [string, number][], tabs = 0, spaces = 0): Board => ({
@@ -181,23 +181,23 @@ describe("playing now and the arena pills (#74)", () => {
   });
 
   test("one pill per arena, reading 'Arena <id> · <people> · wave <wave>', by id", () => {
-    expect(arenaPills([])).toEqual({ pills: [], more: 0 });
-    expect(arenaPills([{ id: 3, players: 14, wave: 7 }])).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7" }], more: 0 });
+    expect(arenaPills([], 4)).toEqual({ pills: [], more: 0 });
+    expect(arenaPills([{ id: 3, players: 14, wave: 7 }], 4)).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7" }], more: 0 });
     const v = boardView(null, { ...board([]), arenas: [{ id: 5, players: 1, wave: 1 }, { id: 2, players: 20, wave: 4 }] });
-    expect(v.arenas.pills.map((p) => p.id)).toEqual([2, 5]);
+    expect(v.arenas.map((a) => a.id)).toEqual([2, 5]);
+    expect(arenaPills([{ id: 5, players: 1, wave: 1 }, { id: 2, players: 20, wave: 4 }], 4).pills.map((p) => p.id)).toEqual([2, 5]);
   });
 
   test("up to the slots, every arena shows; past them the last slot is '+N more' for the rest", () => {
-    expect(arenaPills(arenas(PILL_SLOTS))).toMatchObject({ more: 0 });
-    expect(arenaPills(arenas(PILL_SLOTS)).pills.length).toBe(PILL_SLOTS);
-    const over = arenaPills(arenas(PILL_SLOTS + 1));
-    expect(over.pills.map((p) => p.id)).toEqual(Array.from({ length: PILL_SLOTS - 1 }, (_, i) => i + 1));
+    const all = arenaPills(arenas(4), 4);
+    expect(all.pills.length).toBe(4);
+    expect(all.more).toBe(0);
+    const over = arenaPills(arenas(5), 4);
+    expect(over.pills.map((p) => p.id)).toEqual([1, 2, 3]);
     expect(over.more).toBe(2);
-    const fifteen = arenaPills(arenas(15));
-    expect(fifteen.pills.length).toBe(PILL_SLOTS - 1);
-    expect(fifteen.more).toBe(15 - PILL_SLOTS + 1);
-    expect(arenaPills(arenas(3), 3)).toMatchObject({ more: 0 });
-    expect(arenaPills(arenas(4), 3)).toMatchObject({ more: 2 });
-    expect(arenaPills(arenas(4), 3).pills.length).toBe(2);
+    const fifteen = arenaPills(arenas(15), 11);
+    expect(fifteen.pills.length).toBe(10);
+    expect(fifteen.more).toBe(5);
+    expect(arenaPills(arenas(15), 1)).toEqual({ pills: [], more: 15 });
   });
 });
