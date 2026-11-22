@@ -21,7 +21,7 @@ export const BOMB_FLOOR_S = 12;
  * and dashers die, everything else takes the damage (a 3 hp spitter and a 1 hp glob die of it too,
  * today). A Record over BUG_KINDS, so a new kind does not compile until it says which.
  */
-export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: true, spitter: false, glob: false };
+export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: true, spitter: false, glob: false, beetle: false };
 
 export const bomb: PickupDef = {
   id: "bomb",
@@ -29,7 +29,7 @@ export const bomb: PickupDef = {
   // Each kind's pickup chance, split evenly over the 3 pickups (#78): crawler 1.5%, dasher and spitter
   // 3% in all (half the item's starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72,
   // drops as the dasher does). A glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0 },
+  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0, beetle: 0.02 },
   floorTicks: Math.round(BOMB_FLOOR_S / DT),
   durationTicks: 0,
 };

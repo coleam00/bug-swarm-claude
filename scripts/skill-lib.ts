@@ -7,9 +7,11 @@
 // bot (#66), placed between 2x the mover and the aimer. Per bug kind (#65) it also prints how many
 // of each spawned in a life and how many hits each landed (the first gate's lives, played alone),
 // and per pickup (#73) how many the player took, how many hits a shield blocked, how many bugs
-// its review laser shots hit and how many its refactor bombs killed (#78). Every gate is played
-// with pickups dropping. Tested in skill-lib.test.ts on a few seeds.
+// its review laser shots hit and how many its refactor bombs killed (#78); and for bugs with a
+// shell (#80, the beetle), how many the player killed and how many of its shots a shell blocked.
+// Every gate is played with pickups dropping. Tested in skill-lib.test.ts on a few seeds.
 import { BUG_KINDS, DASH_TICKS, DT, PICKUP_IDS, WORLD_H, WORLD_W, type BugKind, type PickupId } from "../src/shared/arena/constants";
+import { bugDef } from "../src/shared/arena/bugs/registry";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
   AIMER,
@@ -58,6 +60,18 @@ function countPickups(state: ArenaState, id: number, c: PickupCounts): void {
   for (const o of ev.bombKills) if (o === id) c.bombKills++;
 }
 
+/** The bug kinds with a shell (#80). */
+const SHELLED_KINDS: readonly BugKind[] = BUG_KINDS.filter((k) => bugDef(k).shell !== undefined);
+
+/** One life's shelled bugs (#80): kills of a kind with a shell, and its shots a shell blocked. */
+export type ShellCounts = { kills: number; blocks: number };
+
+/** Adds the last step's shelled-bug kills and shell blocks for player `id` to `c`. */
+export function countShells(state: ArenaState, id: number, c: ShellCounts): void {
+  for (const k of state.events.kills) if (k.by === id && SHELLED_KINDS.includes(k.kind)) c.kills++;
+  for (const o of state.events.shellBlocks) if (o === id) c.blocks++;
+}
+
 /** One life's result: what the drop-in gates read. */
 export type DropInLife = { score: number; kills: number; seconds: number; capped: boolean; dashes: number };
 
@@ -68,6 +82,7 @@ export type LifeResult = DropInLife & {
   /** Hits the player took from each kind. */
   touches: PerKind;
   pickups: PickupCounts;
+  shells: ShellCounts;
 };
 
 /**
@@ -115,6 +130,7 @@ function playLifeWith<M extends PolicyMemory>(
   const spawned = perKind();
   const touches = perKind();
   const pickups = pickupCounts();
+  const shells: ShellCounts = { kills: 0, blocks: 0 };
   for (let t = 0; t < maxTicks; t++) {
     observe(state, p.id, WORLD_W, WORLD_H, obs);
     act(obs, mem, rng, out);
@@ -125,10 +141,11 @@ function playLifeWith<M extends PolicyMemory>(
     if (p.dashTicks === DASH_TICKS) dashes++;
     countKinds(state, firstNew, p.id, spawned, touches);
     countPickups(state, p.id, pickups);
+    countShells(state, p.id, shells);
     const ended = state.events.livesEnded[0];
-    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches, pickups };
+    if (ended) return { score: ended.score, kills: ended.kills, seconds: ended.ticks * DT, capped: false, dashes, spawned, touches, pickups, shells };
   }
-  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches, pickups };
+  return { score: p.score, kills: p.kills, seconds: (state.tick - p.lifeStartTick) * DT, capped: true, dashes, spawned, touches, pickups, shells };
 }
 
 /** The value at fraction `q` (0 to 1) of sorted numbers, interpolated. */
@@ -159,6 +176,8 @@ export type PolicySummary = {
   medianTouches: PerKind;
   /** Pickups a life (#73): taken by id, shield blocks, laser hits and bomb kills, median and mean. */
   pickups: { median: PickupCounts; mean: PickupCounts };
+  /** Shelled bugs a life (#80): kills and shots blocked, median and mean. */
+  shells: { median: ShellCounts; mean: ShellCounts };
 };
 
 export type SkillReport = {
@@ -197,7 +216,20 @@ export function summarize(policy: PolicyName, lives: LifeResult[]): PolicySummar
     medianSpawned: medianOf((l) => l.spawned),
     medianTouches: medianOf((l) => l.touches),
     pickups: pickupStats(lives.map((l) => l.pickups)),
+    shells: shellStats(lives.map((l) => l.shells)),
   };
+}
+
+/** The median and mean of each shelled-bug count over `lives`. */
+export function shellStats(lives: readonly ShellCounts[]): { median: ShellCounts; mean: ShellCounts } {
+  const n = Math.max(1, lives.length);
+  const of = (pick: (c: ShellCounts) => number) => {
+    const v = lives.map(pick).sort((a, b) => a - b);
+    return [quantile(v, 0.5), v.reduce((s, x) => s + x, 0) / n] as const;
+  };
+  const [mk, ak] = of((c) => c.kills);
+  const [mb, ab] = of((c) => c.blocks);
+  return { median: { kills: mk, blocks: mb }, mean: { kills: ak, blocks: ab } };
 }
 
 /** The median and mean of each pickup count over `lives`. */
@@ -295,6 +327,13 @@ export function formatSkill(r: SkillReport): string[] {
     lines.push(
       `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}, bomb kills ${v(m.bombKills, a.bombKills)}`,
     );
+  }
+  if (SHELLED_KINDS.length > 0) {
+    lines.push(`bugs with a shell (${SHELLED_KINDS.join(", ")}) a life, median (mean): killed, shots the shell blocked`);
+    for (const p of r.policies) {
+      const { median: m, mean: a } = p.shells;
+      lines.push(`${p.policy.padEnd(8)}kills ${m.kills} (${a.kills.toFixed(1)}), blocked ${m.blocks} (${a.blocks.toFixed(1)})`);
+    }
   }
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");
   return lines;

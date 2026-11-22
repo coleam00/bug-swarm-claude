@@ -2,7 +2,7 @@
 import { BUG_KINDS, ROBOT_RADIUS } from "./config";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
-export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95", "#7dd3fc", "#f43f5e", "#7cff3a", "#e8ff5a", "#e879f9"] as const;
+export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95", "#7dd3fc", "#f43f5e", "#7cff3a", "#e8ff5a", "#93c5fd", "#e879f9"] as const;
 export const GLOW_AMBER = 0;
 export const GLOW_LIME = 1;
 export const GLOW_CYAN = 2;
@@ -18,8 +18,10 @@ export const GLOW_LASER = 8;
 export const GLOW_ACID = 9;
 /** Hot yellow-green: a spitter's glob (#72), bright so it reads in a swarm. */
 export const GLOW_GLOB = 10;
+/** Steel blue: the arena's beetle (#80) and the spark off its shell. */
+export const GLOW_STEEL = 11;
 /** Orchid: the arena's refactor bomb (#78), release 1's bomb ring colour. */
-export const GLOW_BOMB = 11;
+export const GLOW_BOMB = 12;
 /** The refactor bomb's ring (release 1's look): a bright stroke, drawn again wide and faint for its glow. */
 export const BOMB_RING = PALETTE[GLOW_BOMB];
 export const BOMB_RING_WIDTH = 8;

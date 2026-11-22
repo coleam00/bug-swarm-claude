@@ -1,13 +1,14 @@
 // Every bug kind, by id (#65). The Record makes TypeScript demand an entry for each id in
 // constants.ts BUG_KINDS, so a kind cannot be named without being defined.
 import { BUG_KINDS, type BugKind } from "../constants";
+import { beetle } from "./beetle";
 import { crawler } from "./crawler";
 import { dasher } from "./dasher";
 import { glob } from "./glob";
 import type { BugKindDef } from "./kind";
 import { spitter } from "./spitter";
 
-export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher, spitter, glob };
+export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher, spitter, glob, beetle };
 
 export function bugDef(kind: BugKind): BugKindDef {
   return BUG_DEFS[kind];

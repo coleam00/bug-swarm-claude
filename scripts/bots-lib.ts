@@ -1,7 +1,8 @@
 // The pure half of `bun run bots`: arguments, the bots' names, how a bot wanders and aims, what a
 // policy bot sees (from snapshots), and the summary. No network here, so `bun test` covers it;
 // `bots.ts` opens the sockets.
-import { DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { bugDef } from "../src/shared/arena/bugs/registry";
+import { BUG_KINDS, DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createObservation, setObservedBug, setObservedPickup, type Observation } from "../src/shared/arena/policies";
 import type { Snapshot } from "../src/shared/arena/protocol";
 import { nextRandom, type Rng } from "../src/shared/arena/rng";
@@ -163,12 +164,17 @@ export function createObservationTracker(): ObservationTracker {
       s.dashReady = s.alive && m.me.dc === 0 && m.me.dk === 0;
       next.clear();
       for (let i = 0; i < m.b.length; i++) {
-        const [id, , x, y] = m.b[i]!;
+        const row = m.b[i]!;
+        const [id, kind, x, y] = row;
         const before = last.get(id);
         const gap = before ? (m.tick - before.tick) * DT : 0;
         const vx = before && gap > 0 ? (x - before.x) / gap : 0;
         const vy = before && gap > 0 ? (y - before.y) / gap : 0;
-        setObservedBug(obs, i, x, y, vx, vy);
+        // A kind with a shell (#80) faces its row's tail angle; any other bug, or one with no tail, 0, 0.
+        const k = BUG_KINDS[kind];
+        const shelled = k !== undefined && bugDef(k).shell !== undefined && row.length > 4;
+        const angle = shelled ? row[5]! : 0;
+        setObservedBug(obs, i, x, y, vx, vy, shelled ? Math.cos(angle) : 0, shelled ? Math.sin(angle) : 0);
         next.set(id, { x, y, tick: m.tick });
       }
       obs.bugCount = m.b.length;

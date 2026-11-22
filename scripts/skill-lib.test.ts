@@ -16,9 +16,12 @@ import {
   runDropIn,
   runFill,
   runSkill,
+  shellStats,
+  countShells,
   USAGE,
   warmArenas,
 } from "./skill-lib";
+import { createArena } from "../src/shared/arena/sim";
 
 describe("bun run skill: fair drop-in", () => {
   test("the late gate is 0.8x and the idle gate 10 s, at their boundaries", () => {
@@ -132,6 +135,17 @@ describe("bun run skill", () => {
     expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0, bomb: 0 }, blocks: 0, laserHits: 0, bombKills: 0 });
     // One life's counts replay exactly.
     expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
+  });
+
+  test("bugs with a shell are counted (#80): a player's own beetle kills and shell blocks, nobody else's, no other kind", () => {
+    const a = createArena(1);
+    const ev = a.events;
+    ev.kills.push({ bug: 1, by: 7, x: 0, y: 0, points: 60, kind: "beetle" }, { bug: 2, by: 7, x: 0, y: 0, points: 10, kind: "crawler" }, { bug: 3, by: 8, x: 0, y: 0, points: 60, kind: "beetle" });
+    ev.shellBlocks.push(7, 8, 7);
+    const c = { kills: 0, blocks: 0 };
+    countShells(a, 7, c);
+    expect(c).toEqual({ kills: 1, blocks: 2 });
+    expect(shellStats([c, { kills: 0, blocks: 0 }, { kills: 2, blocks: 5 }])).toEqual({ median: { kills: 1, blocks: 2 }, mean: { kills: 1, blocks: 7 / 3 } });
   });
 
   test("pickupStats: the median and mean of each count", () => {

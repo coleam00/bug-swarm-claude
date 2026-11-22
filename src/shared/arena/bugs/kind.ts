@@ -39,6 +39,13 @@ export type BugKindDef = {
    */
   launches?: { kind: BugKind; speed: number };
   /**
+   * Optional (#80): a front shell centred on the bug's facing, its unit (b.dx, b.dy). A shot
+   * travelling within acos(cosHalf) of straight against that facing is blocked (combat.ts
+   * shellBlocks): no damage, the shot ends, the shooter's streak still grows. A zero facing blocks
+   * nothing. The policies read the same rule, so bots flank (policies.ts).
+   */
+  shell?: { cosHalf: number };
+  /**
    * One tick of its behaviour: sets b.x, b.y, b.vx, b.vy and its phase fields (phase,
    * phaseTicks, dx, dy, travel). `target` is the nearest player who is up, or null, and
    * `targetAge` that player's pressure age in seconds (index.ts pressureAge: the life's age, held
