@@ -59,6 +59,20 @@ describe("glob flight", () => {
     expect([events, ps[0]!.score, ps[0]!.hits]).toEqual([0, 0, 0]);
   });
 
+  test("an expiring glob leaves without touching a player it ends beside", () => {
+    // From 600 along +x it is at 1350 on its last step, 10 from the player (touch is 22); a step
+    // earlier it is 25 away. So only the expiry keeps it from costing a hit.
+    const { a, ps } = arenaWith([1360, 1200]);
+    const g = placeGlob(a, 600, 1200, 1, 0);
+    let touches = 0;
+    for (let n = 0; n < FLY_TICKS + FADE_TICKS; n++) {
+      stepQuiet(a);
+      touches += a.events.touches.length;
+    }
+    expect(a.bugs).not.toContain(g);
+    expect([touches, ps[0]!.hits]).toEqual([0, 0]);
+  });
+
   test("a wall ends it on the step it would leave the floor", () => {
     const { a } = arenaWith([200, 200]);
     const g = placeGlob(a, WORLD_W - 20, 1200, 1, 0);

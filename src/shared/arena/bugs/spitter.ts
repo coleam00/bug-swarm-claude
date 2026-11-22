@@ -5,8 +5,10 @@
 //   its id, turning back when a wall stops it). Once it has spent RELOAD_TICKS in keep (counted
 //   from its spawn too) with its target within TELL_RANGE, it starts its tell, but never at a
 //   life whose pressure age is under SPITTER_FROM_S (owner ruling, #72): a spitter spawns for no
-//   life younger than that, so a newcomer joining an arena full of spitters gets the same first
-//   minute as one joining at the start. It circles them without spitting.
+//   life younger than that, so a newcomer is not singled out by an arena full of spitters. It
+//   circles them without telling. The rule is on the tell's start only: the glob is aimed at
+//   whoever is the nearest player up when the tell ends, at any age, so a young life that steps
+//   nearer during a tell begun at an older one takes the glob.
 // - tell: stands still, swelling and glowing (the browser draws it), for TELL_TICKS ticks, the
 //   first one included, facing where its target was when it began. It never cancels. On its last
 //   tick it aims with lead (leadAim) and launches one glob (glob.ts) from its mouth: the stepper
@@ -42,7 +44,7 @@ export const SPIT_TICKS = Math.round(0.3 / DT);
 export const MUZZLE = SPITTER_RADIUS + GLOB_RADIUS;
 /** The longest lead it aims for, seconds of glob flight. */
 export const LEAD_MAX_S = 2;
-/** A life must be this old (pressure age) before a spitter spawns for it or spits at it, seconds. */
+/** A life must be this old (pressure age) before a spitter spawns for it or starts a tell at it, seconds. */
 export const SPITTER_FROM_S = 60;
 /** Its share of a life's spawns at SPITTER_FROM_S, rising by SPITTER_SHARE_RAMP a second to SPITTER_SHARE_MAX. */
 export const SPITTER_SHARE_START = 0.08;
