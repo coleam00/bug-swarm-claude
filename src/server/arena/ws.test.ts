@@ -496,6 +496,9 @@ test(
     pa.budget = 0;
     pb.budget = 0;
     pa.invulnTicks = 400;
+    // Neither has the first-life shield (#90), so only the taken one shows.
+    pa.effect.fill(0);
+    pb.effect.fill(0);
     pb.x = Math.max(20, pa.x - 300);
     pb.y = pa.y;
     const f = placePickup(room.state, pa.x + 200, pa.y, "shield");

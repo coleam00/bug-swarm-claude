@@ -144,8 +144,13 @@ export type BugKind = (typeof BUG_KINDS)[number];
  */
 export const PICKUP_IDS = ["shield", "laser", "bomb", "drone"] as const;
 export type PickupId = (typeof PICKUP_IDS)[number];
-/** The most pickups lying on the floor of one arena; a drop past it is lost, never queued. */
-export const MAX_PICKUPS_PER_ARENA = 6;
+/**
+ * The most pickups lying on the floor of one arena; a drop past it is lost, never queued. #90 raised
+ * it from 6: with 12 to 20 aimers the old cap bound, holding a pickup in a player's view about 35% of
+ * the time whatever the drop chances; 16 is where that share stopped rising (51% to 58%; measured,
+ * architecture.md "Built so far (#90)").
+ */
+export const MAX_PICKUPS_PER_ARENA = 16;
 /** A floor pickup blinks for this long before it goes, seconds (drawn only; the sim ignores it). */
 export const PICKUP_BLINK_S = 3;
 /** A floor pickup's radius, units: a player who is up takes it within PLAYER_RADIUS plus this. */

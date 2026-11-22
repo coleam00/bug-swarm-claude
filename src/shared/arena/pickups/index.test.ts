@@ -138,6 +138,21 @@ describe("the floor", () => {
     expect(effectOf(p, "laser")).toBe(laser.durationTicks);
   });
 
+  test("taking one never shortens an effect already running (#90): a long first-life shield stays, a short one is refreshed", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.effect[0] = 1000; // shield is PICKUP_IDS[0]
+    placePickup(a, 1200, 1200, "shield");
+    stepQuiet(a);
+    expect(a.events.pickups).toEqual([{ player: p.id, kind: "shield" }]);
+    // Counted down this step, then the take left it alone.
+    expect(effectOf(p, "shield")).toBe(999);
+    p.effect[0] = 5;
+    placePickup(a, 1200, 1200, "shield");
+    stepQuiet(a);
+    expect(effectOf(p, "shield")).toBe(shield.durationTicks);
+  });
+
   test("two players on one pickup: the first in the list takes it", () => {
     const { a, ps } = arenaWith([1200, 1200], [1210, 1200]);
     placePickup(a, 1205, 1200, "shield");

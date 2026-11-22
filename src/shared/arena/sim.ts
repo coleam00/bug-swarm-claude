@@ -10,7 +10,7 @@ import { stepFire, stepShots } from "./combat";
 import { stepDrone } from "./pickups/drone";
 import { stepDowns } from "./downs";
 import { stepPickups } from "./pickups";
-import { shieldBlocks } from "./pickups/shield";
+import { FIRST_LIFE_SHIELD_TICKS, SHIELD, shieldBlocks } from "./pickups/shield";
 import {
   ACCEL,
   DASH_COOLDOWN_TICKS,
@@ -275,7 +275,10 @@ export function wave(tick: number): number {
   return 1 + Math.floor((tick * DT) / WAVE_S);
 }
 
-/** Starts a fresh life for `p` at (x, y): every life field reset, with SPAWN_PROTECT_S of spawn protection. */
+/**
+ * Starts a fresh life for `p` at (x, y): every life field reset, with SPAWN_PROTECT_S of spawn
+ * protection, and on a first life in a session the test shield up (#90, FIRST_LIFE_SHIELD_S).
+ */
 function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.x = x;
   p.y = y;
@@ -298,6 +301,7 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.dashTicks = 0;
   p.dashCooldown = DASH_SPAWN_LOCK_TICKS;
   p.effect.fill(0);
+  if (p.firstLife) p.effect[SHIELD] = FIRST_LIFE_SHIELD_TICKS;
 }
 
 function clearDown(p: Player): void {
