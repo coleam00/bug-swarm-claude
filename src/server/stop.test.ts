@@ -72,3 +72,13 @@ test("stop resolves within 2 s with open WebSockets that never close, even if th
   expect(r).toBe(0); // nobody said hello, so no life was in progress
   expect(ms).toBeLessThan(2000);
 });
+
+test("a listener stop that rejects makes stop reject, so the shutdown logs it and exits 1 (#99)", async () => {
+  const running = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: join(dir, "no-dist"), buildId: "b" });
+  const real = running.server.stop.bind(running.server);
+  (running.server as { stop: (closeActive?: boolean) => Promise<void> }).stop = async (closeActive) => {
+    await real(closeActive);
+    throw new Error("boom");
+  };
+  await expect(running.stop()).rejects.toThrow("boom");
+});

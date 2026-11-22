@@ -42,8 +42,9 @@ export type RunningServer = {
   /**
    * Stops the server for a redeploy (or a test's end): ends and saves every life in progress with
    * its score so far, sends every socket `error restarting` and closes it, stops the listener
-   * (waiting at most LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the number of lives it ended. Calling it again returns
-   * the same promise.
+   * (waiting at most LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the
+   * number of lives it ended; rejects if the listener stop does. Calling it again returns the same
+   * promise.
    */
   stop(): Promise<number>;
 };
@@ -187,17 +188,20 @@ export function startServer(opts: ServerOptions): RunningServer {
     while (sockets.openCount > 0 && performance.now() < deadline) await Bun.sleep(10);
     // Bounded: on Windows Bun's listener stop once never settled with browser players connected
     // (#99). The lives are already written, and exiting closes whatever the listener still holds.
+    // A listener stop that rejects is a failure: stop() rejects with it, so gracefulShutdown logs it
+    // and exits 1.
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const settled = await Promise.race([
-      server.stop(true).then(
-        () => true,
-        () => true,
-      ),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), LISTENER_STOP_WAIT_MS);
-      }),
-    ]);
-    clearTimeout(timer);
+    let settled: boolean;
+    try {
+      settled = await Promise.race([
+        server.stop(true).then(() => true),
+        new Promise<false>((resolve) => {
+          timer = setTimeout(() => resolve(false), LISTENER_STOP_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
     if (!settled) {
       console.warn(
         `stop: the listener had not stopped after ${LISTENER_STOP_WAIT_MS} ms (websockets ${server.pendingWebSockets}, requests ${server.pendingRequests}); moving on`,
