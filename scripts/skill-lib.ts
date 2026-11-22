@@ -318,8 +318,13 @@ export const BACKGROUND_BOTS = 3;
 export const LATE_POLICIES = ["aimer"] as const satisfies readonly PolicyName[];
 /** Policies whose late ratio is reported alongside the gate, not gated. */
 export const LATE_REPORTED = ["mover"] as const satisfies readonly PolicyName[];
-/** Seeds the late gate plays by default: more than the other gates, so its median is not noise. */
-export const LATE_SEEDS = 60;
+/**
+ * Seeds the late gate plays by default: more than the other gates, so its median is not noise.
+ * 240 (owner ruling, #72): on 60 the ratio swings by about 0.05 with small changes to bug
+ * behaviour, and the gate sits near its floor. `--late-seeds 60` is the quick mode (about 15 s
+ * for the whole run, against about a minute), for a first look, not for the gate's verdict.
+ */
+export const LATE_SEEDS = 240;
 
 /** The late gate: a late joiner's median life is at least LATE_RATIO of an early joiner's (above 0). */
 export function lateGate(late: number, early: number): boolean {

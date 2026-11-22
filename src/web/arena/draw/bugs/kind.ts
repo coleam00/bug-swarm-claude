@@ -18,6 +18,14 @@ export type BugFrame = {
   top: number;
   right: number;
   bottom: number;
+  /**
+   * The screen itself inside the safe area, world units, with no margin (#72): where marks pinned
+   * to the screen's edge go.
+   */
+  screenLeft: number;
+  screenTop: number;
+  screenRight: number;
+  screenBottom: number;
   /** This kind's leg frames (sprites.ts buildBugLookSprites of its look). */
   frames: readonly HTMLCanvasElement[];
   /** A soft glow in this kind's colour, for additive blending. */

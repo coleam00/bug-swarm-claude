@@ -118,8 +118,10 @@ describe("bun run skill", () => {
     expect([dasher.score, dasher.seconds]).not.toEqual([aimer.score, aimer.seconds]);
   });
 
-  test("pickups are counted a life: the aimer takes some on 8 seeds, its shields block and its lasers hit; the idle takes none", () => {
-    const r = runSkill(8, 180);
+  test("pickups are counted a life: the aimer takes some on 16 seeds, its shields block and its lasers hit; the idle takes none", () => {
+    // 16 seeds, not 8: at #73's drop chances a shield block is rare (1 in 16 lives here), and the
+    // spitter (#72) moved the seeded lives so the first 8 hold none.
+    const r = runSkill(16, 180);
     const by = (n: string) => r.policies.find((p) => p.policy === n)!;
     const aim = by("aimer").pickups.mean;
     expect(aim.taken.shield + aim.taken.laser).toBeGreaterThan(0);
@@ -142,7 +144,7 @@ describe("bun run skill", () => {
   test("quantiles and arguments", () => {
     expect(quantile([1, 2, 3, 4], 0.5)).toBe(2.5);
     expect(quantile([], 0.5)).toBe(0);
-    expect(parseSkillArgs([])).toEqual({ seeds: 30, lateSeeds: 60, max: 300 });
+    expect(parseSkillArgs([])).toEqual({ seeds: 30, lateSeeds: 240, max: 300 });
     expect(parseSkillArgs(["--seeds", "8", "--late-seeds", "12", "--max", "60"])).toEqual({ seeds: 8, lateSeeds: 12, max: 60 });
     expect(parseSkillArgs(["--late-seeds", "0"])).toBe(USAGE);
     expect(parseSkillArgs(["--seeds", "0"])).toBe(USAGE);

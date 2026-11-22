@@ -1,4 +1,4 @@
-// `bun run skill [--seeds 30] [--late-seeds 60] [--max 300]`: plays seeded arenas in-process with
+// `bun run skill [--seeds 30] [--late-seeds 240] [--max 300]` (`--late-seeds 60`: the quick mode): plays seeded arenas in-process with
 // the policies in src/shared/arena/policies.ts and prints each gate's numbers: the aimer against
 // the mover, aiming late joiners against early ones (the mover's late ratio printed, not gated),
 // and the idle newcomer at every arena age, plus an info line placing the server's fill bot between
