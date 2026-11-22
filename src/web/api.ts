@@ -1,4 +1,5 @@
 import { TEAMS, type Team } from "../server/rules";
+import { parseBoard } from "./board/data";
 
 // The API client for the life-over screen's reads (the arena saves lives on the server; nothing
 // here writes). Nothing here throws to its caller and nothing blocks play: every failure is
@@ -76,6 +77,19 @@ export async function fetchBest(playerId: string): Promise<number | null | "fail
     console.error(`best score failed: HTTP ${res.status}`);
   } catch (err) {
     console.error("best score failed", err);
+  }
+  return "failed";
+}
+
+/** People playing now (never bots), from the stream board's read (/api/board): the start screen's live line. */
+export async function fetchPlaying(): Promise<number | "failed"> {
+  try {
+    const res = await call("/api/board");
+    const board = res.ok ? parseBoard(await res.json()) : null;
+    if (board) return board.playing;
+    console.error(`playing now failed: HTTP ${res.status}`);
+  } catch (err) {
+    console.error("playing now failed", err);
   }
   return "failed";
 }

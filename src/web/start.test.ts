@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { TEAMS } from "../server/rules";
-import { BOT_NAME_MESSAGE, changeName, nameMessage, openingNotice, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type StartView } from "./start";
+import { BOT_NAME_MESSAGE, playingLine, changeName, nameMessage, openingNotice, pressEnter, pressTeam, showMessage, startView, teamLocked, typed, type StartView } from "./start";
 
 const id = "0123456789abcdef0123456789abcdef";
 const [TABS, SPACES] = TEAMS;
@@ -92,4 +92,11 @@ test("a bot name is refused before joining, by a team button and by Enter", () =
   // Not a bot name: "bots-01", "Robot".
   expect(pressTeam(view, "bots-01", TABS)).toEqual({ kind: "start", name: "bots-01", team: TABS });
   expect(pressTeam(view, "Robot", TABS)).toEqual({ kind: "start", name: "Robot", team: TABS });
+});
+
+test("the live line: people playing now, formatted like the board; nothing at none or when the read failed", () => {
+  expect(playingLine(1)).toBe("1 playing now");
+  expect(playingLine(1234)).toBe("1,234 playing now");
+  expect(playingLine(0)).toBe("");
+  expect(playingLine(null)).toBe("");
 });

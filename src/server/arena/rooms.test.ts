@@ -3,6 +3,8 @@ import {
   DASH_COOLDOWN_TICKS,
   DASH_SPAWN_LOCK_TICKS,
   DASH_TICKS,
+  DEMO_BOTS,
+  DEMO_WARM_TICKS,
   FILL_TARGET,
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
@@ -522,5 +524,118 @@ describe("the stream board's live read (#74)", () => {
     const last = joined[MAX_PLAYERS_PER_ARENA]!;
     rooms.leave(last.room, last.entity);
     expect(rooms.live()).toEqual({ playing: MAX_PLAYERS_PER_ARENA, arenas: [{ id: 1, players: MAX_PLAYERS_PER_ARENA, wave: 1 }] });
+  });
+});
+
+describe("watchers (#79, the start screen)", () => {
+  /** A socket's send that keeps the raw strings too, to compare them. */
+  function rawClient() {
+    const raw: string[] = [];
+    const got: ServerMessage[] = [];
+    return {
+      raw,
+      got,
+      send: (m: string) => {
+        raw.push(m);
+        got.push(JSON.parse(m) as ServerMessage);
+      },
+    };
+  }
+
+  test("on an empty server the first watcher opens a demo arena of DEMO_BOTS bots, already DEMO_WARM_S in and fighting, off the board, that closes with its last watcher", () => {
+    const { rooms, timers, tick } = setup(undefined, FILL_TARGET);
+    const w = rawClient();
+    const watching = rooms.watch(w.send)!;
+    // Warmed up before the watcher came: its bots are in the welcome's roster, bugs are out.
+    expect(watching.welcome).toMatchObject({ t: "welcome", you: 0, arena: 1, tick: DEMO_WARM_TICKS });
+    expect(watching.welcome.roster.length).toBe(DEMO_BOTS);
+    expect(rooms.room(1)!.state.bugs.length).toBeGreaterThan(10);
+    // None of the warm-up's ticks are in the stats.
+    expect(rooms.stats().tick.p50).toBeNull();
+    tick();
+    expect(w.got.filter((m) => m.t === "event" && m.kind === "join")).toEqual([]);
+    const snap = snapshots(w.got).at(-1)!;
+    expect(snap.ack).toBe(0);
+    expect(snap.me).toMatchObject({ sc: 0, al: 0, hl: 0 });
+    expect(snap.p.length).toBe(DEMO_BOTS);
+    expect(rooms.stats()).toMatchObject({ arenas: [{ id: 1, players: 0, bots: DEMO_BOTS, watchers: 1 }], players: 0, watchers: 1 });
+    expect(rooms.live()).toEqual({ playing: 0, arenas: [] });
+    rooms.unwatch(watching.watcher);
+    expect(rooms.stats()).toMatchObject({ arenas: [], watchers: 0 });
+    // The arena's tick timer and the rehome sweep are both stopped.
+    expect(timers.size).toBe(0);
+  });
+
+  test("every watcher of an arena gets the identical snapshot string each tick; events reach them, their coming and going reaches nobody", () => {
+    const { rooms, tick } = setup();
+    const a = client();
+    rooms.join("Ada", "tabs", INFO, a.send);
+    const w1 = rawClient();
+    const w2 = rawClient();
+    rooms.watch(w1.send);
+    const second = rooms.watch(w2.send)!;
+    expect(second.welcome.roster).toEqual([{ id: 1, name: "Ada", team: "tabs" }]);
+    rooms.join("Bob", "spaces", INFO, client().send);
+    tick(3);
+    expect(w1.raw.length).toBeGreaterThan(0);
+    expect(w1.raw).toEqual(w2.raw);
+    expect(w1.got.map((m) => (m.t === "event" ? m.kind : m.t))).toEqual(["join", "snapshot", "snapshot", "snapshot"]);
+    rooms.unwatch(second.watcher);
+    tick();
+    // Ada saw Bob join and her snapshots, never a watcher.
+    expect(a.got.filter((m) => m.t === "event").map((m) => (m as { name?: string }).name)).toEqual(["Bob"]);
+    expect(rooms.stats()).toMatchObject({ players: 2, watchers: 1, arenas: [{ id: 1, players: 2, watchers: 1 }] });
+  });
+
+  test("a watch lands in the arena with the most people; past the cap it is refused until one leaves", () => {
+    const rooms = new Rooms({ now: () => 0, clock: () => 0, fillTo: 0, maxWatchers: 2, startTimer: () => () => {} });
+    // A full arena 1 and an arena 2 with one person.
+    for (let i = 0; i < MAX_PLAYERS_PER_ARENA + 1; i++) rooms.join(`p${i}`, "tabs", INFO, client().send);
+    expect(rooms.stats().arenas.map((a) => a.players)).toEqual([MAX_PLAYERS_PER_ARENA, 1]);
+    const first = rooms.watch(client().send)!;
+    expect(first.welcome.arena).toBe(1);
+    expect(rooms.watch(client().send)!.welcome.arena).toBe(1);
+    expect(rooms.watch(client().send)).toBeNull();
+    rooms.unwatch(first.watcher);
+    expect(rooms.watch(client().send)).not.toBeNull();
+  });
+
+  test("a join never lands in a watched arena with no people; rehome then moves its watchers to the people, with a welcome, and the demo closes", () => {
+    const { rooms, tick } = setup(undefined, FILL_TARGET);
+    const w = rawClient();
+    rooms.watch(w.send);
+    tick();
+    const j = rooms.join("Ada", "tabs", INFO, client().send);
+    expect(j.room).toBe(2);
+    expect(rooms.room(1)!.size).toBe(0);
+    // The fake timers fire the sweep with the arenas' ticks.
+    tick();
+    const welcomes = w.got.filter((m) => m.t === "welcome");
+    expect(welcomes).toEqual([expect.objectContaining({ you: 0, arena: 2 })]);
+    expect(rooms.room(1)).toBeUndefined();
+    expect(rooms.stats()).toMatchObject({ arenas: [{ id: 2, players: 1, watchers: 1 }], watchers: 1 });
+    // After the welcome, the watcher's snapshots are arena 2's: Ada is in them.
+    tick();
+    expect(snapshots(w.got).at(-1)!.p.some((p) => p[0] === j.entity)).toBe(true);
+  });
+
+  test("the last person leaving a watched arena keeps it open with the demo bots, off the board; a new person opens another", () => {
+    const { rooms, tick } = setup(undefined, FILL_TARGET);
+    const j = rooms.join("Ada", "tabs", INFO, client().send);
+    tick();
+    rooms.watch(client().send);
+    rooms.leave(j.room, j.entity);
+    tick(40);
+    expect(rooms.stats()).toMatchObject({ arenas: [{ id: 1, players: 0, bots: DEMO_BOTS, watchers: 1 }] });
+    expect(rooms.live()).toEqual({ playing: 0, arenas: [] });
+    expect(rooms.join("Bob", "tabs", INFO, client().send).room).toBe(2);
+  });
+
+  test("endAll forgets the watchers and stops the sweep", () => {
+    const { rooms, timers } = setup();
+    rooms.watch(client().send);
+    rooms.endAll();
+    expect(rooms.stats()).toMatchObject({ arenas: [], watchers: 0 });
+    expect(timers.size).toBe(0);
   });
 });

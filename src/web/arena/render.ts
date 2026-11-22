@@ -292,6 +292,11 @@ export type Scene = {
   players: number;
   /** Your life is over (the life-over screen is up): no HUD, no dash button. */
   out: boolean;
+  /**
+   * Watching behind the start screen (#79): the arena and its effects only, nothing on top: no
+   * hit flash, HUD line, minimap, sticks, dash button, edge arrows or F readout.
+   */
+  watch: boolean;
   sticks: readonly Stick[];
   stats: string | null;
   /** The dash button, CSS px, while you are in a life; else null. */
@@ -1067,7 +1072,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (vignette) ctx.drawImage(vignette, 0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (sc.hud.hit > 0) {
+    if (sc.hud.hit > 0 && !sc.watch) {
       ctx.globalAlpha = 0.28 * (sc.hud.hit / HIT_FLASH_S);
       ctx.strokeStyle = HIT_EDGE;
       ctx.lineWidth = 24;
@@ -1095,6 +1100,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       }
       ctx.globalAlpha = 1;
     }
+    if (sc.watch) return;
     if (sc.dashButton && !sc.out) drawDashButton(sc.dashButton, sc.dashReady);
     for (const s of sc.sticks) drawStick(s);
 

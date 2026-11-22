@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { fetchBest, fetchTeams, fetchTop } from "./api";
+import { fetchBest, fetchPlaying, fetchTeams, fetchTop } from "./api";
 import { TEAMS } from "../server/rules";
 
 const realFetch = globalThis.fetch;
@@ -61,4 +61,19 @@ test("fetchTop with a player id asks for their rank; a malformed rank is dropped
   }
   respond = down;
   expect(await fetchTop("player-0001")).toBe("failed");
+});
+
+test("fetchPlaying: the board's people playing now, else a failure instead of throwing", async () => {
+  const board = { top: [], teams: { tabs: 0, spaces: 0 }, playing: 3, arenas: [{ id: 1, players: 1, wave: 2 }, { id: 2, players: 2, wave: 1 }] };
+  respond = () => json(200, board);
+  expect(await fetchPlaying()).toBe(3);
+  expect(url).toBe("/api/board");
+  respond = () => json(200, { ...board, playing: "3" });
+  expect(await fetchPlaying()).toBe("failed");
+  respond = () => new Response("not json", { status: 200 });
+  expect(await fetchPlaying()).toBe("failed");
+  respond = () => json(500, {});
+  expect(await fetchPlaying()).toBe("failed");
+  respond = down;
+  expect(await fetchPlaying()).toBe("failed");
 });

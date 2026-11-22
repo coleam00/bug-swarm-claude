@@ -9,6 +9,11 @@
 // marked bot leaves between its lives (at the start of the tick after its life ends); a person
 // joining a full arena takes a bot's slot at once. Bots are players with no member and no socket:
 // the tick drives them with the fillBot policy, and their lives are never handed to `onLifeEnd`.
+//
+// Watchers (#79): sockets that only watch (the start screen). They take no player slot, send no
+// inputs and come and go unannounced; they get every broadcast event (never a life's "over") and
+// one snapshot string per tick, built once and sent to all of them. With `demoTo` above 0, an
+// arena nobody plays in but someone watches runs that many bots (fill.ts botTarget).
 import {
   BUG_KINDS,
   HITS_PER_LIFE,
@@ -60,7 +65,7 @@ import {
 } from "../../shared/arena/policies";
 import { createRng, type Rng } from "../../shared/arena/rng";
 import type { Team } from "../rules";
-import { botName, botTeam, fillDelta } from "./fill";
+import { botName, botTeam, botTarget, fillDelta } from "./fill";
 import type { TickLog } from "./ticks";
 
 /** Sends one text frame to a member's socket. */
@@ -97,6 +102,9 @@ type Member = MemberInfo & {
 /** A server fill bot: its player, and what its policy sees and remembers. */
 type Bot = { player: Player; obs: Observation; mem: FillMemory; rng: Rng; out: PolicyInput; leaving: boolean };
 
+/** A watcher's snapshot numbers: all zero (it has no robot). Shared, never written. */
+const WATCH_ME: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0) };
+
 /** Ticks a late timer may run at once to catch up; any further lag is dropped, not caught up. */
 export const MAX_CATCH_UP_TICKS = 2;
 
@@ -124,7 +132,11 @@ export class Room {
   private readonly members = new Map<number, Member>();
   /** Fill bots by player id, oldest first. */
   private readonly bots = new Map<number, Bot>();
+  /** Watching sockets by watcher id (rooms.ts numbers them). */
+  private readonly watchers = new Map<number, Send>();
   private nextTickAt: number;
+  /** Running warmUp: the arena plays as a watched demo arena with nobody to send to. */
+  private warming = false;
   private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [] };
 
   constructor(
@@ -136,18 +148,39 @@ export class Room {
     private readonly onLifeEnd: (r: LifeRecord) => void = () => {},
     /** People plus fill bots to top the arena up to; 0: no fill bots are managed. */
     private readonly fillTo = 0,
+    /** Bots an arena with watchers and no people runs; 0: none. */
+    private readonly demoTo = 0,
   ) {
     this.state = createArena(seed);
     this.nextTickAt = startMs + TICK_MS;
   }
 
-  /** People in the arena (members). Bots never count: capacity and closing go by people. */
+  /** People in the arena (members). Bots and watchers never count: capacity goes by people. */
   get size(): number {
     return this.members.size;
   }
 
   get botCount(): number {
     return this.bots.size;
+  }
+
+  get watcherCount(): number {
+    return this.watchers.size;
+  }
+
+  /** Adds a watcher, silently: nobody is told, the roster does not change. */
+  watch(id: number, send: Send): void {
+    this.watchers.set(id, send);
+    this.markLeaving();
+  }
+
+  unwatch(id: number): void {
+    if (this.watchers.delete(id)) this.markLeaving();
+  }
+
+  /** People plus bots the arena should hold now (fill.ts botTarget). */
+  private target(): number {
+    return botTarget(this.members.size, this.warming ? 1 : this.watchers.size, this.fillTo, this.demoTo);
   }
 
   /** The arena's wave now (1 up), as the snapshot sends it. */
@@ -181,8 +214,9 @@ export class Room {
 
   /** Marks the newest bots past the fill target to leave between lives, and unmarks the rest. */
   private markLeaving(): void {
-    if (this.fillTo <= 0) return;
-    const leave = Math.max(0, -fillDelta(this.members.size, this.bots.size, this.fillTo));
+    const target = this.target();
+    if (target <= 0) return;
+    const leave = Math.max(0, -fillDelta(this.members.size, this.bots.size, target));
     let i = 0;
     for (const b of this.bots.values()) b.leaving = i++ >= this.bots.size - leave;
   }
@@ -270,9 +304,10 @@ export class Room {
    * its input for this step, in place (no new input objects; adding a bot allocates its state).
    */
   private driveBots(): void {
-    if (this.fillTo > 0 && this.members.size > 0) {
+    const target = this.target();
+    if (target > 0) {
       for (const b of this.bots.values()) if (b.leaving && !b.player.alive) this.removeBot(b.player.id);
-      const add = Math.min(fillDelta(this.members.size, this.bots.size, this.fillTo), MAX_PLAYERS_PER_ARENA - this.state.players.length);
+      const add = Math.min(fillDelta(this.members.size, this.bots.size, target), MAX_PLAYERS_PER_ARENA - this.state.players.length);
       for (let i = 0; i < add; i++) this.addBot();
       this.markLeaving();
     }
@@ -304,6 +339,25 @@ export class Room {
    */
   tick(nowMs: number): void {
     const t0 = this.clock();
+    this.step(nowMs);
+    this.ticks.record(nowMs, this.clock() - t0);
+  }
+
+  /**
+   * Runs `ticks` ticks at once, as a watched demo arena, before anyone is in it or watching it
+   * (#79), so its bots are already fighting when its first watcher arrives. Nothing is sent (there
+   * is nobody to send to) and the ticks are not in the stats. Rooms calls it only when nobody plays
+   * anywhere on the server, so the time it takes holds up no player.
+   */
+  warmUp(ticks: number, nowMs: number): void {
+    if (this.members.size > 0 || this.watchers.size > 0) return;
+    this.warming = true;
+    for (let i = 0; i < ticks; i++) this.step(nowMs);
+    this.warming = false;
+  }
+
+  /** One tick's work (see tick). */
+  private step(nowMs: number): void {
     this.driveBots();
     for (const m of this.members.values()) {
       const p = m.player;
@@ -333,7 +387,10 @@ export class Room {
     }
     const shared = encodeSnapshotShared(this.state, BUG_KINDS, wave(this.state.tick), PICKUP_IDS);
     for (const m of this.members.values()) m.send(encodeSnapshot(this.state.tick, m.ack, meOf(m.player, this.me), shared));
-    this.ticks.record(nowMs, this.clock() - t0);
+    if (this.watchers.size > 0) {
+      const watched = encodeSnapshot(this.state.tick, 0, WATCH_ME, shared);
+      for (const send of this.watchers.values()) send(watched);
+    }
   }
 
   /** Hands a finished life on to be saved, and tells its player (if still connected) it is over. */
@@ -358,5 +415,6 @@ export class Room {
   private broadcast(event: ArenaEvent): void {
     const msg = JSON.stringify(event);
     for (const m of this.members.values()) m.send(msg);
+    for (const send of this.watchers.values()) send(msg);
   }
 }

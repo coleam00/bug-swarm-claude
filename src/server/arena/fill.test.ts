@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { FILL_BOT_NAMES, botName, botTeam, fillDelta } from "./fill";
+import { FILL_BOT_NAMES, botName, botTeam, botTarget, fillDelta } from "./fill";
 
 describe("fill bots", () => {
   test("an arena with people is topped up to the target; past it, bots retire, never below none", () => {
     // [people, bots, delta] at a target of 4.
     const cases: [number, number, number][] = [
-      [0, 0, 0],
-      [0, 3, 0],
+      [0, 0, 4],
+      [0, 3, 1],
+      [0, 5, -1],
       [1, 0, 3],
       [1, 2, 1],
       [1, 3, 0],
@@ -19,6 +20,20 @@ describe("fill bots", () => {
     ];
     for (const [people, bots, delta] of cases) expect([people, bots, fillDelta(people, bots, 4)]).toEqual([people, bots, delta]);
     expect(fillDelta(1, 0, 0)).toBe(0);
+    expect(fillDelta(0, 3, 0)).toBe(0);
+  });
+
+  test("the target: the fill target with people, the demo size with only watchers, else none (#79)", () => {
+    // [people, watchers, target] with fillTo 4 and demoTo 3.
+    const cases: [number, number, number][] = [
+      [0, 0, 0],
+      [0, 1, 3],
+      [0, 7, 3],
+      [1, 0, 4],
+      [2, 5, 4],
+    ];
+    for (const [people, watchers, target] of cases) expect([people, watchers, botTarget(people, watchers, 4, 3)]).toEqual([people, watchers, target]);
+    expect(botTarget(1, 1, 0, 3)).toBe(0);
   });
 
   test("a bot takes the first name nobody has", () => {
