@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { openDb } from "./db";
 import { listenConfig } from "./listen";
-import { buildIdFrom, gracefulShutdown, startServer, startTickFrom } from "./serve";
+import { buildIdFrom, gracefulShutdown, onShutdownMessage, startServer, startTickFrom } from "./serve";
 
 // Production mode: one process serves the API, the built game from dist/ (the start screen and the
 // arena at /), the stream board at /board and the arena's WebSocket at /ws (serve.ts).
@@ -24,3 +24,6 @@ const shutdown = gracefulShutdown({
   log: (line) => console.log(line),
 });
 for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => void shutdown(signal));
+// The same from a parent process over IPC (the playtest's `--serve`, #95): on Windows a signal to a
+// child is a hard kill. Inert unless the process was spawned with an IPC channel.
+onShutdownMessage(process, (why) => void shutdown(why));

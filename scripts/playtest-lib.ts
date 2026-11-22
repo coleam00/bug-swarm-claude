@@ -10,13 +10,17 @@
 // screens agree when they received the same content by id within INTERP_DELAY_MS of each other.
 // Since #89 each page is sent its own view (bugs, pickups and kills culled to a square around its
 // camera, as deltas between keyframes), so the checks compare what two pages both had, by id.
+// Ticks, player ids, bug ids, arena ids and input seqs all start again with a new server process
+// (the restart scenario, #95), so every record carries `gen`, the server lifetime it came from,
+// and every check compares within one lifetime only.
 // Every page gets every player and every down; the players come as deltas against what that
 // socket was sent before, so their positions are compared too (a page's own row carries its exact
 // `me` numbers and is left out).
 import { join } from "node:path";
-import { ACCEL, DT, FILL_TARGET, INTERP_DELAY_MS, MAX_SPEED, REVIVE_RANGE, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { ACCEL, DT, FILL_TARGET, INTERP_DELAY_MS, MAX_SPEED, REVIVE_RANGE, WAVE_S, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import {
   DOWN,
+  ERROR,
   EVENT,
   INPUT,
   JOIN,
@@ -26,7 +30,9 @@ import {
   SNAPSHOT,
   QUEEN,
   WELCOME,
+  ERROR_RESTARTING,
   type ArenaEvent,
+  type ErrorCode,
   type ServerMessage,
   type InputMessage,
   type RosterEntry,
@@ -43,7 +49,7 @@ import { dashButtonAt } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
 import type { TopRow } from "../src/web/api";
 
-export const USAGE = "usage: bun run playtest -- --url <base url> [--players 4] [--seconds 90] [--scenario basic|revive] [--chrome <path>] [--headed]";
+export const USAGE = "usage: bun run playtest -- (--url <base url> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart] [--chrome <path>] [--headed]";
 
 // ---- Scenarios ----
 
@@ -69,8 +75,7 @@ export type Scenario = {
   roles: (n: number) => Role[];
 };
 
-/** Follow-up issues for the scenarios this pull request does not build. */
-export const LATE_JOIN_RESTART_ISSUE = 95;
+/** The follow-up issue for the scenario not built yet. */
 export const QUEEN_ISSUE = 96;
 
 export const SCENARIOS: Record<ScenarioName, Scenario> = {
@@ -84,21 +89,42 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
     minPlayers: FILL_TARGET,
     roles: (n) => Array.from({ length: n }, (_, i): Role => (i === 0 ? "victim" : i === 1 ? "reviver" : "keepaway")),
   },
-  "late-join": { name: "late-join", followUp: LATE_JOIN_RESTART_ISSUE, why: "a page joining at wave 6", minPlayers: 2, roles: () => [] },
-  restart: { name: "restart", followUp: LATE_JOIN_RESTART_ISSUE, why: "needs the playtest to own the server process", minPlayers: 2, roles: () => [] },
+  // The early pages, and one more page that joins once the arena reads LATE_JOIN_WAVE (#95).
+  "late-join": { name: "late-join", followUp: null, why: "", minPlayers: 3, roles: (n) => Array.from({ length: n }, () => "fighter") },
+  // The server restarts mid-fight through its graceful path and every page rejoins (#95). Needs --serve.
+  restart: { name: "restart", followUp: null, why: "", minPlayers: 2, roles: (n) => Array.from({ length: n }, () => "fighter") },
   queen: { name: "queen", followUp: QUEEN_ISSUE, why: "a queen check and a run to wave 5", minPlayers: 2, roles: () => [] },
 };
 
+/** The late-join scenario's last page joins once an early page's snapshot reads this wave: (LATE_JOIN_WAVE - 1) * WAVE_S s in (sim.ts `wave`). */
+export const LATE_JOIN_WAVE = 6;
+/** The late page plays at least this long after its first snapshot, s. */
+export const LATE_PLAY_S = 30;
+/** If no early page reads LATE_JOIN_WAVE by this many seconds of play, the run stops (and fails). */
+export const LATE_JOIN_CAP_S = (LATE_JOIN_WAVE - 1) * WAVE_S + 60;
+
+/** The restart scenario plays this long before it restarts the server, s. */
+export const RESTART_AT_S = 40;
+/** Every page must have rejoined (a welcome from the new server) within this of the restart starting, s. */
+export const REJOIN_CAP_S = 30;
+/** After the last page rejoins it plays on this long, s. */
+export const AFTER_RESTART_S = 40;
+
 // ---- Arguments ----
 
-export type PlaytestArgs = { url: string; players: number; seconds: number; scenario: ScenarioName; chrome: string | null; headed: boolean };
+/** `url`: the server to play against, null with `serve` (the playtest starts its own and sets it). */
+export type PlaytestArgs = { url: string | null; serve: boolean; players: number; seconds: number; scenario: ScenarioName; chrome: string | null; headed: boolean };
 
 const INT_FLAGS = {
   players: { def: 4, min: 2, max: 20 },
   seconds: { def: 90, min: 10, max: 3600 },
 } as const;
 
-/** Parses `--url`, `--players`, `--seconds`, `--scenario`, `--chrome` (`--x v` or `--x=v`) and `--headed`. Throws a message on anything else. */
+/**
+ * Parses `--url` or `--serve`, `--players`, `--seconds`, `--scenario`, `--chrome` (`--x v` or
+ * `--x=v`) and `--headed`. Throws a message on anything else, on both or neither of `--url` and
+ * `--serve`, and on `restart` without `--serve`.
+ */
 export function parseArgs(argv: string[]): PlaytestArgs {
   const seen: Record<string, string> = {};
   const args = argv.filter((a) => a !== "--");
@@ -107,9 +133,9 @@ export function parseArgs(argv: string[]): PlaytestArgs {
     const m = /^--([a-z-]+)(?:=(.*))?$/.exec(arg);
     if (!m) throw new Error(`unexpected argument "${arg}"`);
     const key = m[1]!;
-    if (key === "headed") {
-      if (m[2] !== undefined) throw new Error("--headed takes no value");
-      seen.headed = "1";
+    if (key === "headed" || key === "serve") {
+      if (m[2] !== undefined) throw new Error(`--${key} takes no value`);
+      seen[key] = "1";
       continue;
     }
     if (!["url", "players", "seconds", "scenario", "chrome"].includes(key)) throw new Error(`unknown flag --${key}`);
@@ -120,16 +146,21 @@ export function parseArgs(argv: string[]): PlaytestArgs {
     }
     seen[key] = value;
   }
-  if (seen.url === undefined) throw new Error("--url is required");
-  let url: URL;
-  try {
-    url = new URL(seen.url);
-  } catch {
-    throw new Error(`--url "${seen.url}" is not a URL`);
+  const serve = seen.serve === "1";
+  if (seen.url === undefined && !serve) throw new Error("--url or --serve is required");
+  if (seen.url !== undefined && serve) throw new Error("--url and --serve: pick one");
+  let url: URL | null = null;
+  if (seen.url !== undefined) {
+    try {
+      url = new URL(seen.url);
+    } catch {
+      throw new Error(`--url "${seen.url}" is not a URL`);
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("--url must be http or https");
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("--url must be http or https");
   const scenario = seen.scenario ?? "basic";
   if (!(SCENARIO_NAMES as readonly string[]).includes(scenario)) throw new Error(`--scenario must be one of ${SCENARIO_NAMES.join(", ")}`);
+  if (scenario === "restart" && !serve) throw new Error("restart needs --serve: the playtest must own the server to restart it");
   const int = (key: keyof typeof INT_FLAGS): number => {
     const f = INT_FLAGS[key];
     if (seen[key] === undefined) return f.def;
@@ -138,13 +169,31 @@ export function parseArgs(argv: string[]): PlaytestArgs {
     return n;
   };
   return {
-    url: url.href.replace(/\/+$/, ""),
+    url: url ? url.href.replace(/\/+$/, "") : null,
+    serve,
     players: int("players"),
     seconds: int("seconds"),
     scenario: scenario as ScenarioName,
     chrome: seen.chrome ?? null,
     headed: seen.headed === "1",
   };
+}
+
+/**
+ * The environment `--serve` starts `bun src/server/main.ts` with: a fixed PORT (the same one
+ * after a restart, so the pages' rejoins reach it), a scratch DATA_DIR, and a fixed BUILD_ID (so a
+ * rejoin is not refused as another build, which would show "Updating..." and reload). Without
+ * RAILWAY_GIT_COMMIT_SHA (it beats BUILD_ID), NODE_ENV (production listens on every interface)
+ * and BUG_SWARM_START_WAVE (late-join needs the real wave 6).
+ */
+export function serverEnv(base: Record<string, string | undefined>, port: number, dataDir: string, buildId: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(base)) if (v !== undefined) out[k] = v;
+  for (const k of ["RAILWAY_GIT_COMMIT_SHA", "NODE_ENV", "BUG_SWARM_START_WAVE"]) delete out[k];
+  out.PORT = String(port);
+  out.DATA_DIR = dataDir;
+  out.BUILD_ID = buildId;
+  return out;
 }
 
 // ---- Chrome ----
@@ -180,7 +229,8 @@ export type Device = { touch: boolean; width: number; height: number; scale: num
 export const DESKTOP: Device = { touch: false, width: 1280, height: 800, scale: 1 };
 export const PHONE: Device = { touch: true, width: 390, height: 844, scale: 1 };
 
-export type PageSpec = { index: number; name: string; team: Team; device: Device; role: Role; seed: number };
+/** `late`: the late-join scenario's late page (the last one), opened once the arena reads LATE_JOIN_WAVE. */
+export type PageSpec = { index: number; name: string; team: Team; device: Device; role: Role; seed: number; late: boolean };
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRST";
 
@@ -198,6 +248,7 @@ export function pageSpecs(n: number, scenario: ScenarioName, seed: number): Page
     device: i % 2 === 0 ? DESKTOP : PHONE,
     role: roles[i] ?? "fighter",
     seed: (seed + i * 7919) | 0,
+    late: scenario === "late-join" && i === n - 1,
   }));
 }
 
@@ -205,14 +256,21 @@ export function pageSpecs(n: number, scenario: ScenarioName, seed: number): Page
 
 /** A snapshot as kept: what the checks read (the bugs, shots and floor are dropped to save memory). */
 export type Kept = { tick: number; ack: number; p: SnapshotPlayer[]; k: SnapshotKill[]; d: SnapshotDown[]; w: number; me: SnapshotMe };
-/** `at`: Chrome's receipt time, ms; `hat`: the harness's clock when it heard, ms; `you`: the page's id then. */
-export type FrameRec = { at: number; hat: number; you: number; s: Kept };
+/**
+ * `at`: Chrome's receipt time, ms; `hat`: the harness's clock when it heard, ms; `you`: the page's
+ * id then; `gen`: the server lifetime it came from (its connection's welcome's, connGen).
+ */
+export type FrameRec = { at: number; hat: number; you: number; gen: number; s: Kept };
 /** An event, with the tick whose step raised it (the server sends a step's events before its snapshot). */
-export type EventRec = { at: number; tick: number; you: number; ev: ArenaEvent };
-export type WelcomeRec = { at: number; you: number; arena: number; build: string; roster: RosterEntry[] };
-export type TopRec = { at: number; rows: TopRow[] };
+export type EventRec = { at: number; tick: number; you: number; gen: number; ev: ArenaEvent };
+/** `gen`: the harness's server lifetime when it arrived. */
+export type WelcomeRec = { at: number; you: number; gen: number; arena: number; build: string; roster: RosterEntry[] };
+/** `gen`: the harness's server lifetime when the response arrived (a page on the life-over screen reads the top 10 before it rejoins). */
+export type TopRec = { at: number; gen: number; rows: TopRow[] };
 /** An input the page sent, at the harness's clock. */
-export type SentRec = { hat: number; msg: InputMessage };
+export type SentRec = { hat: number; gen: number; msg: InputMessage };
+/** An error the server sent (`restarting` before a restart). */
+export type ErrorRec = { at: number; gen: number; code: ErrorCode };
 /**
  * What the harness dispatched: the move as the keys or stick gave it (unit or 0), the aim, fire and
  * dash. `hat` is when its dispatch began and `done` when Chrome had taken every event of it.
@@ -227,6 +285,9 @@ export type PageLog = {
   team: Team;
   touch: boolean;
   role: Role;
+  late: boolean;
+  /** The server lifetime now: 0, and one more each time the harness restarts the server (set by the harness). */
+  gen: number;
   /** The page's id now (0 until a player welcome; a watching welcome is `you: 0`). */
   you: number;
   welcomes: WelcomeRec[];
@@ -236,35 +297,47 @@ export type PageLog = {
   sent: SentRec[];
   intents: IntentRec[];
   screens: ScreenRec[];
+  errors: ErrorRec[];
 };
 
 export function createLog(spec: PageSpec): PageLog {
-  return { index: spec.index, name: spec.name, team: spec.team, touch: spec.device.touch, role: spec.role, you: 0, welcomes: [], frames: [], events: [], tops: [], sent: [], intents: [], screens: [] };
+  return { index: spec.index, name: spec.name, team: spec.team, touch: spec.device.touch, role: spec.role, late: spec.late, gen: 0, you: 0, welcomes: [], frames: [], events: [], tops: [], sent: [], intents: [], screens: [], errors: [] };
 }
 
 /**
  * Records one message the page received, decoded as the page decodes it (protocol.ts
  * parseServerMessage, then that socket's view.ts createSnapshotReader; null: a delta it could not
  * apply, which the page drops too). Messages before its first player welcome (the start screen's
- * watching socket) are skipped.
+ * watching socket) are skipped. A welcome takes the log's current `gen`; everything else takes its
+ * connection's (connGen), so a frame from the old server that arrives late keeps the old one.
  */
 export function addFrame(log: PageLog, at: number, hat: number, m: ServerMessage | null): void {
   if (!m) return;
   if (m.t === WELCOME) {
     if (m.you !== 0) {
       log.you = m.you;
-      log.welcomes.push({ at, you: m.you, arena: m.arena, build: m.build, roster: m.roster });
+      log.welcomes.push({ at, you: m.you, gen: log.gen, arena: m.arena, build: m.build, roster: m.roster });
     } else log.you = 0;
     return;
   }
+  if (m.t === ERROR) {
+    log.errors.push({ at, gen: connGen(log), code: m.code });
+    return;
+  }
   if (log.you === 0) return;
+  const gen = connGen(log);
   if (m.t === SNAPSHOT) {
-    log.frames.push({ at, hat, you: log.you, s: { tick: m.tick, ack: m.ack, p: m.p, k: m.k, d: m.d, w: m.w, me: m.me } });
+    log.frames.push({ at, hat, you: log.you, gen, s: { tick: m.tick, ack: m.ack, p: m.p, k: m.k, d: m.d, w: m.w, me: m.me } });
   } else if (m.t === EVENT) {
     const last = log.frames[log.frames.length - 1];
     const sinceWelcome = last && last.at >= log.welcomes[log.welcomes.length - 1]!.at;
-    log.events.push({ at, tick: sinceWelcome ? last.s.tick + 1 : -1, you: log.you, ev: m });
+    log.events.push({ at, tick: sinceWelcome ? last.s.tick + 1 : -1, you: log.you, gen, ev: m });
   }
+}
+
+/** The server lifetime of the page's connection: its latest player welcome's, else the log's. */
+export function connGen(log: PageLog): number {
+  return log.welcomes[log.welcomes.length - 1]?.gen ?? log.gen;
 }
 
 /** Records an input the page sent (other frames it sent are ignored). */
@@ -272,7 +345,7 @@ export function addSent(log: PageLog, hat: number, raw: string): void {
   if (log.you === 0) return;
   try {
     const m = JSON.parse(raw) as InputMessage;
-    if (m && m.t === INPUT) log.sent.push({ hat, msg: m });
+    if (m && m.t === INPUT) log.sent.push({ hat, gen: connGen(log), msg: m });
   } catch {
     // Not an input.
   }
@@ -554,37 +627,71 @@ export function touchPoints(layout: TouchLayout, intent: Intent): [TouchPoint, T
 
 export type CheckResult = { name: string; pass: boolean; detail: string };
 
-/** The id-to-name roster a page knows at the end: its last welcome's roster, then joins and leaves after it. */
-export function rosterOf(log: PageLog): Map<number, string> {
+/** The id-to-name roster a page knew at `at`: its last welcome by then, then the joins and leaves it received after it, up to `at`. */
+export function rosterAt(log: PageLog, at: number): Map<number, string> {
   const out = new Map<number, string>();
-  const w = log.welcomes[log.welcomes.length - 1];
+  let w: WelcomeRec | undefined;
+  for (const x of log.welcomes) if (x.at <= at) w = x;
   if (!w) return out;
   for (const r of w.roster) out.set(r.id, r.name);
   for (const e of log.events) {
-    if (e.at < w.at) continue;
+    if (e.at < w.at || e.at > at) continue;
     if (e.ev.kind === JOIN) out.set(e.ev.id, e.ev.name ?? "");
     else if (e.ev.kind === LEAVE) out.delete(e.ev.id);
   }
   return out;
 }
 
-/** a. Every page joined the same arena. */
-export function checkSameArena(logs: PageLog[]): CheckResult {
-  const arenas = logs.map((l) => l.welcomes[0]?.arena ?? null);
-  const missing = logs.filter((l) => l.welcomes.length === 0).map((l) => l.name);
-  const distinct = new Set(arenas);
-  const pass = missing.length === 0 && distinct.size === 1;
-  return { name: "same arena", pass, detail: missing.length > 0 ? `never joined: ${missing.join(", ")}` : pass ? `arena ${arenas[0]}` : `arenas ${arenas.join(", ")}` };
+/** The id-to-name roster a page knows at the end. */
+export const rosterOf = (log: PageLog): Map<number, string> => rosterAt(log, Infinity);
+
+/** The server lifetimes the pages saw, in order. */
+function gens(logs: PageLog[]): number[] {
+  return [...new Set(logs.flatMap((l) => l.welcomes.map((w) => w.gen)))].sort((a, b) => a - b);
 }
 
-/** b. At the end every page's roster holds every page, by id and name. */
+/** a. Every page joined the same arena, in each server lifetime (each page's first welcome in it). */
+export function checkSameArena(logs: PageLog[]): CheckResult {
+  const missing: string[] = [];
+  const parts: string[] = [];
+  let pass = true;
+  const all = gens(logs);
+  for (const g of all.length > 0 ? all : [0]) {
+    const arenas = logs.map((l) => l.welcomes.find((w) => w.gen === g)?.arena ?? null);
+    for (const [i, a] of arenas.entries()) if (a === null) missing.push(all.length > 1 ? `${logs[i]!.name} (server ${g})` : logs[i]!.name);
+    const distinct = new Set(arenas.filter((a) => a !== null));
+    if (distinct.size !== 1) pass = false;
+    const label = all.length > 1 ? `server ${g}: ` : "";
+    parts.push(distinct.size === 1 ? `${label}arena ${[...distinct][0]}` : `${label}arenas ${arenas.join(", ")}`);
+  }
+  pass &&= missing.length === 0;
+  return { name: "same arena", pass, detail: missing.length > 0 ? `never joined: ${missing.join(", ")}` : parts.join("; ") };
+}
+
+/**
+ * b. At the end of each server lifetime every page's roster holds every page, by its id in that
+ * lifetime and its name. An earlier lifetime is read at the page's last snapshot from it: a
+ * stopping server ends every life and sends each member's leave after its last snapshot (the
+ * last lifetime is read at the end of the run).
+ */
 export function checkRoster(logs: PageLog[]): CheckResult {
   const wrong: string[] = [];
-  for (const l of logs) {
-    const r = rosterOf(l);
-    for (const o of logs) if (o.you !== 0 && r.get(o.you) !== o.name) wrong.push(`${l.name} lacks ${o.name}`);
+  const all = gens(logs);
+  const last = all[all.length - 1] ?? 0;
+  for (const g of all) {
+    const ids = logs.map((o) => o.welcomes.filter((w) => w.gen === g).at(-1)?.you ?? 0);
+    for (const l of logs) {
+      const end = g === last ? Infinity : Math.max(...l.frames.filter((f) => f.gen === g).map((f) => f.at));
+      const r = rosterAt(l, end);
+      logs.forEach((o, i) => {
+        const id = ids[i]!;
+        if (id === 0) wrong.push(`${o.name} never joined${all.length > 1 ? ` server ${g}` : ""}`);
+        else if (r.get(id) !== o.name) wrong.push(`${l.name} lacks ${o.name}${all.length > 1 ? ` on server ${g}` : ""}`);
+      });
+    }
   }
-  return { name: "roster", pass: wrong.length === 0 && logs.every((l) => l.you !== 0), detail: wrong.length === 0 ? `${logs.length} pages see all ${logs.length}` : wrong.slice(0, 4).join("; ") };
+  const lifetimes = all.length > 1 ? ` on each of ${all.length} servers` : "";
+  return { name: "roster", pass: all.length > 0 && wrong.length === 0, detail: wrong.length === 0 ? `${logs.length} pages see all ${logs.length}${lifetimes}` : [...new Set(wrong)].slice(0, 4).join("; ") };
 }
 
 function pct(sorted: number[], q: number): number {
@@ -594,33 +701,60 @@ function pct(sorted: number[], q: number): number {
 const ms = (n: number) => `${n.toFixed(1)} ms`;
 
 /**
- * c. Delivery: every tick two or more pages received reached them within INTERP_DELAY_MS of each
- * other (the screens agree), and the server never left every page more than INTERP_DELAY_MS
- * between two ticks (a late tick: every drawn view, that far behind, runs out and stalls). A gap on
- * one page only is that browser's, not the game's: it is reported and does not fail. Measured
- * (#94): four headless pages on one machine showed a few 100 to 150 ms one-page gaps, mostly on the
- * touch-emulated pages (each synthetic touch waits on the renderer: p50 24 ms against 9 ms for a
- * mouse event), none with the same pages driven by the mouse and none with two pages.
+ * The delivery rule (owner, #95): a tick's cross-page spread over INTERP_DELAY_MS is counted and
+ * reported, but fails only as a sustained problem: more than DELIVERY_SLOW_SHARE of the shared
+ * ticks over DELIVERY_SLOW_MS, or any one over DELIVERY_MAX_MS. An owner run of `revive` failed on
+ * 3 ticks at 101 to 111 ms while every game-state check passed: one busy browser, not the game.
+ */
+export const DELIVERY_SLOW_MS = 150;
+export const DELIVERY_SLOW_SHARE = 0.01;
+export const DELIVERY_MAX_MS = 250;
+
+/**
+ * c. Delivery: the ticks two or more pages received reached them close together (the screens
+ * agree), by the delivery rule above (the count over INTERP_DELAY_MS is reported), and the server
+ * never left every page more than INTERP_DELAY_MS between two ticks (a late tick: every drawn view,
+ * that far behind, runs out and stalls; this one still fails at once). A gap on one page only is
+ * that browser's, not the game's: it is reported and does not fail. Measured (#94): four headless
+ * pages on one machine showed a few 100 to 150 ms one-page gaps, mostly on the touch-emulated
+ * pages (each synthetic touch waits on the renderer: p50 24 ms against 9 ms for a mouse event),
+ * none with the same pages driven by the mouse and none with two pages.
  */
 export function checkDelivery(logs: PageLog[]): CheckResult {
-  const byTick = new Map<number, number[]>();
+  // By server lifetime, then tick.
+  const byTick = new Map<string, number[]>();
+  const tickKey = (gen: number, tick: number) => `${gen}:${tick}`;
   for (const l of logs) for (const f of l.frames) {
-    const a = byTick.get(f.s.tick);
+    const k = tickKey(f.gen, f.s.tick);
+    const a = byTick.get(k);
     if (a) a.push(f.at);
-    else byTick.set(f.s.tick, [f.at]);
+    else byTick.set(k, [f.at]);
   }
   const spreads: number[] = [];
   for (const a of byTick.values()) if (a.length >= 2) spreads.push(Math.max(...a) - Math.min(...a));
   spreads.sort((x, y) => x - y);
   const over = spreads.filter((s) => s > INTERP_DELAY_MS).length;
-  // The server's cadence: each tick's first receipt on any page, against the tick before's.
-  const ticks = [...byTick.keys()].sort((x, y) => x - y);
+  const slow = spreads.filter((s) => s > DELIVERY_SLOW_MS).length;
+  const max = spreads[spreads.length - 1] ?? 0;
+  const slowShare = spreads.length === 0 ? 0 : slow / spreads.length;
+  // The server's cadence: each tick's first receipt on any page, against the tick before's, within
+  // one server lifetime (the restart's own gap is reported, not late).
   const late: string[] = [];
-  for (let i = 1; i < ticks.length; i++) {
-    const t = ticks[i]!;
-    if (t !== ticks[i - 1]! + 1) continue;
-    const gap = Math.min(...byTick.get(t)!) - Math.min(...byTick.get(t - 1)!);
-    if (gap > INTERP_DELAY_MS) late.push(`tick ${t} ${ms(gap)} late`);
+  const lifetimes = [...new Set(logs.flatMap((l) => l.frames.map((f) => f.gen)))].sort((a, b) => a - b);
+  for (const g of lifetimes) {
+    const ticks = [...new Set(logs.flatMap((l) => l.frames.filter((f) => f.gen === g).map((f) => f.s.tick)))].sort((x, y) => x - y);
+    for (let i = 1; i < ticks.length; i++) {
+      const t = ticks[i]!;
+      if (t !== ticks[i - 1]! + 1) continue;
+      const gap = Math.min(...byTick.get(tickKey(g, t))!) - Math.min(...byTick.get(tickKey(g, t - 1))!);
+      if (gap > INTERP_DELAY_MS) late.push(`${lifetimes.length > 1 ? `server ${g} ` : ""}tick ${t} ${ms(gap)} late`);
+    }
+  }
+  const restartGaps: string[] = [];
+  for (let i = 1; i < lifetimes.length; i++) {
+    const before = Math.max(...logs.flatMap((l) => l.frames.filter((f) => f.gen === lifetimes[i - 1]).map((f) => f.at)));
+    const after = Math.min(...logs.flatMap((l) => l.frames.filter((f) => f.gen === lifetimes[i]).map((f) => f.at)));
+    if (Number.isFinite(before) && Number.isFinite(after)) restartGaps.push(`restart gap ${((after - before) / 1000).toFixed(1)} s (not judged)`);
   }
   const onePage: string[] = [];
   let maxGap = 0;
@@ -628,22 +762,26 @@ export function checkDelivery(logs: PageLog[]): CheckResult {
     for (let i = 1; i < l.frames.length; i++) {
       const a = l.frames[i - 1]!;
       const b = l.frames[i]!;
-      if (a.you !== b.you) continue;
+      if (a.you !== b.you || a.gen !== b.gen) continue;
       const gap = b.at - a.at;
       maxGap = Math.max(maxGap, gap);
       if (gap > INTERP_DELAY_MS) onePage.push(`${l.name} (${l.touch ? "touch" : "mouse"}) ${ms(gap)} before tick ${b.s.tick}`);
     }
   }
-  const pass = spreads.length > 0 && over === 0 && late.length === 0;
+  const pass = spreads.length > 0 && slowShare <= DELIVERY_SLOW_SHARE && max <= DELIVERY_MAX_MS && late.length === 0;
   const shown = [...late, ...onePage].slice(0, 3).join("; ");
   return {
     name: "delivery",
     pass,
     detail:
-      `${spreads.length} shared ticks, spread p50 ${ms(pct(spreads, 0.5))} p95 ${ms(pct(spreads, 0.95))} max ${ms(spreads[spreads.length - 1] ?? 0)}, ${over} over ${INTERP_DELAY_MS} ms; ` +
-      `${late.length} ticks late from the server; longest gap on a page ${ms(maxGap)}, ${onePage.length} over ${INTERP_DELAY_MS} ms on one page only (reported, not failed)${shown ? `: ${shown}` : ""}`,
+      `${spreads.length} shared ticks, spread p50 ${ms(pct(spreads, 0.5))} p95 ${ms(pct(spreads, 0.95))} max ${ms(max)} (fails above ${DELIVERY_MAX_MS} ms), ` +
+      `${over} over ${INTERP_DELAY_MS} ms, ${slow} over ${DELIVERY_SLOW_MS} ms (${(slowShare * 100).toFixed(1)}%, fails above ${DELIVERY_SLOW_SHARE * 100}%); ` +
+      `${late.length} ticks late from the server; ${restartGaps.length > 0 ? `${restartGaps.join(", ")}; ` : ""}longest gap on a page ${ms(maxGap)}, ${onePage.length} over ${INTERP_DELAY_MS} ms on one page only (reported, not failed)${shown ? `: ${shown}` : ""}`,
   };
 }
+
+/** What every page gets of another player's row: position, aim, alive and the flags. */
+const sharedRow = (r: SnapshotPlayer): string => JSON.stringify([r[1], r[2], r[5], r[6], r[7], r[8], r[9], r[10]]);
 
 /**
  * Positions: every player row two pages received for the same tick is the same on both (x, y,
@@ -651,15 +789,16 @@ export function checkDelivery(logs: PageLog[]): CheckResult {
  * carries the page's exact `me` numbers, not the shared quantized ones).
  */
 export function checkPositions(logs: PageLog[]): CheckResult {
-  const byTick = new Map<number, Map<number, { row: string; page: string }>>();
+  const byTick = new Map<string, Map<number, { row: string; page: string }>>();
   let compared = 0;
   const wrong: string[] = [];
   for (const l of logs) for (const f of l.frames) {
-    let rows = byTick.get(f.s.tick);
-    if (!rows) byTick.set(f.s.tick, (rows = new Map()));
+    const k = `${f.gen}:${f.s.tick}`;
+    let rows = byTick.get(k);
+    if (!rows) byTick.set(k, (rows = new Map()));
     for (const r of f.s.p) {
       if (r[0] === f.you) continue;
-      const row = JSON.stringify([r[1], r[2], r[5], r[6], r[7], r[8], r[9], r[10]]);
+      const row = sharedRow(r);
       const prev = rows.get(r[0]);
       if (!prev) rows.set(r[0], { row, page: l.name });
       else if (prev.page !== l.name) {
@@ -675,21 +814,23 @@ export function checkPositions(logs: PageLog[]): CheckResult {
   };
 }
 
-/** The first and last tick a page received for its current id: it was connected then. */
-function span(l: PageLog): [number, number] | null {
-  const f = l.frames;
+/** The first and last tick a page received from server lifetime `gen`: it was connected then. */
+function span(l: PageLog, gen: number): [number, number] | null {
+  const f = l.frames.filter((x) => x.gen === gen);
   return f.length === 0 ? null : [f[0]!.s.tick, f[f.length - 1]!.s.tick];
 }
 
 /**
  * d and e. Every down (and revive) any page received reached every page connected at its tick,
- * the same on each (a revive's reviver and points too), within INTERP_DELAY_MS of each other.
+ * the same on each (a revive's reviver and points too), and no more than DELIVERY_MAX_MS apart
+ * across pages. Spreads over INTERP_DELAY_MS and DELIVERY_SLOW_MS are counted and reported: a run
+ * has a few dozen events at most, so a share rule would make one slow event a failure (#95).
  */
 export function checkEvents(logs: PageLog[], kind: typeof DOWN | typeof REVIVE): CheckResult {
   const seen = new Map<string, { at: number[]; who: Set<number>; body: Set<string> }>();
   for (const l of logs) for (const e of l.events) {
     if (e.ev.kind !== kind || e.tick < 0) continue;
-    const key = `${e.tick}:${e.ev.id}`;
+    const key = `${e.gen}:${e.tick}:${e.ev.id}`;
     const s = seen.get(key) ?? { at: [], who: new Set(), body: new Set() };
     s.at.push(e.at);
     s.who.add(l.index);
@@ -698,22 +839,29 @@ export function checkEvents(logs: PageLog[], kind: typeof DOWN | typeof REVIVE):
   }
   const wrong: string[] = [];
   let worst = 0;
+  let over = 0;
+  let slow = 0;
   for (const [key, s] of seen) {
-    const tick = Number(key.split(":")[0]);
+    const [gen, tick] = key.split(":").map(Number) as [number, number];
     for (const l of logs) {
-      const sp = span(l);
+      const sp = span(l, gen);
       if (sp && sp[0] < tick && tick <= sp[1] && !s.who.has(l.index)) wrong.push(`${l.name} missed ${kind} ${key}`);
     }
     if (s.body.size > 1) wrong.push(`${kind} ${key} differs: ${[...s.body].join(" vs ")}`);
     const spread = Math.max(...s.at) - Math.min(...s.at);
     worst = Math.max(worst, spread);
-    if (spread > INTERP_DELAY_MS) wrong.push(`${kind} ${key} spread ${ms(spread)}`);
+    if (spread > INTERP_DELAY_MS) over++;
+    if (spread > DELIVERY_SLOW_MS) slow++;
+    if (spread > DELIVERY_MAX_MS) wrong.push(`${kind} ${key} spread ${ms(spread)}`);
   }
   // Every life ends through a down, so a run with none saw nothing to compare.
   return {
     name: `${kind}s`,
     pass: wrong.length === 0 && (kind !== DOWN || seen.size > 0),
-    detail: wrong.length === 0 ? `${seen.size} ${kind}s, every page had each, spread max ${ms(worst)}` : wrong.slice(0, 4).join("; "),
+    detail:
+      wrong.length === 0
+        ? `${seen.size} ${kind}s, every page had each, spread max ${ms(worst)} (fails above ${DELIVERY_MAX_MS} ms), ${over} over ${INTERP_DELAY_MS} ms, ${slow} over ${DELIVERY_SLOW_MS} ms`
+        : wrong.slice(0, 4).join("; "),
   };
 }
 
@@ -722,13 +870,13 @@ export function checkEvents(logs: PageLog[], kind: typeof DOWN | typeof REVIVE):
  * same scorer and the same points. Views are culled, so a kill only one page saw is not compared.
  */
 export function checkKills(logs: PageLog[]): CheckResult {
-  const byBug = new Map<number, { row: string; pages: number }>();
+  const byBug = new Map<string, { row: string; pages: number }>();
   let compared = 0;
   const wrong: string[] = [];
   for (const l of logs) for (const f of l.frames) for (const k of f.s.k) {
     const row = `${f.s.tick}:${k[1]}:${k[4]}`;
-    const prev = byBug.get(k[0]);
-    if (!prev) byBug.set(k[0], { row, pages: 1 });
+    const prev = byBug.get(`${f.gen}:${k[0]}`);
+    if (!prev) byBug.set(`${f.gen}:${k[0]}`, { row, pages: 1 });
     else {
       prev.pages++;
       compared++;
@@ -756,19 +904,19 @@ export function checkScore(logs: PageLog[]): CheckResult {
   let unseen = 0;
   let points = 0;
   const wrong: string[] = [];
-  // Every kill row any page had, by tick, then bug id.
-  const kills = new Map<number, Map<number, SnapshotKill>>();
+  // Every kill row any page had, by server lifetime and tick, then bug id.
+  const kills = new Map<string, Map<number, SnapshotKill>>();
   for (const l of logs) for (const f of l.frames) for (const k of f.s.k) {
-    const m = kills.get(f.s.tick) ?? new Map<number, SnapshotKill>();
+    const m = kills.get(`${f.gen}:${f.s.tick}`) ?? new Map<number, SnapshotKill>();
     m.set(k[0], k);
-    kills.set(f.s.tick, m);
+    kills.set(`${f.gen}:${f.s.tick}`, m);
   }
-  // Revives and queen rewards: every page gets them; one copy of each, by tick.
-  const bonus = new Map<string, { tick: number; id: number; points: number }>();
+  // Revives and queen rewards: every page gets them; one copy of each, by server lifetime and tick.
+  const bonus = new Map<string, { gen: number; tick: number; id: number; points: number }>();
   for (const l of logs) for (const e of l.events) {
     if (e.tick < 0) continue;
-    if (e.ev.kind === REVIVE) bonus.set(`r${e.tick}:${e.ev.id}`, { tick: e.tick, id: e.ev.by ?? 0, points: e.ev.points ?? 0 });
-    else if (e.ev.kind === QUEEN) for (const [id, pts] of e.ev.paid ?? []) bonus.set(`q${e.tick}:${id}`, { tick: e.tick, id, points: pts });
+    if (e.ev.kind === REVIVE) bonus.set(`r${e.gen}:${e.tick}:${e.ev.id}`, { gen: e.gen, tick: e.tick, id: e.ev.by ?? 0, points: e.ev.points ?? 0 });
+    else if (e.ev.kind === QUEEN) for (const [id, pts] of e.ev.paid ?? []) bonus.set(`q${e.gen}:${e.tick}:${id}`, { gen: e.gen, tick: e.tick, id, points: pts });
   }
   for (const x of logs) {
     // Runs of consecutive ticks in a life, for one id.
@@ -776,7 +924,7 @@ export function checkScore(logs: PageLog[]): CheckResult {
     let run: FrameRec[] = [];
     for (const f of x.frames) {
       const prev = run[run.length - 1];
-      if (f.s.me.al === 1 && prev && prev.you === f.you && f.s.tick === prev.s.tick + 1) run.push(f);
+      if (f.s.me.al === 1 && prev && prev.you === f.you && prev.gen === f.gen && f.s.tick === prev.s.tick + 1) run.push(f);
       else {
         if (run.length >= 2) runs.push(run);
         run = f.s.me.al === 1 ? [f] : [];
@@ -791,20 +939,20 @@ export function checkScore(logs: PageLog[]): CheckResult {
       let tally = 0;
       let seen = 0;
       for (let t = first.s.tick + 1; t <= last.s.tick; t++) {
-        for (const k of kills.get(t)?.values() ?? []) {
+        for (const k of kills.get(`${first.gen}:${t}`)?.values() ?? []) {
           if (k[1] !== first.you) continue;
           tally += k[4];
           seen++;
         }
       }
-      for (const b of bonus.values()) if (b.id === first.you && b.tick > first.s.tick && b.tick <= last.s.tick) tally += b.points;
+      for (const b of bonus.values()) if (b.gen === first.gen && b.id === first.you && b.tick > first.s.tick && b.tick <= last.s.tick) tally += b.points;
       if (seen < ownKills) {
         unseen++;
         continue;
       }
       compared++;
       points += own;
-      if (tally !== own || seen !== ownKills) wrong.push(`${x.name} ticks ${first.s.tick}-${last.s.tick}: own ${own} (${ownKills} kills), the pages saw ${tally} (${seen} kills)`);
+      if (tally !== own || seen !== ownKills) wrong.push(`${x.name} ${first.gen > 0 ? `server ${first.gen} ` : ""}ticks ${first.s.tick}-${last.s.tick}: own ${own} (${ownKills} kills), the pages saw ${tally} (${seen} kills)`);
     }
   }
   return {
@@ -866,13 +1014,13 @@ export function checkInput(logs: PageLog[]): CheckResult {
       const aimOk = !it.fire || it.aim === null || angleBetween(m.aim, it.aim) <= AIM_TOLERANCE;
       if (moveOk && fireOk && aimOk) ok1++;
     }
-    // Link 2: sent input to the server's row, paired by ack.
-    const bySeq = new Map<number, InputMessage>();
-    for (const s of l.sent) bySeq.set(s.msg.seq, s.msg);
+    // Link 2: sent input to the server's row, paired by ack within one server lifetime (seqs start again on a new socket).
+    const bySeq = new Map<string, InputMessage>();
+    for (const s of l.sent) bySeq.set(`${s.gen}:${s.msg.seq}`, s.msg);
     let held = 0;
     let last: InputMessage | null = null;
     for (const f of l.frames) {
-      const m = bySeq.get(f.s.ack);
+      const m = bySeq.get(`${f.gen}:${f.s.ack}`);
       held = m && last && m.mx === last.mx && m.my === last.my ? held + 1 : 0;
       last = m ?? null;
       const row = rowOf(f.s.p, f.you);
@@ -943,6 +1091,8 @@ export function checkLifeOver(logs: PageLog[]): CheckResult {
       const a = all[i]!;
       const b = all[j]!;
       if (a.l === b.l) continue;
+      // A restart ends every life with no over event: reads from two server lifetimes are not compared.
+      if (a.t.gen !== b.t.gen) continue;
       if (overs.some(({ e }) => e.at > a.t.at - TOP_SETTLE_MS && e.at <= b.t.at)) continue;
       same++;
       if (JSON.stringify(a.t.rows) !== JSON.stringify(b.t.rows)) wrong.push(`${a.l.name} and ${b.l.name} read different top 10s with no life ending between`);
@@ -979,10 +1129,111 @@ export function checkScenarioRevive(logs: PageLog[]): CheckResult {
   };
 }
 
+/** A roster as sorted [id, name] pairs, for comparing. */
+const rosterKey = (r: Map<number, string>): string => JSON.stringify([...r].sort((a, b) => a[0] - b[0]));
+/** Downs by id, with their timers, for comparing. */
+const downsKey = (d: SnapshotDown[]): string => JSON.stringify([...d].sort((a, b) => a[0] - b[0]));
+
+/**
+ * The late-join scenario: the late page's first snapshot (a new socket's first is a keyframe) is
+ * at LATE_JOIN_WAVE or later, and at that tick its screen agrees with every early page's: the
+ * roster (its welcome and the joins and leaves before that snapshot, against what the early page
+ * had received by the same tick), the other players' rows and the downs (by id, with their
+ * timers). Then it plays on for LATE_PLAY_S. Roster, downs, kills and score from there on are the
+ * common checks, which include the late page.
+ */
+export function checkScenarioLateJoin(logs: PageLog[]): CheckResult {
+  const name = "late-join scenario";
+  const late = logs.find((l) => l.late);
+  const early = logs.filter((l) => !l.late);
+  if (!late) return { name, pass: false, detail: "no late page" };
+  const first = late.frames[0];
+  if (!first) return { name, pass: false, detail: `${late.name} never got a snapshot (no wave ${LATE_JOIN_WAVE} seen in time, or it never joined)` };
+  const tick = first.s.tick;
+  const wrong: string[] = [];
+  if (first.s.w < LATE_JOIN_WAVE) wrong.push(`${late.name}'s first snapshot is at wave ${first.s.w}, not ${LATE_JOIN_WAVE}`);
+  const mine = rosterAt(late, first.at);
+  let rows = 0;
+  for (const e of early) {
+    const f = e.frames.find((x) => x.s.tick === tick);
+    if (!f) {
+      wrong.push(`${e.name} has no tick ${tick}`);
+      continue;
+    }
+    const theirs = rosterAt(e, f.at);
+    if (rosterKey(mine) !== rosterKey(theirs)) wrong.push(`roster: ${late.name} ${rosterKey(mine)}, ${e.name} ${rosterKey(theirs)}`);
+    // Each page's own row carries its exact numbers, so both pages' own rows are left out.
+    const others = (fr: FrameRec) => new Map(fr.s.p.filter((r) => r[0] !== late.you && r[0] !== e.you).map((r) => [r[0], sharedRow(r)]));
+    const a = others(first);
+    const b = others(f);
+    if (a.size !== b.size || [...a].some(([id, row]) => b.get(id) !== row)) wrong.push(`players at tick ${tick}: ${late.name} and ${e.name} differ`);
+    rows += a.size;
+    if (downsKey(first.s.d) !== downsKey(f.s.d)) wrong.push(`downs at tick ${tick}: ${late.name} ${downsKey(first.s.d)}, ${e.name} ${downsKey(f.s.d)}`);
+  }
+  const playedS = (late.frames[late.frames.length - 1]!.s.tick - tick) * DT;
+  if (playedS < LATE_PLAY_S) wrong.push(`${late.name} played ${playedS.toFixed(1)} s after joining, under ${LATE_PLAY_S}`);
+  return {
+    name,
+    pass: wrong.length === 0,
+    detail:
+      wrong.length === 0
+        ? `${late.name} joined at wave ${first.s.w}, first snapshot tick ${tick} (${(tick * DT).toFixed(1)} s in): roster of ${mine.size}, ${rows} player rows and ${first.s.d.length} downs the same as on all ${early.length} early pages; then ${playedS.toFixed(1)} s of play`
+        : wrong.slice(0, 4).join("; "),
+  };
+}
+
+/**
+ * What the harness saw of the restart: the old server's PID and how it stopped (`graceful`: it
+ * exited on its own after the IPC shutdown, with `code`, `ms` after it was asked), the new one's
+ * PID, and the old server's shutdown log line (its lives saved), if it printed one.
+ */
+export type RestartReport = { pid0: number; pid1: number; code: number | null; ms: number; graceful: boolean; logLine: string | null };
+
+/**
+ * The restart scenario: the old server stopped through its graceful path (it exited 0 on its own
+ * within the shutdown budget after the IPC message), every page was told `restarting` by it, then
+ * rejoined: exactly one new welcome from the new server, on the same build (not "Updating..."),
+ * and played on for AFTER_RESTART_S (less 5 s of slack) with inputs sent. The common checks run
+ * per server lifetime (`gen`).
+ */
+export function checkScenarioRestart(logs: PageLog[], r: RestartReport | null, budgetMs: number): CheckResult {
+  const name = "restart scenario";
+  if (!r) return { name, pass: false, detail: "the server was never restarted" };
+  const wrong: string[] = [];
+  if (!r.graceful || r.code !== 0 || r.ms > budgetMs) wrong.push(`server ${r.pid0} stopped ${r.graceful ? "" : "by a kill, "}with exit ${r.code} after ${Math.round(r.ms)} ms (budget ${budgetMs} ms)`);
+  const rejoin: string[] = [];
+  for (const l of logs) {
+    if (!l.errors.some((e) => e.gen === 0 && e.code === ERROR_RESTARTING)) wrong.push(`${l.name} was never told restarting`);
+    const old = l.welcomes.filter((w) => w.gen === 0);
+    const fresh = l.welcomes.filter((w) => w.gen === 1);
+    if (fresh.length !== 1) {
+      wrong.push(`${l.name} has ${fresh.length} welcomes from the new server, not 1`);
+      continue;
+    }
+    if (old.length > 0 && fresh[0]!.build !== old[0]!.build) wrong.push(`${l.name} rejoined build ${fresh[0]!.build}, not ${old[0]!.build}`);
+    const f = l.frames.filter((x) => x.gen === 1);
+    const played = f.length === 0 ? 0 : (f[f.length - 1]!.s.tick - f[0]!.s.tick) * DT;
+    const sent = l.sent.filter((x) => x.gen === 1).length;
+    if (played < AFTER_RESTART_S - 5 || sent === 0) wrong.push(`${l.name} played ${played.toFixed(1)} s on the new server with ${sent} inputs`);
+    const told = l.errors.find((e) => e.gen === 0 && e.code === ERROR_RESTARTING);
+    rejoin.push(`${l.name} ${told ? `${((fresh[0]!.at - told.at) / 1000).toFixed(1)} s` : "?"}`);
+  }
+  return {
+    name,
+    pass: wrong.length === 0,
+    detail:
+      wrong.length === 0
+        ? `server ${r.pid0} stopped gracefully (exit 0, ${Math.round(r.ms)} ms${r.logLine ? `, "${r.logLine}"` : ""}), server ${r.pid1} took over; all ${logs.length} told restarting, each rejoined once on the same build (told to welcome: ${rejoin.join(", ")}) and played on`
+        : wrong.slice(0, 4).join("; "),
+  };
+}
+
 /** Every check for a scenario, in table order. */
-export function runChecks(logs: PageLog[], scenario: ScenarioName): CheckResult[] {
+export function runChecks(logs: PageLog[], scenario: ScenarioName, restart: { report: RestartReport | null; budgetMs: number } | null = null): CheckResult[] {
   const out = [checkSameArena(logs), checkRoster(logs), checkDelivery(logs), checkPositions(logs), checkEvents(logs, DOWN), checkEvents(logs, REVIVE), checkKills(logs), checkScore(logs), checkInput(logs), checkLifeOver(logs)];
   if (scenario === "revive") out.push(checkScenarioRevive(logs));
+  if (scenario === "late-join") out.push(checkScenarioLateJoin(logs));
+  if (scenario === "restart") out.push(checkScenarioRestart(logs, restart?.report ?? null, restart?.budgetMs ?? 0));
   return out;
 }
 

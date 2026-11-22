@@ -1,7 +1,7 @@
 // The shutdown a SIGTERM or SIGINT runs (main.ts), with fakes for the server, database, timer and exit.
 import { expect, test } from "bun:test";
 import { DT, WAVE_S } from "../shared/arena/constants";
-import { START_LEAD_S, buildIdFrom, gracefulShutdown, startTickFrom, type ShutdownDeps } from "./serve";
+import { SHUTDOWN_MESSAGE, START_LEAD_S, buildIdFrom, gracefulShutdown, onShutdownMessage, startTickFrom, type ShutdownDeps } from "./serve";
 
 function fakes(stop: () => Promise<number>) {
   const calls: string[] = [];
@@ -50,6 +50,16 @@ test("a failed stop is logged and exits 1", async () => {
   });
   await gracefulShutdown(deps)("SIGTERM");
   expect(calls).toEqual(["stop", "shutdown (SIGTERM): failed: Error: boom", "exit 1"]);
+});
+
+test("the IPC shutdown message runs the shutdown once per message; any other message does nothing (#95)", () => {
+  let listener: ((m: unknown) => void) | null = null;
+  const why: string[] = [];
+  onShutdownMessage({ on: (_e, l) => (listener = l) }, (w) => why.push(w));
+  for (const m of ["hello", { t: SHUTDOWN_MESSAGE }, 1, null]) listener!(m);
+  expect(why).toEqual([]);
+  listener!(SHUTDOWN_MESSAGE);
+  expect(why).toEqual(["ipc"]);
 });
 
 test("the build id is Railway's commit, else BUILD_ID, else the start time", () => {
