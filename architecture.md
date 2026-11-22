@@ -125,7 +125,7 @@ Release 2 was built beside release 1 at `/arena` and replaced it at `/` in #64 (
   - The glob is a bright core with a white hot spot, an additive glow, and four trailing blobs 9 units apart, shrinking and fading behind it along its motion. It fades out over its last 0.5 s.
 - **`bun run skill`** (240 late seeds, the default since this item): aimer vs mover 25.16x, late/early 0.82x, idle lowest 22.5 s. In an aimer's median life: 7 spitters and 8.5 globs, and no hits from either at the median (the dasher policy: 8 and 14).
 - **Measured** (headless Chrome on the factory's Windows machine, `.evidence/72/`): `bun run bots` with 18 aimers, plus a 1280x800 desktop tab and a 390x844 portrait phone tab (20 players), four runs of about 5 minutes. Spitters appear from about 70 s, at wave 3.
-  - Tick p50 0.84 to 0.95 ms and p95 1.41 to 1.81 ms (#65's dasher run read 0.75 / 1.27, on a busier machine now).
+  - Tick p50 0.84 to 0.95 ms and p95 1.41 to 1.81 ms (#65's dasher run read 0.75 / 1.27).
   - The desktop tab received 68 to 82 KB/s over 10 s with spitters and globs in play (#65: 64.6), still over the 40 KB/s budget the Load item has to meet. A glob in flight is a 4-field row. Fading globs and telling spitters carry the tail.
   - The F readout showed 60 fps with 20 players, 146 bugs and a spitter spitting on screen. With two headless tabs it also read 30 fps at times, including at wave 3 with 61 bugs and no spitter yet, so that 30 is not the spitter's draw.
   - In one of the four runs, both tabs drew black frames from about 3.5 minutes on, with no page exception, no crash and the server unaffected. It did not happen again; runs 3 and 4 also listened for page exceptions and target crashes and saw none.
