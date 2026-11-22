@@ -7,7 +7,8 @@
 // HELP over it, a ring fills between it and whoever is reviving it, an arrow at the screen's edge
 // points to each one out of view nearby, its minimap dot blinks, and your own HUD says DOWN with
 // the seconds left. A server fill bot (#66) has a small BOT pill left of its name, which is drawn
-// dimmer. A name tag (and HELP) that would reach the HUD band flips under its robot (#90, tag.ts). Pickups (#73): each on the floor as a halo, a disc and its glyph, blinking in its last
+// dimmer. A name tag (and HELP) that would reach the HUD band flips under its robot (#90, tag.ts).
+// Pickups (#73): each on the floor as a halo, a disc and its glyph, blinking in its last
 // 3 s; on every robot that has one, its look (a shield bubble, a glow at a laser's barrel, a CI drone orbiting, #84); a laser
 // shot as a longer, brighter beam and a drone's in violet; your active ones as timer icons under the HUD line, each with a
 // ring draining as it runs out. It reuses release 1's sprites and pooled
