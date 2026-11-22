@@ -23,9 +23,9 @@
 //   never its aim: it aims at the nearest bug in range that is not shelled, and holds fire when
 //   every bug in range is. It flanks the nearest bug with a shell within FLANK_RANGE that it is
 //   not yet well behind (within FLANK_BEHIND_COS of its facing), unless another bug is within
-//   KEEP_DIST: at full speed round it, the way that takes it away from the shell's facing, holding
-//   FLANK_NEAR to FLANK_FAR from it, plus the evasion from every other bug, shooting it once it is
-//   off the shell. With no bug with a shell about it plays exactly as before.
+//   KEEP_DIST: at full speed round it, the way that takes it away from the shell's facing, coming
+//   in past FLANK_FAR, plus the evasion from every other bug (and from it, inside FLANK_NEAR),
+//   shooting it once it is off the shell. With no bug with a shell about it plays exactly as before.
 //   Pickups (#73): while the nearest bug is not within KEEP_DIST and a pickup lies within
 //   PICKUP_SEEK, it walks to the nearest pickup at full speed instead (aim and fire unchanged).
 //   `aimerBase` is the aimer without this.
@@ -115,7 +115,7 @@ export const DASH_CONTACT = 30;
 export const PICKUP_SEEK = 300;
 /** The aimer flanks a shelled bug within this, units (#80). */
 export const FLANK_RANGE = 400;
-/** While flanking it keeps between these from the bug, units: outward below FLANK_NEAR, inward past FLANK_FAR. */
+/** While flanking, inside FLANK_NEAR the bug repels it as a threat; past FLANK_FAR it closes in, units. */
 export const FLANK_NEAR = 150;
 export const FLANK_FAR = 300;
 /**
@@ -355,9 +355,10 @@ function intercept(sx: number, sy: number, bx: number, by: number, vx: number, v
 
 /**
  * The flank (#80): at full speed round bug `i`, the way that carries the robot away from its
- * shell's facing (round the side its facing is already turned from), out below FLANK_NEAR and in
- * past FLANK_FAR, plus the evasion from every other bug. Round it at 200 units a robot covers
- * 1.5 rad/s, faster than a beetle turns.
+ * shell's facing (round the side its facing is already turned from), in past FLANK_FAR, plus the
+ * evasion from every other bug; inside FLANK_NEAR the bug itself counts in the evasion again, so
+ * other bugs never push the robot into it. Round it at 200 units a robot covers 1.5 rad/s, faster
+ * than a beetle turns.
  */
 function flankMove(obs: Observation, i: number, out: PolicyInput): void {
   const b = obs.bugs[i]!;
@@ -370,14 +371,18 @@ function flankMove(obs: Observation, i: number, out: PolicyInput): void {
   const side = b.fx * uy - b.fy * ux >= 0 ? 1 : -1;
   let mx = -uy * side;
   let my = ux * side;
-  if (rd < FLANK_NEAR) {
-    mx += ux;
-    my += uy;
-  } else if (rd > FLANK_FAR) {
+  if (rd > FLANK_FAR) {
     mx -= ux;
     my -= uy;
   }
-  moveAlong(out, mx / THREAT_RANGE + evade.x, my / THREAT_RANGE + evade.y, 1);
+  mx = mx / THREAT_RANGE + evade.x;
+  my = my / THREAT_RANGE + evade.y;
+  // Inside FLANK_NEAR it is a threat again, as in the evasion, so other bugs never push the robot into it.
+  if (rd < FLANK_NEAR) {
+    mx += ux / rd;
+    my += uy / rd;
+  }
+  moveAlong(out, mx, my, 1);
 }
 
 /** The aimer without going for pickups: what the fill bot builds on. */
