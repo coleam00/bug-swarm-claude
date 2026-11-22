@@ -214,6 +214,16 @@ describe("recording", () => {
 });
 
 describe("checks", () => {
+  test("each scenario's own check is in its table", () => {
+    expect(runChecks(game(), "basic").map((r) => r.name)).not.toContain("revive scenario");
+    expect(runChecks(game(), "revive").map((r) => r.name)).toContain("revive scenario");
+    const late = runChecks(lateGame(), "late-join").find((r) => r.name === "late-join scenario");
+    expect(late?.pass).toBe(true);
+    // No restart report: the restart scenario's row is there, and fails.
+    const restart = runChecks(restartGame(), "restart", { report: null, budgetMs: 4500 }).find((r) => r.name === "restart scenario");
+    expect(restart).toMatchObject({ pass: false, detail: "the server was never restarted" });
+  });
+
   test("a game where the pages agree passes every check", () => {
     const results = runChecks(game(), "basic");
     for (const r of results) expect(`${r.name}: ${r.pass} ${r.detail}`).toBe(`${r.name}: true ${r.detail}`);
@@ -473,23 +483,52 @@ describe("late join", () => {
 
 const RESTART_SHIFT = 10_000;
 
-/** game() on server 0, `restarting` on each page, then game() again on server 1 (arena 1), with the fill bot (id 3) 7 units over. */
+/** On server 1, A aims here (0.5 on server 0). */
+const AIM_1 = 1.5;
+/** On server 1, B is back only from this tick: after its own down and revive there. */
+const B_BACK_1 = 31;
+
+/**
+ * game() on server 0, `restarting` on each page, then a second game on server 1 (arena 1) that
+ * reuses its ticks, player ids, bug id and input seqs with other content: the fill bot (id 3) 7
+ * units over; A aims AIM_1 under the same seqs; A kills bug 77 at tick 12 for 20 points (not at
+ * tick 10 for 10), so its score reads 20 then 70; B's frames, events and inputs start only at
+ * B_BACK_1, so it was not connected for that lifetime's down and revive; and A reads a top 10 on
+ * the new server that differs from B's read on the old one, with no life ending between. A check
+ * that compared across lifetimes would fail on each of these.
+ */
 function restartGame(): PageLog[] {
   const logs = game();
   const next = game();
   logs.forEach((l, i) => {
     const n = next[i]!;
+    const back = (tick: number) => i === 0 || tick >= B_BACK_1;
     l.errors.push({ at: 40 * 50 + 100, gen: 0, code: "restarting" });
     l.gen = 1;
     for (const w of n.welcomes) l.welcomes.push({ ...w, at: w.at + RESTART_SHIFT, gen: 1, arena: 1 });
     for (const f of n.frames) {
-      const p = f.s.p.map((r): SnapshotPlayer => (r[0] === 3 ? [r[0], r[1] + 7, ...r.slice(2)] as SnapshotPlayer : r));
-      l.frames.push({ ...f, at: f.at + RESTART_SHIFT, hat: f.hat + RESTART_SHIFT, gen: 1, s: { ...f.s, p } });
+      const t = f.s.tick;
+      if (!back(t)) continue;
+      const p = f.s.p.map((r): SnapshotPlayer => {
+        const c = [...r] as SnapshotPlayer;
+        if (c[0] === 3) c[1] += 7;
+        if (c[0] === 1) c[5] = AIM_1;
+        return c;
+      });
+      const k: SnapshotKill[] = t === 12 ? [[77, 1, 300, 500, 20, 0]] : [];
+      const me = i === 0 ? { ...f.s.me, sc: t >= 30 ? 70 : t >= 12 ? 20 : 0, ki: t >= 12 ? 1 : 0 } : f.s.me;
+      l.frames.push({ ...f, at: f.at + RESTART_SHIFT, hat: f.hat + RESTART_SHIFT, gen: 1, s: { ...f.s, p, k, me } });
     }
-    for (const e of n.events) l.events.push({ ...e, at: e.at + RESTART_SHIFT, gen: 1 });
-    for (const x of n.sent) l.sent.push({ ...x, hat: x.hat + RESTART_SHIFT, gen: 1 });
-    for (const x of n.intents) l.intents.push({ ...x, hat: x.hat + RESTART_SHIFT, done: x.done + RESTART_SHIFT });
+    for (const e of n.events) {
+      if (!back(e.tick)) continue;
+      const ev = e.ev.kind === "over" ? { ...e.ev, score: 70 } : e.ev;
+      l.events.push({ ...e, at: e.at + RESTART_SHIFT, gen: 1, ev });
+    }
+    for (const x of n.sent) if (back(x.msg.seq)) l.sent.push({ ...x, hat: x.hat + RESTART_SHIFT, gen: 1, msg: i === 0 ? { ...x.msg, aim: AIM_1 } : x.msg });
+    for (const x of n.intents) if (back(Math.floor(x.hat / 50))) l.intents.push({ ...x, hat: x.hat + RESTART_SHIFT, done: x.done + RESTART_SHIFT, aim: i === 0 ? AIM_1 : x.aim });
   });
+  // Read on the new server before its first life ends: it holds the lives the old one saved, and more.
+  logs[0]!.tops.push({ at: RESTART_SHIFT + 500, gen: 1, rows: [{ name: "PT-A", score: 60 }, { name: "PT-B", score: 0 }] });
   return logs;
 }
 
@@ -519,13 +558,31 @@ describe("server lifetimes (restart)", () => {
     const results = runChecks(restartGame(), "restart", { report: null, budgetMs: 4500 });
     for (const r of results.filter((x) => x.name !== "restart scenario")) expect(`${r.name}: ${r.pass} ${r.detail}`).toBe(`${r.name}: true ${r.detail}`);
     const byName = Object.fromEntries(results.map((r) => [r.name, r.detail]));
-    expect(byName["same arena"]).toBe("server 0: arena 3; server 1: arena 1");
-    expect(byName.positions).toContain("80 player rows");
-    expect(byName.delivery).toContain("80 shared ticks");
+    expect(byName["same arena"]).toContain("server 0: arena 3; server 1: arena 1");
+    expect(byName.positions).toContain("50 player rows");
+    expect(byName.delivery).toContain("50 shared ticks");
     expect(byName.delivery).toContain("restart gap");
     expect(byName.delivery).toContain("0 ticks late from the server");
+    // B was not on server 1 for its down and revive there: it is not expected to have them.
     expect(byName.downs).toContain("2 downs");
-    expect(byName.score).toContain("4 life spans");
+    expect(byName.kills).toContain("2 kills seen");
+    expect(byName.score).toContain("4 life spans, 130 points");
+    expect(byName.input).toContain("PT-A mouse 100%/100%");
+    expect(byName["life over"]).toContain("2 lives over");
+  });
+
+  test("a score run ends at the restart even where the new server's ticks carry on from the old one's", () => {
+    const logs = restartGame();
+    // B's first tick on server 1 is 41, right after its last on server 0; B ends its old life with 50 points and starts at 0.
+    const shift = 41 - B_BACK_1;
+    for (const l of logs) {
+      for (const f of l.frames) if (f.gen === 1) f.s.tick += shift;
+      for (const e of l.events) if (e.gen === 1) e.tick += shift;
+    }
+    expect(logs[1]!.frames.find((f) => f.gen === 1)!.s.tick).toBe(41);
+    for (const f of logs[1]!.frames) if (f.gen === 0) f.s.me = { ...f.s.me, sc: 50 };
+    const r = checkScore(logs);
+    expect(`${r.pass} ${r.detail}`).toBe(`true ${r.detail}`);
   });
 
   test("roster is checked on each server: a page missing before the restart fails though the last roster is whole", () => {
