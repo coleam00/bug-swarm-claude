@@ -42,11 +42,14 @@ function perPickup(): PerPickup {
   return Object.fromEntries(PICKUP_IDS.map((k) => [k, 0])) as PerPickup;
 }
 
-/** One life's pickups (#73): taken by id, hits its shields blocked, bugs its laser shots hit, bugs its bombs killed (#78). */
-export type PickupCounts = { taken: PerPickup; blocks: number; laserHits: number; bombKills: number };
+/**
+ * One life's pickups (#73): taken by id, hits its shields blocked, bugs its laser shots hit, bugs
+ * its bombs killed (#78), bugs its CI drone's shots killed (#84).
+ */
+export type PickupCounts = { taken: PerPickup; blocks: number; laserHits: number; bombKills: number; droneKills: number };
 
 function pickupCounts(): PickupCounts {
-  return { taken: perPickup(), blocks: 0, laserHits: 0, bombKills: 0 };
+  return { taken: perPickup(), blocks: 0, laserHits: 0, bombKills: 0, droneKills: 0 };
 }
 
 /** Adds the last step's pickups for player `id` to `c`. */
@@ -56,6 +59,7 @@ function countPickups(state: ArenaState, id: number, c: PickupCounts): void {
   for (const b of ev.blocks) if (b === id) c.blocks++;
   for (const o of ev.laserHits) if (o === id) c.laserHits++;
   for (const o of ev.bombKills) if (o === id) c.bombKills++;
+  for (const o of ev.droneKills) if (o === id) c.droneKills++;
 }
 
 /** One life's result: what the drop-in gates read. */
@@ -157,7 +161,7 @@ export type PolicySummary = {
   medianSpawned: PerKind;
   /** Hits taken from each kind in a life, median. */
   medianTouches: PerKind;
-  /** Pickups a life (#73): taken by id, shield blocks, laser hits and bomb kills, median and mean. */
+  /** Pickups a life (#73): taken by id, shield blocks, laser hits, bomb kills and drone kills, median and mean. */
   pickups: { median: PickupCounts; mean: PickupCounts };
 };
 
@@ -213,6 +217,7 @@ export function pickupStats(lives: readonly PickupCounts[]): { median: PickupCou
   [median.blocks, mean.blocks] = of((c) => c.blocks);
   [median.laserHits, mean.laserHits] = of((c) => c.laserHits);
   [median.bombKills, mean.bombKills] = of((c) => c.bombKills);
+  [median.droneKills, mean.droneKills] = of((c) => c.droneKills);
   return { median, mean };
 }
 
@@ -288,12 +293,12 @@ export function formatSkill(r: SkillReport): string[] {
   for (const p of r.policies) {
     lines.push(`${p.policy.padEnd(8)}${BUG_KINDS.map((k) => `${k} ${p.medianSpawned[k]} / ${p.medianTouches[k]}`).join(", ")}`);
   }
-  lines.push("pickups a life, median (mean): taken by id, hits blocked by a shield, bugs hit by laser shots, bugs killed by bombs");
+  lines.push("pickups a life, median (mean): taken by id, hits blocked by a shield, bugs hit by laser shots, bugs killed by bombs and by drones");
   for (const p of r.policies) {
     const { median: m, mean: a } = p.pickups;
     const v = (x: number, y: number) => `${x} (${y.toFixed(1)})`;
     lines.push(
-      `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}, bomb kills ${v(m.bombKills, a.bombKills)}`,
+      `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}, bomb kills ${v(m.bombKills, a.bombKills)}, drone kills ${v(m.droneKills, a.droneKills)}`,
     );
   }
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");

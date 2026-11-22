@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { DT, SHOT_RANGE, SHOT_SPEED } from "../../shared/arena/constants";
 import { addShot, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill, shotTravel } from "./shots";
+import { SHOT_DRONE, SHOT_LASER } from "../../shared/arena/protocol";
 
 const STEP = SHOT_SPEED * DT;
 const nobody = () => false;
@@ -80,10 +81,12 @@ describe("kills", () => {
   });
 });
 
-test("a review laser shot (#73) is marked in its slot, and a slot reused by a normal shot is not", () => {
+test("a shot's style is marked in its slot (a review laser shot, #73; a CI drone's, #84), and a reused slot is reset", () => {
   const s = createShots(1);
-  addShot(s, 1, 1, 0, 0, 0, 10, true);
-  expect(s.laser[0]).toBe(1);
-  addShot(s, 2, 1, 0, 0, 0, 11);
-  expect(s.laser[0]).toBe(0);
+  addShot(s, 1, 1, 0, 0, 0, 10, SHOT_LASER);
+  expect([s.laser[0], s.drone[0]]).toEqual([1, 0]);
+  addShot(s, 2, 1, 0, 0, 0, 11, SHOT_DRONE);
+  expect([s.laser[0], s.drone[0]]).toEqual([0, 1]);
+  addShot(s, 3, 1, 0, 0, 0, 12);
+  expect([s.laser[0], s.drone[0]]).toEqual([0, 0]);
 });

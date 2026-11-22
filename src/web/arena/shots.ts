@@ -6,10 +6,11 @@
 // frame allocates nothing. Times are server ticks (fractional between ticks). Pure.
 import { SHOT_RANGE } from "../../shared/arena/constants";
 import { shotTravelAt } from "../../shared/arena/combat";
+import { SHOT_DRONE, SHOT_GUN, SHOT_LASER } from "../../shared/arena/protocol";
 
 /**
  * The most shots drawn at once. A full arena has at most about 110 live shots (20 players x 7/s
- * x 0.78 s of flight); ended shots linger until drawn to their end, so this leaves room to spare.
+ * x 0.78 s of flight), about 160 with every player's CI drone firing too (3/s, #84); ended shots linger until drawn to their end, so this leaves room to spare.
  * The server ends every shot it fires, so every slot is let go by its end.
  */
 export const SHOT_CAPACITY = 512;
@@ -30,6 +31,8 @@ export type ClientShots = {
   hit: Uint8Array;
   /** A review laser shot (#73): drawn as a longer, brighter beam. */
   laser: Uint8Array;
+  /** A CI drone's shot (#84): drawn violet. */
+  drone: Uint8Array;
   used: Uint8Array;
   /** Shot id to its slot. */
   slots: Map<number, number>;
@@ -50,6 +53,7 @@ export function createShots(capacity = SHOT_CAPACITY): ClientShots {
     endTravel: new Float32Array(capacity),
     hit: new Uint8Array(capacity),
     laser: new Uint8Array(capacity),
+    drone: new Uint8Array(capacity),
     used: new Uint8Array(capacity),
     slots: new Map(),
     live: 0,
@@ -70,8 +74,11 @@ function free(s: ClientShots, i: number): void {
   s.live--;
 }
 
-/** A shot fired, from a snapshot's `s` (`laser`: a review laser shot, v7). A full pool overwrites the oldest slot. */
-export function addShot(s: ClientShots, id: number, owner: number, x: number, y: number, angle: number, tick: number, laser = false): void {
+/**
+ * A shot fired, from a snapshot's `s`; `style` is its last field (protocol.ts SHOT_GUN, SHOT_LASER
+ * for a review laser shot, SHOT_DRONE for a CI drone's, v9). A full pool overwrites the oldest slot.
+ */
+export function addShot(s: ClientShots, id: number, owner: number, x: number, y: number, angle: number, tick: number, style: number = SHOT_GUN): void {
   const cap = s.used.length;
   const i = s.cursor;
   s.cursor = (i + 1) % cap;
@@ -88,7 +95,8 @@ export function addShot(s: ClientShots, id: number, owner: number, x: number, y:
   s.endTick[i] = -1;
   s.endTravel[i] = SHOT_RANGE;
   s.hit[i] = 0;
-  s.laser[i] = laser ? 1 : 0;
+  s.laser[i] = style === SHOT_LASER ? 1 : 0;
+  s.drone[i] = style === SHOT_DRONE ? 1 : 0;
   s.slots.set(id, i);
 }
 

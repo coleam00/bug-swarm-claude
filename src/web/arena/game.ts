@@ -302,7 +302,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     } else if (m.t === SNAPSHOT) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
-      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5] === 1);
+      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5]);
       for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       if (watch) return setLive(true);

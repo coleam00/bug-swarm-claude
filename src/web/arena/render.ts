@@ -29,6 +29,7 @@ import {
   BOMB_RING_GLOW_ALPHA,
   BOMB_RING_GLOW_WIDTH,
   BOMB_RING_WIDTH,
+  GLOW_DRONE,
   GLOW_LASER,
   GLOW_SHOT,
   GLOW_WHITE,
@@ -37,6 +38,7 @@ import {
   ROBOT_HALO_ALPHA,
   ROBOT_HALO_RADIUS,
   SHOT_CORE,
+  DRONE_SHOT_CORE,
   STICK_KNOB,
   STICK_KNOB_RADIUS,
   STICK_RING,
@@ -115,6 +117,8 @@ const LASER_LENGTH = 3;
 const LASER_GLOW_WIDTH = 18;
 const LASER_CORE_WIDTH = 3.2;
 const LASER_CORE = "#ffffff";
+/** A CI drone's shot (#84): release 1's, this much of a gun shot's size, violet. */
+const DRONE_SHOT_SCALE = 0.8;
 /** A floor pickup: its halo's radius (pickup radii) and pulse (cycles a second), and its disc. */
 const PICKUP_HALO = 2.6;
 const PICKUP_HALO_HZ = 1.2;
@@ -642,13 +646,16 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalAlpha = 1;
   }
 
-  /** What each robot's active pickups draw on it (a shield bubble, a laser's barrel glow), for everyone. */
-  function drawEffects(r: Robot, t: number): void {
+  /**
+   * What each robot's active pickups draw on it (a shield bubble, a laser's barrel glow, a CI
+   * drone), for everyone, at `tick`: the tick that robot's shots are drawn at.
+   */
+  function drawEffects(r: Robot, t: number, tick: number): void {
     if (r.fx === 0 || r.down) return;
     for (let i = 0; i < PICKUP_IDS.length; i++) {
       if (!(r.fx & (1 << i))) continue;
       const d = PICKUP_DRAW[PICKUP_IDS[i]!];
-      d.on?.(ctx, r.x, r.y, r.aim, t, glows[d.glow]!);
+      d.on?.(ctx, r.x, r.y, r.aim, t, glows[d.glow]!, r.id, tick);
     }
   }
 
@@ -693,6 +700,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fillStyle = SHOT_CORE;
     const glow = glows[GLOW_SHOT]!;
     const beam = glows[GLOW_LASER]!;
+    const violet = glows[GLOW_DRONE]!;
     for (let i = 0; i < s.used.length; i++) {
       if (!s.used[i]) continue;
       const travel = shotTravel(s, i, s.owner[i] === sc.you ? sc.mineAt : sc.othersAt);
@@ -711,6 +719,17 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.drawImage(beam, 6 - tail, -LASER_GLOW_WIDTH / 4, tail, LASER_GLOW_WIDTH / 2);
         ctx.fillStyle = LASER_CORE;
         ctx.fillRect(2 - core, -LASER_CORE_WIDTH / 2, core, LASER_CORE_WIDTH);
+        ctx.fillStyle = SHOT_CORE;
+        continue;
+      }
+      if (s.drone[i]) {
+        // A CI drone's shot (#84): release 1's, a little shorter and narrower, violet through.
+        const d = DRONE_SHOT_SCALE;
+        const tail = Math.min(SHOT_GLOW_LENGTH * d, travel + 6 * d);
+        const core = Math.min(SHOT_CORE_LENGTH * d, travel + 2 * d);
+        ctx.drawImage(violet, 6 * d - tail, (-SHOT_GLOW_WIDTH * d) / 2, tail, SHOT_GLOW_WIDTH * d);
+        ctx.fillStyle = DRONE_SHOT_CORE;
+        ctx.fillRect(2 * d - core, (-SHOT_CORE_WIDTH * d) / 2, core, SHOT_CORE_WIDTH * d);
         ctx.fillStyle = SHOT_CORE;
         continue;
       }
@@ -1022,7 +1041,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     for (let i = 0; i < count; i++) {
       if (i === self || !inView(robots[i]!.x, robots[i]!.y)) continue;
       drawRobot(robots[i]!, t);
-      drawEffects(robots[i]!, t);
+      drawEffects(robots[i]!, t, sc.othersAt);
     }
     const me = self >= 0 ? robots[self] : undefined;
     if (me) {
@@ -1032,7 +1051,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = "source-over";
       drawRobot(me, t);
-      drawEffects(me, t);
+      drawEffects(me, t, sc.mineAt);
       if (!me.down) {
         const mh = PLAYER_RADIUS * ROBOT_MARK_HALF;
         ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);

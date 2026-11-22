@@ -129,21 +129,22 @@ describe("bun run skill", () => {
     expect(aim.bombKills).toBeGreaterThan(0);
     expect(aim.blocks).toBeGreaterThan(0);
     // A block is never a hit landed: the counts come from different events.
-    expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0, bomb: 0 }, blocks: 0, laserHits: 0, bombKills: 0 });
+    expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0, bomb: 0, drone: 0 }, blocks: 0, laserHits: 0, bombKills: 0, droneKills: 0 });
     // One life's counts replay exactly.
     expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
   });
 
   test("pickupStats: the median and mean of each count", () => {
-    const c = (shield: number, laser: number, bomb: number, blocks: number, laserHits: number, bombKills: number) => ({
-      taken: { shield, laser, bomb },
+    const c = (shield: number, laser: number, bomb: number, drone: number, blocks: number, laserHits: number, bombKills: number, droneKills: number) => ({
+      taken: { shield, laser, bomb, drone },
       blocks,
       laserHits,
       bombKills,
+      droneKills,
     });
-    expect(pickupStats([c(0, 1, 0, 0, 3, 0), c(2, 1, 1, 1, 0, 9), c(1, 4, 2, 0, 6, 3)])).toEqual({
-      median: c(1, 1, 1, 0, 3, 3),
-      mean: c(1, 2, 1, 1 / 3, 3, 4),
+    expect(pickupStats([c(0, 1, 0, 1, 0, 3, 0, 5), c(2, 1, 1, 0, 1, 0, 9, 0), c(1, 4, 2, 2, 0, 6, 3, 1)])).toEqual({
+      median: c(1, 1, 1, 1, 0, 3, 3, 1),
+      mean: c(1, 2, 1, 1, 1 / 3, 3, 4, 2),
     });
   });
 
