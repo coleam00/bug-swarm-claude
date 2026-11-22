@@ -41,8 +41,8 @@ export type RunningServer = {
   rooms: Rooms;
   /**
    * Stops the server for a redeploy (or a test's end): ends and saves every life in progress with
-   * its score so far, sends every socket `error restarting` and closes it, stops the listener, and
-   * writes every queued life. Resolves to the number of lives it ended. Calling it again returns
+   * its score so far, sends every socket `error restarting` and closes it, stops the listener
+   * (waiting at most LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the number of lives it ended. Calling it again returns
    * the same promise.
    */
   stop(): Promise<number>;
@@ -50,6 +50,8 @@ export type RunningServer = {
 
 /** How long stop waits for the sockets to finish closing before it cuts them, ms. */
 export const SOCKET_CLOSE_WAIT_MS = 500;
+/** How long stop waits for Bun's listener stop to settle before it moves on, ms (#99: on Windows it once never settled). */
+export const LISTENER_STOP_WAIT_MS = 1000;
 /** The shutdown's backstop: the process exits by then whatever is still running, ms (the item asks for 5 s, #69; Railway must allow at least that: architecture.md, "Hosting"). */
 export const SHUTDOWN_BUDGET_MS = 4500;
 
@@ -183,7 +185,24 @@ export function startServer(opts: ServerOptions): RunningServer {
     // Let the error frames and close handshakes finish before the listener cuts what is left.
     const deadline = performance.now() + SOCKET_CLOSE_WAIT_MS;
     while (sockets.openCount > 0 && performance.now() < deadline) await Bun.sleep(10);
-    await server.stop(true);
+    // Bounded: on Windows Bun's listener stop once never settled with browser players connected
+    // (#99). The lives are already written, and exiting closes whatever the listener still holds.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = await Promise.race([
+      server.stop(true).then(
+        () => true,
+        () => true,
+      ),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), LISTENER_STOP_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!settled) {
+      console.warn(
+        `stop: the listener had not stopped after ${LISTENER_STOP_WAIT_MS} ms (websockets ${server.pendingWebSockets}, requests ${server.pendingRequests}); moving on`,
+      );
+    }
     // Anything queued since (nothing should be) is written before the caller closes the database.
     lives.flush();
     return ended;
