@@ -189,8 +189,8 @@ describe("playing now and the arena pills (#74)", () => {
   });
 
   test("one pill per arena, reading 'Arena <id> · <people> · wave <wave>', by id", () => {
-    expect(arenaPills([], 4)).toEqual({ pills: [], more: 0 });
-    expect(arenaPills([{ id: 3, players: 14, wave: 7, queen: null }], 4)).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7", queen: null }], more: 0 });
+    expect(arenaPills([], 4)).toEqual({ pills: [], more: 0, moreQueens: null });
+    expect(arenaPills([{ id: 3, players: 14, wave: 7, queen: null }], 4)).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7", queen: null }], more: 0, moreQueens: null });
     expect(arenaPills([{ id: 5, players: 1, wave: 1, queen: null }, { id: 2, players: 20, wave: 4, queen: null }], 4).pills.map((p) => p.id)).toEqual([2, 5]);
   });
 
@@ -207,11 +207,20 @@ describe("playing now and the arena pills (#74)", () => {
       { id: 3, text: "Arena 3 · 4 · wave 9", queen: null },
     ]);
     expect(more).toBe(0);
-    // A queen never changes the order or the '+N more' count.
-    const queens = arenas(5).map((a) => ({ ...a, queen: 50 }));
-    const over = arenaPills(queens, 4);
-    expect(over.pills.map((p) => p.id)).toEqual([1, 2, 3]);
-    expect(over.more).toBe(2);
+  });
+
+  test("'+N more' counts the folded arenas with a queen alive, '1 QUEEN' or 'N QUEENS'; order and count stay by id (owner ruling on #102)", () => {
+    const withQueens = (ids: number[]) => arenas(6).map((a) => ({ ...a, queen: ids.includes(a.id) ? 50 : null }));
+    // Slots 4: arenas 1-3 shown, 4-6 folded.
+    const two = arenaPills(withQueens([2, 4, 6]), 4);
+    expect(two.pills.map((p) => [p.id, p.queen])).toEqual([[1, null], [2, "QUEEN 50%"], [3, null]]);
+    expect([two.more, two.moreQueens]).toEqual([3, "2 QUEENS"]);
+    expect(arenaPills(withQueens([5]), 4).moreQueens).toBe("1 QUEEN");
+    // Queens only among the shown pills, or none folded at all: nothing on the chip.
+    expect(arenaPills(withQueens([1, 2, 3]), 4).moreQueens).toBeNull();
+    expect(arenaPills(withQueens([1, 6]), 6)).toMatchObject({ more: 0, moreQueens: null });
+    // Every arena folded (slots 1).
+    expect(arenaPills(withQueens([1, 2, 3, 4, 5, 6]), 1)).toMatchObject({ pills: [], more: 6, moreQueens: "6 QUEENS" });
   });
 
   test("up to the slots, every arena shows; past them the last slot is '+N more' for the rest", () => {
@@ -224,6 +233,6 @@ describe("playing now and the arena pills (#74)", () => {
     const fifteen = arenaPills(arenas(15), 11);
     expect(fifteen.pills.length).toBe(10);
     expect(fifteen.more).toBe(5);
-    expect(arenaPills(arenas(15), 1)).toEqual({ pills: [], more: 15 });
+    expect(arenaPills(arenas(15), 1)).toEqual({ pills: [], more: 15, moreQueens: null });
   });
 });

@@ -10,7 +10,10 @@ const EMPTY = "-";
 
 type RowEls = { root: HTMLElement; name: HTMLElement; score: HTMLElement };
 type TeamEls = { root: HTMLElement; total: HTMLElement; bar: HTMLElement };
-/** An arena pill: its text, and the hive queen's part (a pulsing mark and her health), hidden with no queen (#102). */
+/**
+ * An arena pill: its text, and the hive queen's part (a pulsing mark and her health, or on '+N more'
+ * how many folded arenas have one), hidden with no queen (#102).
+ */
 type PillEls = { root: HTMLElement; label: HTMLElement; queen: HTMLElement; queenText: HTMLElement };
 
 export type BoardDom = {
@@ -98,7 +101,7 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
 
   /** Shows `slots` chips' worth of the arenas. */
   const showPills = (slots: number): void => {
-    const { pills: shown, more } = arenaPills(arenas, slots);
+    const { pills: shown, more, moreQueens } = arenaPills(arenas, slots);
     while (pills.length < shown.length + 1) {
       const li = el("li", "pill");
       const label = el("span", "pill-label");
@@ -116,8 +119,10 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
       pill.root.hidden = !p && !isMore;
       pill.root.classList.toggle("more", isMore);
       pill.label.textContent = p ? p.text : isMore ? `+${more} more` : "";
-      pill.queen.hidden = !p?.queen;
-      pill.queenText.textContent = p?.queen ?? "";
+      // Her health on her arena's pill, or the count of folded queens on '+N more'.
+      const queen = p ? p.queen : isMore ? moreQueens : null;
+      pill.queen.hidden = !queen;
+      pill.queenText.textContent = queen ?? "";
     });
     none.hidden = shown.length > 0 || more > 0;
   };
