@@ -156,6 +156,7 @@ test("a policy bot sees a beetle's shell facing from its row's tail, and no faci
     k: [],
     d: [],
     f: [],
+    q: [],
     w: 4,
     me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0] },
   });

@@ -16,6 +16,13 @@ describe("edge arrows", () => {
     expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 1200 + 1200, 1200, o)).toBe(true);
   });
 
+  test("with no range (the hive queen's arrow, #85): any distance off screen gets one, on screen none", () => {
+    const o = arrow();
+    expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 2390, 1200, o, Infinity)).toBe(true);
+    expect(o).toEqual({ x: 1000 - ARROW_MARGIN, y: 300, angle: 0 });
+    expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 1690, 1490, o, Infinity)).toBe(false);
+  });
+
   test("off the right or the left: at that edge, level with the centre, pointing at them", () => {
     const o = arrow();
     expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 2000, 1200, o)).toBe(true);

@@ -17,7 +17,8 @@ export type EdgeArrow = { x: number; y: number; angle: number };
  * Where to draw the arrow to a downed player at (tx, ty), CSS px, into `out`: on the line from
  * the screen's centre toward them, where it meets the screen inset by the safe area plus
  * ARROW_MARGIN, pointing at them (`angle`, radians, 0 to the right). False, and `out` untouched,
- * when they are on screen or more than HELP_ARROW_RANGE from you at (selfX, selfY).
+ * when they are on screen or more than `range` (HELP_ARROW_RANGE; the hive queen's, #85, has
+ * none) from you at (selfX, selfY).
  */
 export function edgeArrow(
   cam: Camera,
@@ -29,10 +30,11 @@ export function edgeArrow(
   tx: number,
   ty: number,
   out: EdgeArrow,
+  range = HELP_ARROW_RANGE,
 ): boolean {
   const rx = tx - selfX;
   const ry = ty - selfY;
-  if (rx * rx + ry * ry > HELP_ARROW_RANGE * HELP_ARROW_RANGE) return false;
+  if (rx * rx + ry * ry > range * range) return false;
   const cx = cssW / 2;
   const cy = cssH / 2;
   const dx = (tx - cam.x) * cam.scale;
