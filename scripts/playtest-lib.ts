@@ -594,13 +594,24 @@ function pct(sorted: number[], q: number): number {
 const ms = (n: number) => `${n.toFixed(1)} ms`;
 
 /**
- * c. Delivery: every tick two or more pages received reached them within INTERP_DELAY_MS of each
- * other (the screens agree), and the server never left every page more than INTERP_DELAY_MS
- * between two ticks (a late tick: every drawn view, that far behind, runs out and stalls). A gap on
- * one page only is that browser's, not the game's: it is reported and does not fail. Measured
- * (#94): four headless pages on one machine showed a few 100 to 150 ms one-page gaps, mostly on the
- * touch-emulated pages (each synthetic touch waits on the renderer: p50 24 ms against 9 ms for a
- * mouse event), none with the same pages driven by the mouse and none with two pages.
+ * The delivery rule (owner, #95): a tick's cross-page spread over INTERP_DELAY_MS is counted and
+ * reported, but fails only as a sustained problem: more than DELIVERY_SLOW_SHARE of the shared
+ * ticks over DELIVERY_SLOW_MS, or any one over DELIVERY_MAX_MS. An owner run of `revive` failed on
+ * 3 ticks at 101 to 111 ms while every game-state check passed: one busy browser, not the game.
+ */
+export const DELIVERY_SLOW_MS = 150;
+export const DELIVERY_SLOW_SHARE = 0.01;
+export const DELIVERY_MAX_MS = 250;
+
+/**
+ * c. Delivery: the ticks two or more pages received reached them close together (the screens
+ * agree), by the delivery rule above (the count over INTERP_DELAY_MS is reported), and the server
+ * never left every page more than INTERP_DELAY_MS between two ticks (a late tick: every drawn view,
+ * that far behind, runs out and stalls; this one still fails at once). A gap on one page only is
+ * that browser's, not the game's: it is reported and does not fail. Measured (#94): four headless
+ * pages on one machine showed a few 100 to 150 ms one-page gaps, mostly on the touch-emulated
+ * pages (each synthetic touch waits on the renderer: p50 24 ms against 9 ms for a mouse event),
+ * none with the same pages driven by the mouse and none with two pages.
  */
 export function checkDelivery(logs: PageLog[]): CheckResult {
   const byTick = new Map<number, number[]>();
@@ -613,6 +624,9 @@ export function checkDelivery(logs: PageLog[]): CheckResult {
   for (const a of byTick.values()) if (a.length >= 2) spreads.push(Math.max(...a) - Math.min(...a));
   spreads.sort((x, y) => x - y);
   const over = spreads.filter((s) => s > INTERP_DELAY_MS).length;
+  const slow = spreads.filter((s) => s > DELIVERY_SLOW_MS).length;
+  const max = spreads[spreads.length - 1] ?? 0;
+  const slowShare = spreads.length === 0 ? 0 : slow / spreads.length;
   // The server's cadence: each tick's first receipt on any page, against the tick before's.
   const ticks = [...byTick.keys()].sort((x, y) => x - y);
   const late: string[] = [];
@@ -634,13 +648,14 @@ export function checkDelivery(logs: PageLog[]): CheckResult {
       if (gap > INTERP_DELAY_MS) onePage.push(`${l.name} (${l.touch ? "touch" : "mouse"}) ${ms(gap)} before tick ${b.s.tick}`);
     }
   }
-  const pass = spreads.length > 0 && over === 0 && late.length === 0;
+  const pass = spreads.length > 0 && slowShare <= DELIVERY_SLOW_SHARE && max <= DELIVERY_MAX_MS && late.length === 0;
   const shown = [...late, ...onePage].slice(0, 3).join("; ");
   return {
     name: "delivery",
     pass,
     detail:
-      `${spreads.length} shared ticks, spread p50 ${ms(pct(spreads, 0.5))} p95 ${ms(pct(spreads, 0.95))} max ${ms(spreads[spreads.length - 1] ?? 0)}, ${over} over ${INTERP_DELAY_MS} ms; ` +
+      `${spreads.length} shared ticks, spread p50 ${ms(pct(spreads, 0.5))} p95 ${ms(pct(spreads, 0.95))} max ${ms(max)} (fails above ${DELIVERY_MAX_MS} ms), ` +
+      `${over} over ${INTERP_DELAY_MS} ms, ${slow} over ${DELIVERY_SLOW_MS} ms (${(slowShare * 100).toFixed(1)}%, fails above ${DELIVERY_SLOW_SHARE * 100}%); ` +
       `${late.length} ticks late from the server; longest gap on a page ${ms(maxGap)}, ${onePage.length} over ${INTERP_DELAY_MS} ms on one page only (reported, not failed)${shown ? `: ${shown}` : ""}`,
   };
 }
@@ -683,7 +698,9 @@ function span(l: PageLog): [number, number] | null {
 
 /**
  * d and e. Every down (and revive) any page received reached every page connected at its tick,
- * the same on each (a revive's reviver and points too), within INTERP_DELAY_MS of each other.
+ * the same on each (a revive's reviver and points too), and no more than DELIVERY_MAX_MS apart
+ * across pages. Spreads over INTERP_DELAY_MS and DELIVERY_SLOW_MS are counted and reported: a run
+ * has a few dozen events at most, so a share rule would make one slow event a failure (#95).
  */
 export function checkEvents(logs: PageLog[], kind: typeof DOWN | typeof REVIVE): CheckResult {
   const seen = new Map<string, { at: number[]; who: Set<number>; body: Set<string> }>();
@@ -698,6 +715,8 @@ export function checkEvents(logs: PageLog[], kind: typeof DOWN | typeof REVIVE):
   }
   const wrong: string[] = [];
   let worst = 0;
+  let over = 0;
+  let slow = 0;
   for (const [key, s] of seen) {
     const tick = Number(key.split(":")[0]);
     for (const l of logs) {
@@ -707,13 +726,18 @@ export function checkEvents(logs: PageLog[], kind: typeof DOWN | typeof REVIVE):
     if (s.body.size > 1) wrong.push(`${kind} ${key} differs: ${[...s.body].join(" vs ")}`);
     const spread = Math.max(...s.at) - Math.min(...s.at);
     worst = Math.max(worst, spread);
-    if (spread > INTERP_DELAY_MS) wrong.push(`${kind} ${key} spread ${ms(spread)}`);
+    if (spread > INTERP_DELAY_MS) over++;
+    if (spread > DELIVERY_SLOW_MS) slow++;
+    if (spread > DELIVERY_MAX_MS) wrong.push(`${kind} ${key} spread ${ms(spread)}`);
   }
   // Every life ends through a down, so a run with none saw nothing to compare.
   return {
     name: `${kind}s`,
     pass: wrong.length === 0 && (kind !== DOWN || seen.size > 0),
-    detail: wrong.length === 0 ? `${seen.size} ${kind}s, every page had each, spread max ${ms(worst)}` : wrong.slice(0, 4).join("; "),
+    detail:
+      wrong.length === 0
+        ? `${seen.size} ${kind}s, every page had each, spread max ${ms(worst)} (fails above ${DELIVERY_MAX_MS} ms), ${over} over ${INTERP_DELAY_MS} ms, ${slow} over ${DELIVERY_SLOW_MS} ms`
+        : wrong.slice(0, 4).join("; "),
   };
 }
 

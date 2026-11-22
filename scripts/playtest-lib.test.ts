@@ -195,10 +195,7 @@ describe("checks", () => {
     expect(checkRoster(r).pass).toBe(false);
   });
 
-  test("delivery fails on a tick that reached one page 150 ms after another, and on a tick late on every page; one page's gap alone is reported", () => {
-    const spread = game();
-    spread[1]!.frames[5]!.at += 150;
-    expect(checkDelivery(spread).pass).toBe(false);
+  test("delivery fails on a tick late on every page; one page's gap alone is reported", () => {
     const late = game();
     for (const l of late) for (const f of l.frames.slice(10)) f.at += INTERP_DELAY_MS;
     const r = checkDelivery(late);
@@ -209,6 +206,29 @@ describe("checks", () => {
     const o = checkDelivery(onePage);
     expect(o.detail).toContain("1 over 100 ms on one page only");
     expect(o.pass).toBe(true);
+  });
+
+  test("delivery (owner rule, #95): spreads fail only when more than 1% of shared ticks are over 150 ms, or one is over 250 ms; the count over 100 ms is reported", () => {
+    // Two pages, `n` shared ticks 50 ms apart; page B receives tick t `lag(t)` ms after page A.
+    const pair = (n: number, lag: (t: number) => number): PageLog[] =>
+      pageSpecs(2, "basic", 3).map((s, i) => {
+        const l = createLog(s);
+        addFrame(l, 0, 0, msg(JSON.stringify({ t: "welcome", v: 10, you: i + 1, arena: 1, build: "b", world: { w: 2400, h: 2400 }, tickMs: 50, tick: 0, roster: ROSTER })));
+        for (let t = 1; t <= n; t++) addFrame(l, t * 50 + (i === 1 ? lag(t) : 0), 0, msg(snapshot(t, { p: [], me: me(), ack: 0 })));
+        return l;
+      });
+    // The owner's busy-machine run: 3 of 300 ticks at 101 to 111 ms, everything else in step.
+    const owner = checkDelivery(pair(300, (t) => (t === 50 ? 101 : t === 150 ? 105 : t === 250 ? 110.7 : 0)));
+    expect(owner.pass).toBe(true);
+    expect(owner.detail).toContain("3 over 100 ms");
+    expect(owner.detail).toContain("0 over 150 ms");
+    // 3 of 300 over 150 ms is 1%: passes; 4 of 300 (1.3%) fails.
+    expect(checkDelivery(pair(300, (t) => (t % 100 === 0 ? 160 : 0))).pass).toBe(true);
+    const four = checkDelivery(pair(300, (t) => (t % 75 === 0 ? 160 : 0)));
+    expect(four.pass).toBe(false);
+    expect(four.detail).toContain("4 over 150 ms (1.3%");
+    // One tick over 250 ms fails on its own.
+    expect(checkDelivery(pair(300, (t) => (t === 10 ? 251 : 0))).pass).toBe(false);
   });
 
   test("positions fail when two pages had a player somewhere else at the same tick; a page's own row is not compared", () => {
@@ -235,6 +255,17 @@ describe("checks", () => {
     const none = game();
     for (const l of none) l.events = l.events.filter((e) => e.ev.kind !== "down");
     expect(checkEvents(none, "down").pass).toBe(false);
+  });
+
+  test("an event's cross-page spread fails only above 250 ms; one over 100 ms is reported", () => {
+    const slow = game();
+    slow[1]!.events.find((e) => e.ev.kind === "down")!.at += 120;
+    const r = checkEvents(slow, "down");
+    expect(r.pass).toBe(true);
+    expect(r.detail).toContain("1 over 100 ms");
+    const lost = game();
+    lost[1]!.events.find((e) => e.ev.kind === "down")!.at += 260;
+    expect(checkEvents(lost, "down").pass).toBe(false);
   });
 
   test("kills fail when one page's row for a bug carries other points; a kill only one view had is not compared", () => {
