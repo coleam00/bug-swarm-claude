@@ -82,6 +82,7 @@ import {
 } from "./hudline";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import {
+  QUEEN_BAR_BELOW,
   QUEEN_BAR_H,
   QUEEN_BAR_SHIFT,
   bannerAlpha,
@@ -1088,11 +1089,14 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   }
 
   /**
-   * The bottom of the HUD band, CSS px (#90): the score's, or your pickup timers' while any show.
+   * The bottom of the HUD band, CSS px (#90): the score's, or your pickup timers' while any show,
+   * or the hive queen's bar while she lives (#85).
    * Name tags and HELP stay below it (tag.ts tagBaselines). The line's scale is the last frame's.
    */
-  function hudBandBottom(icons: number): number {
-    const below = icons > 0 ? HUD_ICONS_BELOW + HUD_ICON_SIZE / 2 + ICON_RING_WIDTH / 2 : SCORE_HALF * line.scale;
+  function hudBandBottom(icons: number, queen: SnapshotQueen): number {
+    let below = icons > 0 ? HUD_ICONS_BELOW + HUD_ICON_SIZE / 2 + ICON_RING_WIDTH / 2 : SCORE_HALF * line.scale;
+    // The hive queen's health bar (#85) is in the band while she lives.
+    if (queen.length > 0 && queen[0] === 1) below = Math.max(below, QUEEN_BAR_BELOW + hudIconsShift(icons) + QUEEN_BAR_H);
     return hud.top + LINE_MIDDLE + below;
   }
 
@@ -1308,7 +1312,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     // Name tags over every robot, as canvas text (never HTML: names are typed by viewers), and
     // never under the HUD band (#90): a tag that would reach it flips under its robot.
-    const band = sc.out || !sc.me ? -Infinity : (hudBandBottom(iconCount(sc.me)) * dpr - oy) / k;
+    const band = sc.out || !sc.me ? -Infinity : (hudBandBottom(iconCount(sc.me), sc.queen) * dpr - oy) / k;
     ctx.font = NAME_FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";

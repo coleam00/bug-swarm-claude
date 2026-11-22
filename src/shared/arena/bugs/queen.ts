@@ -20,12 +20,13 @@ export const QUEEN_EVERY_WAVES = 5;
 /** Collision radius, units (drawn larger, draw/bugs/queen.ts). */
 export const QUEEN_RADIUS = 40;
 /**
- * Drift speed toward her goal, units per second: 40% of a player's top speed, so anyone can walk
- * away from her. The item's 45 kept her off the scripted aimers' screens (they keep away from bugs
- * and shoot only the nearest): 4 aimers never killed her within 180 s on 30 seeds (on 41b96f7). Set
- * with her hit points (queen.ts) by `bun run skill`'s queen line (#85).
+ * Drift speed toward her goal, units per second: half a player's top speed, so anyone can walk away
+ * from her. The item's 45 kept her off the scripted aimers' screens (they keep away from bugs and
+ * shoot only the nearest): 4 aimers never killed her within 180 s on 30 seeds (on 41b96f7). Set with
+ * her hit points (queen.ts) by `bun run skill`'s queen line (#85): 120 until #90's pickups pushed
+ * the 4-aimer median to 62.4 s; 150 reads 49.1 s on 45ac7bc.
  */
-export const QUEEN_SPEED = 120;
+export const QUEEN_SPEED = 150;
 /** She stops this far short of her goal, units. */
 export const GOAL_NEAR = 60;
 /** Ticks of drift before each tell, and the tell itself (1 s): a ring every 6 s. */
