@@ -1,25 +1,32 @@
-// `bun run playtest -- --url <base> [--players 4] [--seconds 90] [--scenario basic|revive|late-join]` (#94, #95):
+// `bun run playtest -- (--url <base> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart]` (#94, #95):
 // several real browser players in one arena at once, each a headless Chrome page (desktops with a
 // mouse and keyboard and phones with two-point touch, mixed) that joins through the start screen
 // with its own name and team and plays a scripted human (playtest-lib.ts decide) with real
 // Input.* events only. Each page's received frames, /api/top reads and life-over screen are
 // recorded; at the end the checks print a pass/fail table (exit 1 on a fail). Screenshots every
 // 15 s and the pages' logs go to .evidence/playtest/. It plays lives that save, so point it at a
-// server with a scratch DATA_DIR. Not part of `bun run check`: it needs Chrome and a server.
+// server with a scratch DATA_DIR, or pass --serve: the playtest then starts the production server
+// itself (`bun src/server/main.ts`, after `bun run build`) on a free port with a scratch DATA_DIR,
+// keeps its PID, and stops only that process (restart needs this, #95). Not part of `bun run
+// check`: it needs Chrome and a server.
 // Raw Chrome DevTools Protocol over Bun's WebSocket: no browser library.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOWN_S, WAVE_S } from "../src/shared/arena/constants";
+import { SHUTDOWN_BUDGET_MS, SHUTDOWN_MESSAGE } from "../src/server/serve";
 import { DOWN, EVENT, OVER, REVIVE, SNAPSHOT, parseServerMessage, type Snapshot } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import { RESTART_DELAY_MS } from "../src/web/game/guard";
 import {
+  AFTER_RESTART_S,
   AIM_FINGER,
   DASH_FINGER,
   LATE_JOIN_CAP_S,
   LATE_JOIN_WAVE,
   LATE_PLAY_S,
   MOVE_FINGER,
+  REJOIN_CAP_S,
+  RESTART_AT_S,
   SCENARIOS,
   USAGE,
   addFrame,
@@ -36,6 +43,7 @@ import {
   pageSpecs,
   parseArgs,
   runChecks,
+  serverEnv,
   table,
   touchLayout,
   touchPoints,
@@ -43,6 +51,7 @@ import {
   type PageLog,
   type PageSpec,
   type Plan,
+  type RestartReport,
   type TouchPoint,
 } from "./playtest-lib";
 
@@ -62,6 +71,10 @@ const TOP_TAIL_MS = 6000;
 const VICTIM_DOWN_S = 120;
 /** The revive scenario plays on past --seconds until the revive, at most this, s. */
 const REVIVE_WAIT_S = 180;
+/** --serve: the server must answer /api/top within this of being started, ms. */
+const SERVER_READY_MS = 15_000;
+/** --serve: after the IPC shutdown, the server must have exited by this, ms, or it is killed (by its PID). */
+const SERVER_STOP_MS = SHUTDOWN_BUDGET_MS + 2000;
 
 let args: ReturnType<typeof parseArgs>;
 try {
@@ -88,6 +101,92 @@ const now = () => performance.now();
 const secs = () => (now() - t0) / 1000;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const say = (s: string) => console.log(`${secs().toFixed(1).padStart(6)}s ${s}`);
+
+// ---- --serve: the playtest's own server ----
+
+type Server = { proc: ReturnType<typeof Bun.spawn>; pid: number; gen: number; log: string };
+let server: Server | null = null;
+let serverGen = 0;
+const dataDir = join(outDir, `data-${process.pid}`);
+const buildId = `playtest-${process.pid}`;
+let serverPort = 0;
+
+if (args.serve) {
+  if (!existsSync(join(root, "dist", "index.html"))) {
+    console.error("--serve plays the production build: run `bun run build` first");
+    process.exit(2);
+  }
+  rmSync(dataDir, { recursive: true, force: true });
+  mkdirSync(dataDir, { recursive: true });
+  // A free port, chosen once: main.ts prints the PORT it was given, and the restarted server must
+  // come back on the same one for the pages' rejoins to reach it.
+  const probe = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  serverPort = probe.port;
+  probe.stop(true);
+  args.url = `http://127.0.0.1:${serverPort}`;
+}
+
+/** Starts `bun src/server/main.ts` (--serve) with an IPC channel and waits until it answers. */
+async function startServer(): Promise<void> {
+  const log = join(outDir, `server-${process.pid}-${serverGen}.log`);
+  const proc = Bun.spawn([process.execPath, join("src", "server", "main.ts")], {
+    cwd: root,
+    env: serverEnv(process.env, serverPort, dataDir, buildId),
+    // Straight to a file: nothing to drain, so the server never stalls on a full pipe.
+    stdout: Bun.file(log),
+    stderr: Bun.file(log.replace(/\.log$/, ".err.log")),
+    ipc() {},
+  });
+  server = { proc, pid: proc.pid, gen: serverGen, log };
+  say(`server ${serverGen} started: pid ${proc.pid}, ${args.url}, DATA_DIR ${dataDir}, build ${buildId}`);
+  const end = now() + SERVER_READY_MS;
+  for (;;) {
+    if (proc.exitCode !== null) throw new Error(`server pid ${proc.pid} exited with ${proc.exitCode} before it answered (${log})`);
+    try {
+      if ((await fetch(`${args.url}/api/top`)).ok) break;
+    } catch {
+      // Not listening yet.
+    }
+    if (now() > end) throw new Error(`server pid ${proc.pid} did not answer within ${SERVER_READY_MS} ms (${log})`);
+    await wait(100);
+  }
+}
+
+/**
+ * Stops the playtest's server the way a redeploy does: the IPC shutdown message runs its graceful
+ * shutdown (on Windows a signal would be a hard kill). If it has not exited by SERVER_STOP_MS,
+ * that process, by the PID it was started with, is killed.
+ */
+async function stopServer(): Promise<Omit<RestartReport, "pid1"> | null> {
+  const srv = server;
+  if (!srv) return null;
+  server = null;
+  const asked = now();
+  if (srv.proc.exitCode === null) {
+    try {
+      srv.proc.send(SHUTDOWN_MESSAGE);
+    } catch (e) {
+      say(`server pid ${srv.pid}: the shutdown message failed: ${(e as Error).message}`);
+    }
+  }
+  let graceful = await Promise.race([srv.proc.exited.then(() => true), wait(SERVER_STOP_MS).then(() => false)]);
+  if (!graceful) {
+    say(`server pid ${srv.pid} still running ${SERVER_STOP_MS} ms after the shutdown message: killing that pid`);
+    srv.proc.kill();
+    await srv.proc.exited;
+  }
+  const ms = now() - asked;
+  const code = srv.proc.exitCode;
+  let logLine: string | null = null;
+  try {
+    logLine = readFileSync(srv.log, "utf8").split("\n").find((l) => l.startsWith("shutdown (")) ?? null;
+  } catch {
+    // No log.
+  }
+  say(`server ${srv.gen} (pid ${srv.pid}) stopped: exit ${code} after ${Math.round(ms)} ms${graceful ? "" : " (killed)"}${logLine ? `: ${logLine}` : ""}`);
+  graceful &&= code === 0;
+  return { pid0: srv.pid, code, ms, graceful, logLine };
+}
 
 // ---- Chrome ----
 
@@ -196,7 +295,8 @@ type Page = {
   overs: number;
   /** When "Play again" was last pressed (harness ms). */
   againAt: number;
-  tops: Map<string, number>;
+  /** /api/top responses whose body is pending: when they arrived, and the server lifetime then. */
+  tops: Map<string, { at: number; gen: number }>;
   maxBots: number;
   /** A snapshot reader per WebSocket the page opened (by DevTools request id). */
   readers: Map<string, ReturnType<typeof createSnapshotReader>>;
@@ -206,6 +306,8 @@ let cdp: Cdp | null = null;
 const pages: Page[] = [];
 let endPhase = false;
 let stopping = false;
+/** The restart scenario's restart is under way: the pages hold still. */
+let restarting = false;
 
 const key = (code: string) => {
   if (code === "Space") return { code, key: " ", windowsVirtualKeyCode: 32 };
@@ -299,15 +401,15 @@ async function openPage(spec: PageSpec): Promise<Page> {
       }
     } else if (method === "Network.webSocketFrameSent") addSent(pg.log, now(), String(p.response?.payloadData ?? ""));
     else if (method === "Network.responseReceived" && /\/api\/top(\?|$)/.test(new URL(p.response.url).pathname + new URL(p.response.url).search)) {
-      pg.tops.set(p.requestId, p.timestamp * 1000);
+      pg.tops.set(p.requestId, { at: p.timestamp * 1000, gen: pg.log.gen });
     } else if (method === "Network.loadingFinished" && pg.tops.has(p.requestId)) {
-      const at = pg.tops.get(p.requestId)!;
+      const { at, gen } = pg.tops.get(p.requestId)!;
       pg.tops.delete(p.requestId);
       cdp!
         .send("Network.getResponseBody", { requestId: p.requestId }, sessionId)
         .then((r) => {
           const body = JSON.parse(r.body) as { top?: { name: string; score: number }[] };
-          if (Array.isArray(body.top)) pg.log.tops.push({ at, rows: body.top.map((x) => ({ name: x.name, score: x.score })) });
+          if (Array.isArray(body.top)) pg.log.tops.push({ at, gen, rows: body.top.map((x) => ({ name: x.name, score: x.score })) });
         })
         .catch((e) => !stopping && say(`${spec.name} top 10 body: ${(e as Error).message}`));
     } else if (method === "Runtime.exceptionThrown") say(`${spec.name} page error: ${JSON.stringify(p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text).slice(0, 300)}`);
@@ -407,7 +509,7 @@ async function dispatch(pg: Page, intent: Intent, me: { x: number; y: number; vx
 /** One control step for a page: the life-over screen, or a decision and its input. */
 async function step(pg: Page): Promise<void> {
   const snap = pg.latest;
-  if (!snap) return;
+  if (!snap || restarting) return;
   if (pg.overAt !== null) {
     if (now() - pg.overAt < AGAIN_MS) return releaseAll(pg);
     const text: string | null = await evaluate(pg, `document.querySelector(".over-score")?.textContent ?? null`);
@@ -444,6 +546,33 @@ async function screenshots(label: string): Promise<void> {
   );
 }
 
+/**
+ * The restart scenario's restart: the pages hold still, the server is stopped through its graceful
+ * path (stopServer), every page's log moves to the next server lifetime once the old process has
+ * exited (so no frame of the new server can carry the old gen, nor one of the old the new), and the
+ * server is started again on the same port, DATA_DIR and build. The pages rejoin by themselves.
+ */
+async function restartServer(): Promise<RestartReport | null> {
+  restarting = true;
+  say("restarting the server (graceful: the IPC shutdown message)");
+  await screenshots("before-restart");
+  for (const pg of pages) {
+    while (pg.busy) await wait(10);
+    await releaseAll(pg).catch(() => {});
+  }
+  const stopped = await stopServer();
+  serverGen++;
+  for (const pg of pages) {
+    pg.log.gen = serverGen;
+    pg.latest = null;
+    pg.overAt = null;
+  }
+  restarting = false;
+  if (!stopped) return null;
+  await startServer();
+  return { ...stopped, pid1: server!.pid };
+}
+
 // ---- The run ----
 
 async function shutdown(): Promise<void> {
@@ -471,13 +600,16 @@ async function shutdown(): Promise<void> {
 process.on("SIGINT", () => {
   if (stopping) return;
   stopping = true;
-  say("interrupted: closing Chrome");
-  void shutdown().then(() => process.exit(130));
+  say(`interrupted: closing Chrome${server ? " and stopping the server" : ""}`);
+  void shutdown()
+    .then(() => stopServer())
+    .then(() => process.exit(130));
 });
 
 let code = 1;
 try {
   cdp = await connect(await devtoolsUrl());
+  if (args.serve) await startServer();
   const seed = Math.floor(Math.random() * 2 ** 31);
   const specs = pageSpecs(args.players, args.scenario, seed);
   say(`scenario ${args.scenario}: ${args.players} pages against ${args.url} for ${args.seconds} s`);
@@ -499,6 +631,10 @@ try {
   let victimDown = false;
   let revived = false;
   let lateAt: number | null = null;
+  // The restart scenario (#95): when it restarted, the report, and when every page had rejoined.
+  let restartReport: RestartReport | null = null;
+  let restartAt: number | null = null;
+  let rejoinedAt: number | null = null;
   const loop = setInterval(() => {
     for (const pg of pages) {
       if (pg.busy || stopping) continue;
@@ -543,9 +679,27 @@ try {
         break;
       }
     }
+    if (args.scenario === "restart" && restartAt === null && t >= RESTART_AT_S) {
+      restartAt = t;
+      restartReport = await restartServer();
+      if (!restartReport) break;
+    }
+    if (restartAt !== null && rejoinedAt === null) {
+      if (pages.every((p) => p.log.welcomes.some((w) => w.gen === serverGen))) {
+        rejoinedAt = secs() - start;
+        say(`every page rejoined server ${serverGen}, ${(rejoinedAt - restartAt).toFixed(1)} s after the restart began`);
+        await wait(1000);
+        await screenshots("rejoined");
+      } else if (t - restartAt > REJOIN_CAP_S) {
+        const out = pages.filter((p) => !p.log.welcomes.some((w) => w.gen === serverGen)).map((p) => p.spec.name);
+        say(`not rejoined ${REJOIN_CAP_S} s after the restart: ${out.join(", ")}`);
+        break;
+      }
+    }
     if (stopping) break;
     const lateDone = !lateSpec || (lateAt !== null && t >= lateAt + LATE_PLAY_S + 3);
-    if (t >= args.seconds && lateDone && (!victim || revived || t >= REVIVE_WAIT_S)) break;
+    const restartDone = args.scenario !== "restart" || (rejoinedAt !== null && t >= rejoinedAt + AFTER_RESTART_S);
+    if (t >= args.seconds && lateDone && restartDone && (!victim || revived || t >= REVIVE_WAIT_S)) break;
     await wait(200);
   }
   // End: everyone stops fighting until every life is over.
@@ -579,6 +733,7 @@ try {
   const results = runChecks(
     pages.map((p) => p.log),
     args.scenario,
+    args.scenario === "restart" ? { report: restartReport, budgetMs: SHUTDOWN_BUDGET_MS } : null,
   );
   console.log(`\n${table(results)}\n`);
   code = exitCode(results);
@@ -590,6 +745,20 @@ try {
   if (!stopping) {
     stopping = true;
     await shutdown();
+    await stopServer();
+  }
+  if (args.serve) {
+    // The scratch data is kept on a fail, for a look at what was saved.
+    if (code === 0) {
+      for (let i = 0; i < 20; i++) {
+        try {
+          rmSync(dataDir, { recursive: true, force: true });
+          break;
+        } catch {
+          await wait(250);
+        }
+      }
+    } else say(`the server's scratch data is kept at ${dataDir}`);
   }
 }
 process.exit(code);

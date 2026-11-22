@@ -64,7 +64,7 @@ export type ShutdownDeps = {
 };
 
 /**
- * The SIGTERM / SIGINT handler's work (main.ts wires the signals): stops the server (lives saved,
+ * The SIGTERM / SIGINT handler's work (main.ts wires the signals, and the IPC shutdown message): stops the server (lives saved,
  * sockets told to reconnect), closes the database and exits 0. If that has not finished within
  * `budgetMs` it exits 1 anyway. A second signal while it runs does nothing.
  */
@@ -88,6 +88,22 @@ export function gracefulShutdown(deps: ShutdownDeps): (signal: string) => Promis
       deps.exit(1);
     }
   };
+}
+
+/** The IPC message that stops the server gracefully, as SIGTERM does (#95). */
+export const SHUTDOWN_MESSAGE = "shutdown";
+
+/**
+ * Routes SHUTDOWN_MESSAGE from a parent process into the graceful shutdown (main.ts wires it). A
+ * parent that spawned the server with an IPC channel (the playtest's `--serve`, #95) restarts it
+ * this way, because on Windows a signal to a child is a hard kill: its SIGTERM handler never runs
+ * (measured with Bun 1.4.5: exit 143). Without an IPC channel nothing ever arrives. Any other
+ * message is ignored.
+ */
+export function onShutdownMessage(proc: { on(event: "message", listener: (m: unknown) => void): unknown }, shutdown: (why: string) => unknown): void {
+  proc.on("message", (m) => {
+    if (m === SHUTDOWN_MESSAGE) shutdown("ipc");
+  });
 }
 
 /**

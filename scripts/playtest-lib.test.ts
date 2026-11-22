@@ -6,6 +6,7 @@ import { checkName, TEAMS } from "../src/server/rules";
 import { dashButtonAt, DASH_BUTTON_RADIUS } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
 import {
+  AFTER_RESTART_S,
   AIM_FINGER,
   BURST_OFF_S,
   BURST_ON_S,
@@ -31,9 +32,11 @@ import {
   checkRoster,
   checkSameArena,
   checkScenarioLateJoin,
+  checkScenarioRestart,
   checkScenarioRevive,
   checkScore,
   chromeCandidates,
+  connGen,
   createLog,
   createPlan,
   decide,
@@ -46,22 +49,25 @@ import {
   rosterAt,
   rosterOf,
   runChecks,
+  serverEnv,
   shownNumber,
   table,
   touchLayout,
   touchPoints,
   type PageLog,
+  type RestartReport,
   type View,
 } from "./playtest-lib";
 
 describe("parseArgs", () => {
   test("defaults to 4 players, 90 s, basic, and strips a trailing slash", () => {
-    expect(parseArgs(["--url", "http://127.0.0.1:3000/"])).toEqual({ url: "http://127.0.0.1:3000", players: 4, seconds: 90, scenario: "basic", chrome: null, headed: false });
+    expect(parseArgs(["--url", "http://127.0.0.1:3000/"])).toEqual({ url: "http://127.0.0.1:3000", serve: false, players: 4, seconds: 90, scenario: "basic", chrome: null, headed: false });
   });
 
   test("takes both flag forms, --headed and a bare --", () => {
     expect(parseArgs(["--", "--url=https://x.test", "--players", "6", "--seconds=30", "--scenario", "revive", "--chrome", "/c", "--headed"])).toEqual({
       url: "https://x.test",
+      serve: false,
       players: 6,
       seconds: 30,
       scenario: "revive",
@@ -70,10 +76,26 @@ describe("parseArgs", () => {
     });
   });
 
+  test("--serve instead of --url: the playtest starts its own server; restart needs it (#95)", () => {
+    expect(parseArgs(["--serve", "--scenario", "restart"])).toMatchObject({ url: null, serve: true, scenario: "restart" });
+    expect(parseArgs(["--serve"]).scenario).toBe("basic");
+    expect(() => parseArgs(["--serve", "--url", "http://x"])).toThrow("pick one");
+    expect(() => parseArgs(["--url", "http://x", "--scenario", "restart"])).toThrow("restart needs --serve");
+    expect(() => parseArgs(["--serve=1"])).toThrow();
+    expect(() => parseArgs([])).toThrow("--url or --serve");
+  });
+
   test("refuses a missing url, unknown flags, unknown scenarios and out-of-range numbers", () => {
     for (const argv of [[], ["--url", "ftp://x"], ["--url", "nope"], ["--url", "http://x", "--players", "1"], ["--url", "http://x", "--players", "21"], ["--url", "http://x", "--seconds", "2.5"], ["--url", "http://x", "--scenario", "chaos"], ["--url", "http://x", "--bots", "3"], ["--url", "http://x", "--headed=1"], ["--url"]]) {
       expect(() => parseArgs(argv)).toThrow();
     }
+  });
+});
+
+describe("serverEnv", () => {
+  test("pins the port, scratch data and build; drops what would change the build, the interface or the wave", () => {
+    const env = serverEnv({ PATH: "/bin", RAILWAY_GIT_COMMIT_SHA: "abc", NODE_ENV: "production", BUG_SWARM_START_WAVE: "5", BUILD_ID: "old", PORT: "3000", UNSET: undefined }, 4567, "/tmp/d", "playtest-1");
+    expect(env).toEqual({ PATH: "/bin", PORT: "4567", DATA_DIR: "/tmp/d", BUILD_ID: "playtest-1" });
   });
 });
 
@@ -117,10 +139,10 @@ describe("pages and scenarios", () => {
     expect(SCENARIOS["late-join"].minPlayers).toBe(3);
   });
 
-  test("basic, revive and late-join run; the others name the issue that tracks them", () => {
+  test("basic, revive, late-join and restart run; the others name the issue that tracks them", () => {
     for (const name of SCENARIO_NAMES) {
       const s = SCENARIOS[name];
-      if (name === "basic" || name === "revive" || name === "late-join") expect(s.followUp).toBeNull();
+      if (name === "basic" || name === "revive" || name === "late-join" || name === "restart") expect(s.followUp).toBeNull();
       else expect(s.followUp).toBeGreaterThan(94);
     }
   });
@@ -168,7 +190,7 @@ function game(): PageLog[] {
     }
   });
   logs[0]!.screens.push({ over: 0, text: "60" });
-  logs[1]!.tops.push({ at: 40 * 50 + 2500, rows: [{ name: "PT-A", score: 60 }] });
+  logs[1]!.tops.push({ at: 40 * 50 + 2500, gen: 0, rows: [{ name: "PT-A", score: 60 }] });
   return logs;
 }
 
@@ -204,7 +226,7 @@ describe("checks", () => {
     logs[1]!.welcomes[0]!.arena = 4;
     expect(checkSameArena(logs).pass).toBe(false);
     const r = game();
-    r[1]!.events.push({ at: 3000, tick: 41, you: 2, ev: { t: "event", kind: "leave", id: 1 } });
+    r[1]!.events.push({ at: 3000, tick: 41, you: 2, gen: 0, ev: { t: "event", kind: "leave", id: 1 } });
     expect(checkRoster(r).pass).toBe(false);
   });
 
@@ -336,12 +358,12 @@ describe("checks", () => {
     // A full top 10 it does not reach: not expected there.
     const low = game();
     low[1]!.tops[0]!.rows = Array.from({ length: 10 }, (_, i) => ({ name: `p${i}`, score: 1000 - i }));
-    low[0]!.tops.push({ at: 40 * 50 + 2600, rows: low[1]!.tops[0]!.rows });
+    low[0]!.tops.push({ at: 40 * 50 + 2600, gen: 0, rows: low[1]!.tops[0]!.rows });
     expect(checkLifeOver(low).pass).toBe(true);
     expect(checkLifeOver(low).detail).toContain("0 later top 10 reads hold every ranking life, 1 pairs of pages' reads agree");
     // Two pages reading at once, no life ending between, see different top 10s.
     const differ = game();
-    differ[0]!.tops.push({ at: 40 * 50 + 2600, rows: [{ name: "PT-A", score: 70 }] });
+    differ[0]!.tops.push({ at: 40 * 50 + 2600, gen: 0, rows: [{ name: "PT-A", score: 70 }] });
     expect(checkLifeOver(differ).pass).toBe(false);
   });
 
@@ -444,6 +466,105 @@ describe("late join", () => {
     expect(r.pass).toBe(false);
     expect(r.detail).toContain("roster");
     expect(checkScenarioLateJoin(lateGame({ play: 100 })).pass).toBe(false);
+  });
+});
+
+// ---- Restart: the same game twice, on two server lifetimes that reuse ticks, ids and bug ids. ----
+
+const RESTART_SHIFT = 10_000;
+
+/** game() on server 0, `restarting` on each page, then game() again on server 1 (arena 1), with the fill bot (id 3) 7 units over. */
+function restartGame(): PageLog[] {
+  const logs = game();
+  const next = game();
+  logs.forEach((l, i) => {
+    const n = next[i]!;
+    l.errors.push({ at: 40 * 50 + 100, gen: 0, code: "restarting" });
+    l.gen = 1;
+    for (const w of n.welcomes) l.welcomes.push({ ...w, at: w.at + RESTART_SHIFT, gen: 1, arena: 1 });
+    for (const f of n.frames) {
+      const p = f.s.p.map((r): SnapshotPlayer => (r[0] === 3 ? [r[0], r[1] + 7, ...r.slice(2)] as SnapshotPlayer : r));
+      l.frames.push({ ...f, at: f.at + RESTART_SHIFT, hat: f.hat + RESTART_SHIFT, gen: 1, s: { ...f.s, p } });
+    }
+    for (const e of n.events) l.events.push({ ...e, at: e.at + RESTART_SHIFT, gen: 1 });
+    for (const x of n.sent) l.sent.push({ ...x, hat: x.hat + RESTART_SHIFT, gen: 1 });
+    for (const x of n.intents) l.intents.push({ ...x, hat: x.hat + RESTART_SHIFT, done: x.done + RESTART_SHIFT });
+  });
+  return logs;
+}
+
+const REPORT: RestartReport = { pid0: 11, pid1: 12, code: 0, ms: 600, graceful: true, logLine: "shutdown (ipc): 2 lives saved" };
+
+describe("server lifetimes (restart)", () => {
+  test("a welcome takes the log's gen; frames, events, inputs and errors take their connection's", () => {
+    const l = createLog(pageSpecs(2, "restart", 1)[0]!);
+    addFrame(l, 1, 1, welcome(1, 0, ROSTER));
+    addFrame(l, 2, 2, msg(snapshot(1, { p: [], me: me(), ack: 0 })));
+    // The harness moves to server 1 before a late frame of server 0's arrives: it keeps gen 0.
+    l.gen = 1;
+    addFrame(l, 3, 3, msg(snapshot(2, { p: [], me: me(), ack: 0 })));
+    addFrame(l, 4, 4, msg(JSON.stringify({ t: "error", code: "restarting" })));
+    expect(connGen(l)).toBe(0);
+    addFrame(l, 5, 5, welcome(1, 0, ROSTER));
+    addFrame(l, 6, 6, msg(snapshot(1, { p: [], me: me(), ack: 0 })));
+    addFrame(l, 7, 7, msg(JSON.stringify({ t: "event", kind: "join", id: 9, name: "X", team: "tabs" })));
+    addSent(l, 8, JSON.stringify({ t: "input", seq: 1, mx: 0, my: 0, aim: 0, fire: false, dash: false }));
+    expect(l.welcomes.map((w) => w.gen)).toEqual([0, 1]);
+    expect(l.frames.map((f) => f.gen)).toEqual([0, 0, 1]);
+    expect(l.errors).toEqual([{ at: 4, gen: 0, code: "restarting" }]);
+    expect([l.events[0]!.gen, l.sent[0]!.gen]).toEqual([1, 1]);
+  });
+
+  test("ticks, player ids and bug ids that start again on the new server are compared only within a lifetime", () => {
+    const results = runChecks(restartGame(), "restart", { report: null, budgetMs: 4500 });
+    for (const r of results.filter((x) => x.name !== "restart scenario")) expect(`${r.name}: ${r.pass} ${r.detail}`).toBe(`${r.name}: true ${r.detail}`);
+    const byName = Object.fromEntries(results.map((r) => [r.name, r.detail]));
+    expect(byName["same arena"]).toBe("server 0: arena 3; server 1: arena 1");
+    expect(byName.positions).toContain("80 player rows");
+    expect(byName.delivery).toContain("80 shared ticks");
+    expect(byName.delivery).toContain("restart gap");
+    expect(byName.delivery).toContain("0 ticks late from the server");
+    expect(byName.downs).toContain("2 downs");
+    expect(byName.score).toContain("4 life spans");
+  });
+
+  test("same arena fails when the pages land in different arenas on the new server, or one never rejoins", () => {
+    const split = restartGame();
+    split[1]!.welcomes[1]!.arena = 2;
+    expect(checkSameArena(split).pass).toBe(false);
+    const gone = restartGame();
+    gone[1]!.welcomes.pop();
+    expect(checkSameArena(gone).detail).toContain("never joined: PT-B (server 1)");
+  });
+
+  test("the restart scenario passes on a graceful stop, restarting on every page, one new welcome on the same build and play after", () => {
+    // Long enough on the new server: stretch each page's last gen-1 frame to AFTER_RESTART_S on.
+    const long = () => {
+      const logs = restartGame();
+      for (const l of logs) {
+        const f = l.frames[l.frames.length - 1]!;
+        l.frames.push({ ...f, at: f.at + AFTER_RESTART_S * 1000, s: { ...f.s, tick: f.s.tick + AFTER_RESTART_S * 20 } });
+      }
+      return logs;
+    };
+    const ok = checkScenarioRestart(long(), REPORT, 4500);
+    expect(ok.detail).toContain("server 11 stopped gracefully");
+    expect(ok.pass).toBe(true);
+    expect(checkScenarioRestart(long(), null, 4500).pass).toBe(false);
+    expect(checkScenarioRestart(long(), { ...REPORT, graceful: false, code: null }, 4500).pass).toBe(false);
+    expect(checkScenarioRestart(long(), { ...REPORT, code: 1 }, 4500).pass).toBe(false);
+    expect(checkScenarioRestart(long(), { ...REPORT, ms: 5000 }, 4500).pass).toBe(false);
+    const untold = long();
+    untold[0]!.errors = [];
+    expect(checkScenarioRestart(untold, REPORT, 4500).detail).toContain("never told restarting");
+    const never = long();
+    never[1]!.welcomes.pop();
+    expect(checkScenarioRestart(never, REPORT, 4500).detail).toContain("0 welcomes from the new server");
+    const build = long();
+    build[0]!.welcomes[1]!.build = "new";
+    expect(checkScenarioRestart(build, REPORT, 4500).detail).toContain("rejoined build new");
+    // restartGame alone plays 2 s on the new server.
+    expect(checkScenarioRestart(restartGame(), REPORT, 4500).detail).toContain("played 2.0 s on the new server");
   });
 });
 
