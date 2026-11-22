@@ -20,14 +20,16 @@ describe("parseBoard", () => {
       teams: { tabs: 70, spaces: 30, nobody: 5 },
       more: true,
       playing: 15,
-      arenas: [{ id: 3, players: 14, wave: 7, bots: 6 }, { id: 4, players: 1, wave: 1 }],
+      arenas: [{ id: 3, players: 14, wave: 7, bots: 6, queen: 64 }, { id: 4, players: 1, wave: 1, queen: null }, { id: 5, players: 2, wave: 2 }],
     };
     expect(parseBoard(body)).toEqual({
       top: [{ name: "Ann", score: 50 }],
       teams: { tabs: 70, spaces: 30 },
       playing: 15,
-      arenas: [{ id: 3, players: 14, wave: 7 }, { id: 4, players: 1, wave: 1 }],
+      // A missing queen (an older server) reads as none.
+      arenas: [{ id: 3, players: 14, wave: 7, queen: 64 }, { id: 4, players: 1, wave: 1, queen: null }, { id: 5, players: 2, wave: 2, queen: null }],
     });
+    for (const queen of [1, 100]) expect(parseBoard({ ...body, arenas: [{ id: 1, players: 1, wave: 5, queen }] })?.arenas[0]!.queen).toBe(queen);
     expect(parseBoard({ top: [], teams: { tabs: 0, spaces: 0 }, playing: 0, arenas: [] })).toEqual(board([]));
     // No cap on how many arenas are open.
     const many = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, players: 20, wave: 999 }));
@@ -62,6 +64,12 @@ describe("parseBoard", () => {
       { ...ok, arenas: [{ ...arena, players: -1 }] },
       { ...ok, arenas: [{ ...arena, players: "1" }] },
       { ...ok, arenas: [{ ...arena, wave: 2.5 }] },
+      // A queen's health is a whole percent from 1 to 100 (#102).
+      { ...ok, arenas: [{ ...arena, queen: 0 }] },
+      { ...ok, arenas: [{ ...arena, queen: 101 }] },
+      { ...ok, arenas: [{ ...arena, queen: 64.5 }] },
+      { ...ok, arenas: [{ ...arena, queen: "64" }] },
+      { ...ok, arenas: [{ ...arena, queen: true }] },
     ]) {
       expect(parseBoard(bad)).toBeNull();
     }
@@ -173,7 +181,7 @@ test("the board's DOM code never writes HTML, so names always render as text", (
 });
 
 describe("playing now and the arena pills (#74)", () => {
-  const arenas = (n: number): LiveArena[] => Array.from({ length: n }, (_, i) => ({ id: i + 1, players: 20, wave: 3 }));
+  const arenas = (n: number): LiveArena[] => Array.from({ length: n }, (_, i) => ({ id: i + 1, players: 20, wave: 3, queen: null }));
 
   test("the count is formatted like scores", () => {
     expect(boardView(null, { ...board([]), playing: 1234 }).playing).toBe("1,234");
@@ -182,8 +190,28 @@ describe("playing now and the arena pills (#74)", () => {
 
   test("one pill per arena, reading 'Arena <id> · <people> · wave <wave>', by id", () => {
     expect(arenaPills([], 4)).toEqual({ pills: [], more: 0 });
-    expect(arenaPills([{ id: 3, players: 14, wave: 7 }], 4)).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7" }], more: 0 });
-    expect(arenaPills([{ id: 5, players: 1, wave: 1 }, { id: 2, players: 20, wave: 4 }], 4).pills.map((p) => p.id)).toEqual([2, 5]);
+    expect(arenaPills([{ id: 3, players: 14, wave: 7, queen: null }], 4)).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7", queen: null }], more: 0 });
+    expect(arenaPills([{ id: 5, players: 1, wave: 1, queen: null }, { id: 2, players: 20, wave: 4, queen: null }], 4).pills.map((p) => p.id)).toEqual([2, 5]);
+  });
+
+  test("an arena with a hive queen alive adds 'QUEEN <health>%'; the others add nothing (#102)", () => {
+    const { pills, more } = arenaPills(
+      [
+        { id: 2, players: 12, wave: 10, queen: 64 },
+        { id: 3, players: 4, wave: 9, queen: null },
+      ],
+      4,
+    );
+    expect(pills).toEqual([
+      { id: 2, text: "Arena 2 · 12 · wave 10", queen: "QUEEN 64%" },
+      { id: 3, text: "Arena 3 · 4 · wave 9", queen: null },
+    ]);
+    expect(more).toBe(0);
+    // A queen never changes the order or the '+N more' count.
+    const queens = arenas(5).map((a) => ({ ...a, queen: 50 }));
+    const over = arenaPills(queens, 4);
+    expect(over.pills.map((p) => p.id)).toEqual([1, 2, 3]);
+    expect(over.more).toBe(2);
   });
 
   test("up to the slots, every arena shows; past them the last slot is '+N more' for the rest", () => {
