@@ -6,9 +6,9 @@
 // (#60) is printed beside the first gate and against the aimer, not gated; so is the server's fill
 // bot (#66), placed between 2x the mover and the aimer. Per bug kind (#65) it also prints how many
 // of each spawned in a life and how many hits each landed (the first gate's lives, played alone),
-// and per pickup (#73) how many the player took, how many hits a shield blocked and how many bugs
-// its review laser shots hit. Every gate is played with pickups dropping. Tested in
-// skill-lib.test.ts on a few seeds.
+// and per pickup (#73) how many the player took, how many hits a shield blocked, how many bugs
+// its review laser shots hit and how many its refactor bombs killed (#78). Every gate is played
+// with pickups dropping. Tested in skill-lib.test.ts on a few seeds.
 import { BUG_KINDS, DASH_TICKS, DT, PICKUP_IDS, WORLD_H, WORLD_W, type BugKind, type PickupId } from "../src/shared/arena/constants";
 import { createRng, type Rng } from "../src/shared/arena/rng";
 import {
@@ -42,11 +42,11 @@ function perPickup(): PerPickup {
   return Object.fromEntries(PICKUP_IDS.map((k) => [k, 0])) as PerPickup;
 }
 
-/** One life's pickups (#73): taken by id, hits its shields blocked, bugs its laser shots hit. */
-export type PickupCounts = { taken: PerPickup; blocks: number; laserHits: number };
+/** One life's pickups (#73): taken by id, hits its shields blocked, bugs its laser shots hit, bugs its bombs killed (#78). */
+export type PickupCounts = { taken: PerPickup; blocks: number; laserHits: number; bombKills: number };
 
 function pickupCounts(): PickupCounts {
-  return { taken: perPickup(), blocks: 0, laserHits: 0 };
+  return { taken: perPickup(), blocks: 0, laserHits: 0, bombKills: 0 };
 }
 
 /** Adds the last step's pickups for player `id` to `c`. */
@@ -55,6 +55,7 @@ function countPickups(state: ArenaState, id: number, c: PickupCounts): void {
   for (const x of ev.pickups) if (x.player === id) c.taken[x.kind]++;
   for (const b of ev.blocks) if (b === id) c.blocks++;
   for (const o of ev.laserHits) if (o === id) c.laserHits++;
+  for (const o of ev.bombKills) if (o === id) c.bombKills++;
 }
 
 /** One life's result: what the drop-in gates read. */
@@ -156,7 +157,7 @@ export type PolicySummary = {
   medianSpawned: PerKind;
   /** Hits taken from each kind in a life, median. */
   medianTouches: PerKind;
-  /** Pickups a life (#73): taken by id, shield blocks and laser hits, median and mean. */
+  /** Pickups a life (#73): taken by id, shield blocks, laser hits and bomb kills, median and mean. */
   pickups: { median: PickupCounts; mean: PickupCounts };
 };
 
@@ -211,6 +212,7 @@ export function pickupStats(lives: readonly PickupCounts[]): { median: PickupCou
   for (const id of PICKUP_IDS) [median.taken[id], mean.taken[id]] = of((c) => c.taken[id]);
   [median.blocks, mean.blocks] = of((c) => c.blocks);
   [median.laserHits, mean.laserHits] = of((c) => c.laserHits);
+  [median.bombKills, mean.bombKills] = of((c) => c.bombKills);
   return { median, mean };
 }
 
@@ -286,12 +288,12 @@ export function formatSkill(r: SkillReport): string[] {
   for (const p of r.policies) {
     lines.push(`${p.policy.padEnd(8)}${BUG_KINDS.map((k) => `${k} ${p.medianSpawned[k]} / ${p.medianTouches[k]}`).join(", ")}`);
   }
-  lines.push("pickups a life, median (mean): taken by id, hits blocked by a shield, bugs hit by laser shots");
+  lines.push("pickups a life, median (mean): taken by id, hits blocked by a shield, bugs hit by laser shots, bugs killed by bombs");
   for (const p of r.policies) {
     const { median: m, mean: a } = p.pickups;
     const v = (x: number, y: number) => `${x} (${y.toFixed(1)})`;
     lines.push(
-      `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}`,
+      `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}, bomb kills ${v(m.bombKills, a.bombKills)}`,
     );
   }
   if (r.trivial) lines.push("note: the mover's median score is 0, so the gate is met trivially; it measured nothing");

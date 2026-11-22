@@ -214,6 +214,8 @@ export type ArenaEvents = {
   blocks: number[];
   /** The owner of each bug hit by a review laser shot (for `bun run skill`; not sent). */
   laserHits: number[];
+  /** The taker of each bug a refactor bomb killed (#78; for `bun run skill`; not sent: the kill is in `kills`). */
+  bombKills: number[];
 };
 
 export type ArenaState = {
@@ -251,7 +253,7 @@ export function createArena(seed: number): ArenaState {
     nextPickupId: 1,
     // Not seed ^ 0x5bd1e995: skill-lib seeds the policies' own generators with that.
     dropRng: createRng(seed ^ 0x68e31da4),
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [] },
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], bombKills: [] },
   };
 }
 
@@ -645,7 +647,8 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  *    shield blocks one: strikePlayer); the last hit puts a player down (bugs/);
  * 4. shots: travel, hits (a review laser shot pierces), kills, misses (combat.ts);
  * 5. pickups: effects count down, floor pickups age, this step's kills drop, players who are up
- *    take what they touch (pickups/);
+ *    take what they touch (a refactor bomb goes off at the take, its kills drop too and its dead
+ *    bugs leave in the same step) (pickups/);
  * 6. downs: revive progress, revives and bleed-outs (downs.ts);
  * 7. spawn protection counts down (after contact, so a join and a respawn are both protected for
  *    SPAWN_PROTECT_S of contact steps), and the tick counts.
@@ -664,6 +667,7 @@ export function stepArena(state: ArenaState): void {
   ev.pickups.length = 0;
   ev.blocks.length = 0;
   ev.laserHits.length = 0;
+  ev.bombKills.length = 0;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;

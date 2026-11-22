@@ -173,7 +173,12 @@ export function stepShots(state: ArenaState): void {
     state.shots[keep++] = s;
   }
   state.shots.length = keep;
-  // Bugs killed this step leave the arena.
+  sweepDeadBugs(state);
+}
+
+/** Bugs killed this step (hp at 0 or below) leave the arena: after shots, and after a refactor bomb (#78). */
+export function sweepDeadBugs(state: ArenaState): void {
+  const bugs = state.bugs;
   let alive = 0;
   for (let i = 0; i < bugs.length; i++) {
     const b = bugs[i]!;

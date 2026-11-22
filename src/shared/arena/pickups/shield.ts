@@ -12,10 +12,10 @@ export const SHIELD_FLOOR_S = 12;
 export const shield: PickupDef = {
   id: "shield",
   label: "Test shield!",
-  // Each kind's pickup chance (crawler 1.5%, dasher 3%: half the item's starting 3% and 6%, set by the
-  // late-joiner gate, #73), split evenly over the pickups. The spitter (#72) drops as the dasher does;
-  // a glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.0075, dasher: 0.015, spitter: 0.015, glob: 0 },
+  // Each kind's pickup chance, split evenly over the 3 pickups (#78): crawler 1.5%, dasher and spitter
+  // 3% in all (half the item's starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72,
+  // drops as the dasher does). A glob is a shot in flight and drops nothing.
+  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0 },
   floorTicks: Math.round(SHIELD_FLOOR_S / DT),
   durationTicks: Math.round(SHIELD_S / DT),
 };
