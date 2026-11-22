@@ -199,7 +199,7 @@ export const HITS_PER_LIFE = 3;
 export const INVULN_S = 1;
 /** A life over waits this long before a press respawns you, seconds (release 1's restart guard). */
 export const RESPAWN_DELAY_S = 0.8;
-/** The arena's wave clock, seconds per wave. Shown, and unlocks bug kinds (#65); never spawn volume. */
+/** The arena's wave clock, seconds per wave. Shown, unlocks bug kinds (#65) and brings a hive queen every fifth wave (#85); never spawn volume. */
 export const WAVE_S = 30;
 /** Streak multiplier steps: [hits in a row, multiplier], highest first. Below the last: x1. */
 export const STREAK_STEPS: readonly (readonly [number, number])[] = [

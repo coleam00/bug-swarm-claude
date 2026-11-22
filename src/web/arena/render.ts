@@ -429,6 +429,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   // The hive queen's bar and banners (#85): laid out per frame into these, texts measured on change.
   const bar: QueenBar = { x: 0, labelY: 0, y: 0, w: 0 };
   const marker: MarkerLook = { pulse: 0, left: 0 };
+  const arrowSafe: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   let bannerFor = "";
   let bannerSub = "";
   let comingW = 0;
@@ -976,10 +977,18 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalAlpha = 1;
   }
 
-  /** The arrow at the screen's edge to the hive queen while she is off screen, at any distance (#85). */
+  /**
+   * The arrow at the screen's edge to the hive queen while she is off screen, at any distance (#85),
+   * kept below the minimap's bottom so the HUD line, her bar and the minimap stay clear.
+   */
   function drawQueenArrow(cam: Camera, q: SnapshotQueen, t: number): void {
     if (q.length === 0 || q[0] !== 1) return;
-    if (!edgeArrow(cam, cssW, cssH, safe, cam.x, cam.y, q[2], q[3], arrow, Infinity)) return;
+    // Never in the top band: it stays below the minimap, so it covers neither the HUD line, her bar nor the minimap.
+    arrowSafe.left = safe.left;
+    arrowSafe.right = safe.right;
+    arrowSafe.bottom = safe.bottom;
+    arrowSafe.top = Math.max(safe.top, minimap.y + minimap.size);
+    if (!edgeArrow(cam, cssW, cssH, arrowSafe, cam.x, cam.y, q[2], q[3], arrow, Infinity)) return;
     ctx.save();
     ctx.translate(arrow.x, arrow.y);
     ctx.rotate(arrow.angle);
