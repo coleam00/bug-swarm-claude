@@ -13,6 +13,11 @@
 // remount never leaves a second socket (each one's leaving would save a life).
 // Pickups (#73): the floor comes in each snapshot's `f` and is drawn with the bugs; a `pickup`
 // event floats the pickup's label over whoever took it, and a `block` event pops their shield.
+// Watching (#79): `startWatch` runs the same arena for the start screen with no robot of its own:
+// a watch connection (net.ts watchArena), no input listeners at all (the name field keeps its
+// keys), no HUD, a camera that drifts between the action (drift.ts), and a backing store at most
+// 1x (it is drawn blurred). `handoff()` stops it and hands its open connection to startArena,
+// which plays on the same socket.
 import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
 import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
@@ -44,6 +49,7 @@ import { STATS_KEY, STEERING_KEYS } from "../game/keys";
 import { GLOW_SHIELD, GLOW_SHOT } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
+import { createDrift, stepDrift } from "./drift";
 import { BUG_DRAW } from "./draw/bugs";
 import { PICKUP_DRAW } from "./draw/pickups";
 import {
@@ -74,7 +80,7 @@ import {
   type BugSpan,
 } from "./interp";
 import { markUpdateReload } from "../player";
-import { connectArena } from "./net";
+import { connectArena, watchArena, type Connection, type PlayHandlers, type WatchConnection } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
 import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
@@ -114,6 +120,39 @@ export type ArenaHandle = {
   stop(): void;
 };
 
+/** What the watched arena tells the start screen. */
+export type WatchEvents = {
+  /** True on the first snapshot after a welcome (the arena is on screen); false when the connection drops. */
+  live(on: boolean): void;
+  /** The server will not take a watcher (its cap, or another version): nothing reconnects. */
+  unavailable(): void;
+};
+
+export type WatchHandle = {
+  /**
+   * Stops the view and hands over its connection, still open, for startArena to play on; null
+   * (closed) when it is not open.
+   */
+  handoff(): WatchConnection | null;
+  /** Stops everything startWatch started, the connection included unless handed off. */
+  stop(): void;
+};
+
+/** Each watched frame's cost (interpolation, effects and draw) in ms, a ring of the last COST_FRAMES. Dev server only. */
+export type WatchRecord = { work: Float64Array; count: number };
+
+declare global {
+  interface Window {
+    bugSwarmWatch?: WatchRecord;
+  }
+}
+
+const COST_FRAMES = 3600;
+
+type Mode =
+  | { watch: false; player: ArenaPlayer; on: ArenaEvents; adopt: WatchConnection | null }
+  | { watch: true; on: WatchEvents };
+
 /** A touch screen's main pointer: the dash button shows. */
 function coarsePointer(): boolean {
   try {
@@ -123,7 +162,23 @@ function coarsePointer(): boolean {
   }
 }
 
-export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: ArenaEvents): ArenaHandle {
+/**
+ * Joins and plays. `adopt` is the start screen's watching connection (WatchHandle.handoff): the
+ * hello goes on it rather than on a new socket.
+ */
+export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: ArenaEvents, adopt: WatchConnection | null = null): ArenaHandle {
+  const run = runArena(canvas, { watch: false, player, on, adopt });
+  return { respawn: run.respawn, stop: run.stop };
+}
+
+/** Watches an arena behind the start screen (#79). */
+export function startWatch(canvas: HTMLCanvasElement, on: WatchEvents): WatchHandle {
+  const run = runArena(canvas, { watch: true, on });
+  return { handoff: run.handoff, stop: run.stop };
+}
+
+function runArena(canvas: HTMLCanvasElement, mode: Mode) {
+  const watch = mode.watch;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("no 2d canvas");
   const renderer = createArenaRenderer(ctx);
@@ -163,6 +218,10 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   let firstSpawned = false;
   let stopped = false;
   let raf = 0;
+  /** Watching: on screen since the last welcome; and the camera's next frame jumps to its first focus. */
+  let live = false;
+  let snapNext = true;
+  const drift = createDrift();
 
   const robotFor = (id: number, n: string, t: Team): Robot => {
     let r = roster.get(id);
@@ -209,12 +268,20 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     overAt = performance.now();
     // The life-over screen covers the canvas: a button or stick held now never sees its release.
     releaseAll(controls);
-    on.over({ score, kills, seconds }, overAt);
+    if (!mode.watch) mode.on.over({ score, kills, seconds }, overAt);
+  };
+
+  const setLive = (on: boolean) => {
+    if (live === on || !mode.watch) return;
+    live = on;
+    mode.on.live(on);
   };
 
   const onMessage = (m: ServerMessage) => {
     if (m.t === WELCOME) {
-      you = m.you;
+      // Watching, you is 0: no robot is yours (a kill `by` 0 is nobody's, never yours).
+      you = m.you === 0 ? null : m.you;
+      snapNext = true;
       spawned = false;
       alive = false;
       down = false;
@@ -233,6 +300,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5] === 1);
       for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
+      if (watch) return setLive(true);
       Object.assign(me, m.me);
       haveMe = true;
       if (noteMe(hudFx, m.me)) kick(shake, HIT_SHAKE);
@@ -252,13 +320,13 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       const cameBack = nowAlive && !alive;
       alive = nowAlive;
       down = nowDown;
-      if (cameBack) {
+      if (cameBack && !mode.watch) {
         overAt = null;
         if (!firstSpawned) {
           firstSpawned = true;
-          on.firstSpawn();
+          mode.on.firstSpawn();
         }
-        on.alive();
+        mode.on.alive();
       }
     } else if (m.t === EVENT) {
       if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);
@@ -284,20 +352,43 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     }
   };
 
-  const conn = connectArena(
-    { name: player.name, team: player.team, player: player.id, touch: () => controls.touched || coarsePointer() },
-    // A redeploy with a new build: load it and go straight back in (the life before was saved by
-    // the server).
-    {
+  let conn: Connection;
+  let watching: WatchConnection | null = null;
+  if (mode.watch) {
+    const on = mode.on;
+    conn = watching = watchArena({
+      message: onMessage,
+      dropped: () => setLive(false),
+      unavailable: () => {
+        setLive(false);
+        on.unavailable();
+      },
+    });
+  } else {
+    const { player, on, adopt } = mode;
+    const hello = { name: player.name, team: player.team, player: player.id, touch: () => controls.touched || coarsePointer() };
+    const handlers: PlayHandlers = {
       message: onMessage,
       status: on.status,
       refused: on.refused,
+      // A redeploy with a new build: load it and go straight back in (the life before was saved by
+      // the server).
       newBuild: () => {
         markUpdateReload();
         location.reload();
       },
-    },
-  );
+    };
+    let adopted: Connection | null = null;
+    if (adopt) {
+      try {
+        adopted = adopt.play(hello, handlers);
+      } catch {
+        // Closed since the handoff (refused, or given up): a fresh socket instead.
+        adopt.close();
+      }
+    }
+    conn = adopted ?? connectArena(hello, handlers);
+  }
 
   // Layout: the canvas at device resolution, the camera's view, the safe-area insets.
   const probe = document.createElement("div");
@@ -305,7 +396,8 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   document.body.appendChild(probe);
   const insets: Insets = { top: 0, right: 0, bottom: 0, left: 0 };
   const resize = () => {
-    const dpr = window.devicePixelRatio || 1;
+    // Watching, the view is blurred behind the start screen: 1x is plenty, and cheaper.
+    const dpr = watch ? Math.min(1, window.devicePixelRatio || 1) : window.devicePixelRatio || 1;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     canvas.width = Math.round(w * dpr);
@@ -384,15 +476,18 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
   };
 
   window.addEventListener("resize", resize);
-  window.addEventListener("keydown", onKeyDown);
-  window.addEventListener("keyup", onKeyUp);
-  window.addEventListener("blur", onBlur);
-  canvas.addEventListener("pointerdown", onPointerDown);
-  canvas.addEventListener("pointermove", onPointerMove);
-  canvas.addEventListener("pointerup", onPointerUp);
-  canvas.addEventListener("pointercancel", onPointerUp);
-  canvas.addEventListener("contextmenu", onContextMenu);
-  document.addEventListener("visibilitychange", onVisibility);
+  // Watching takes no input: the keydown handler would eat WASD and Space typed into the name field.
+  if (!watch) {
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    canvas.addEventListener("pointerdown", onPointerDown);
+    canvas.addEventListener("pointermove", onPointerMove);
+    canvas.addEventListener("pointerup", onPointerUp);
+    canvas.addEventListener("pointercancel", onPointerUp);
+    canvas.addEventListener("contextmenu", onContextMenu);
+    document.addEventListener("visibilitychange", onVisibility);
+  }
 
   const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false };
   const self = { x: 0, y: 0 };
@@ -437,12 +532,15 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     hud: hudFx,
     players: 0,
     out: false,
-    sticks: [controls.move, controls.aimStick],
+    watch,
+    sticks: watch ? [] : [controls.move, controls.aimStick],
     stats: null,
     dashButton: null,
     dashReady: 1,
   };
   const meter = createFpsMeter();
+  const record: WatchRecord | null = watch && import.meta.env.DEV ? { work: new Float64Array(COST_FRAMES), count: 0 } : null;
+  if (record) window.bugSwarmWatch = record;
   let statsReading = -1;
   let statsText = "";
   let acc = 0;
@@ -526,6 +624,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
 
   const frame = (now: number) => {
     if (stopped) return;
+    const t0 = record ? performance.now() : 0;
     const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
     last = now;
     if (tickFps(meter, dt)) statsReading = -1;
@@ -609,6 +708,15 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     }
     if (selfIndex >= 0) followCamera(cam, drawn[selfIndex]!.x, drawn[selfIndex]!.y, dt);
     fillBugs(rt);
+    if (watch && drawn.length > 0) {
+      if (snapNext) {
+        // A new arena on screen: start on its first focus rather than panning in from afar.
+        drift.hold = 0;
+        stepDrift(drift, cam, drawn, drawn.length, bugs, 0);
+        snapCamera(cam, drift.x, drift.y);
+        snapNext = false;
+      } else stepDrift(drift, cam, drawn, drawn.length, bugs, dt);
+    }
 
     if (showStats && statsReading === -1) {
       statsReading = 0;
@@ -628,9 +736,30 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
     scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
     renderer.draw(cam, scene);
+    if (record) {
+      record.work[record.count % COST_FRAMES] = performance.now() - t0;
+      record.count++;
+    }
     raf = requestAnimationFrame(frame);
   };
   raf = requestAnimationFrame(frame);
+
+  /** Undoes everything but the connection. */
+  const halt = () => {
+    stopped = true;
+    cancelAnimationFrame(raf);
+    window.removeEventListener("resize", resize);
+    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener("keyup", onKeyUp);
+    window.removeEventListener("blur", onBlur);
+    canvas.removeEventListener("pointerdown", onPointerDown);
+    canvas.removeEventListener("pointermove", onPointerMove);
+    canvas.removeEventListener("pointerup", onPointerUp);
+    canvas.removeEventListener("pointercancel", onPointerUp);
+    canvas.removeEventListener("contextmenu", onContextMenu);
+    document.removeEventListener("visibilitychange", onVisibility);
+    probe.remove();
+  };
 
   return {
     respawn() {
@@ -638,21 +767,16 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       pressRespawn(controls);
       return true;
     },
+    handoff(): WatchConnection | null {
+      if (stopped || !watching) return null;
+      halt();
+      if (watching.open) return watching;
+      watching.close();
+      return null;
+    },
     stop() {
       if (stopped) return;
-      stopped = true;
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-      canvas.removeEventListener("pointerdown", onPointerDown);
-      canvas.removeEventListener("pointermove", onPointerMove);
-      canvas.removeEventListener("pointerup", onPointerUp);
-      canvas.removeEventListener("pointercancel", onPointerUp);
-      canvas.removeEventListener("contextmenu", onContextMenu);
-      document.removeEventListener("visibilitychange", onVisibility);
-      probe.remove();
+      halt();
       conn.close();
     },
   };

@@ -1,7 +1,8 @@
 // The start screen's backdrop on a canvas: the simulation in sim.ts stepped and drawn every
 // frame. It is decoration: the canvas takes no input, the loop stops while the tab is hidden and
-// when the screen goes, and with reduced motion it draws one still frame. This is the seam
-// release 2 swaps for the live arena: the start screen mounts whatever this module starts.
+// when the screen goes, and with reduced motion it draws one still frame. Since #79 it is the
+// start screen's fallback under the live arena: `hold(true)` stops its loop (its last frame stays)
+// while the live arena covers it, `hold(false)` runs it again when the live arena goes.
 import { createParticles, spawnBurst, updateParticles, BURST_COUNT } from "../game/fx/particles";
 import { createTrail, updateTrail } from "../game/fx/trail";
 import { createRng } from "../game/rng";
@@ -28,7 +29,7 @@ declare global {
 
 const MEASURE = import.meta.env.DEV;
 
-export function startBackdrop(canvas: HTMLCanvasElement): { stop(): void } {
+export function startBackdrop(canvas: HTMLCanvasElement): { stop(): void; hold(on: boolean): void } {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("no 2d canvas");
   const painter = createBackdropDraw(ctx);
@@ -45,6 +46,7 @@ export function startBackdrop(canvas: HTMLCanvasElement): { stop(): void } {
   let raf = 0;
   let last: number | null = null;
   let stopped = false;
+  let held = false;
 
   const advance = (dt: number) => {
     stepBackdrop(sim, dt, onPop);
@@ -74,7 +76,7 @@ export function startBackdrop(canvas: HTMLCanvasElement): { stop(): void } {
   };
 
   const run = () => {
-    if (stopped || still || raf || document.hidden) return;
+    if (stopped || held || still || raf || document.hidden) return;
     last = null;
     raf = requestAnimationFrame(frame);
     if (record) record.running = true;
@@ -98,6 +100,11 @@ export function startBackdrop(canvas: HTMLCanvasElement): { stop(): void } {
       pause();
       removeEventListener("resize", resize);
       document.removeEventListener("visibilitychange", onVisibility);
+    },
+    hold(on) {
+      held = on;
+      if (on) pause();
+      else run();
     },
   };
 }

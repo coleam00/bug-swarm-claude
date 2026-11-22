@@ -4,6 +4,7 @@
 // team buttons. A player's team is stored once and never switched (architecture.md, Data), so
 // once they have one, the other team's button is shown but locked.
 import { NAME_MAX, NAME_MIN, TEAMS, checkName, isBotName, type NameCheck, type Team } from "../server/rules";
+import { formatScore } from "./board/data";
 import type { Player } from "./player";
 
 export type StartView =
@@ -83,4 +84,12 @@ export function pressEnter(view: StartView, raw: string): Press {
   if (isBotName(checked.name)) return { kind: "message", text: BOT_NAME_MESSAGE };
   if (view.team !== null) return { kind: "start", name: checked.name, team: view.team };
   return { kind: "focus", team: TEAMS[0] };
+}
+
+/**
+ * The live line under the title (#79): people playing now, as the board counts them (never
+ * bots), formatted like the board. Empty with nobody playing, or when the read failed (null).
+ */
+export function playingLine(playing: number | null): string {
+  return playing !== null && playing >= 1 ? `${formatScore(playing)} playing now` : "";
 }

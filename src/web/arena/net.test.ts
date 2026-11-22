@@ -6,8 +6,8 @@ test("rejoin waits 0.5 s, doubling to 5 s", () => {
   expect([0, 1, 2, 3, 4, 5, 50].map(reconnectDelay)).toEqual([500, 1000, 2000, 4000, 5000, 5000, 5000]);
 });
 
-test("a refused name, team or version never retries; a hello timeout does", () => {
-  expect(ERROR_CODES.filter(isFinalError)).toEqual(["version", "name", "team"]);
+test("a refused name, team or version, or a full server for a watch, never retries; a hello timeout does", () => {
+  expect(ERROR_CODES.filter(isFinalError)).toEqual(["version", "name", "team", "full"]);
 });
 
 test("the socket follows the page's scheme and host", () => {
