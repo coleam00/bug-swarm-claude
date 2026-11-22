@@ -41,15 +41,18 @@ import {
   type SnapshotKill,
   type SnapshotMe,
   type SnapshotPlayer,
+  type SnapshotQueen,
 } from "../src/shared/arena/protocol";
+import { QUEEN_EVERY_WAVES } from "../src/shared/arena/bugs/queen";
 import { createRng, nextRandom, type Rng } from "../src/shared/arena/rng";
 import { NAME_MAX, TEAMS, type Team } from "../src/server/rules";
 import { CAMERA_SECONDS, createCamera, snapCamera, type Camera } from "../src/web/arena/camera";
 import { dashButtonAt } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
 import type { TopRow } from "../src/web/api";
+import { QUEEN_CAP_S } from "./skill-lib";
 
-export const USAGE = "usage: bun run playtest -- (--url <base url> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart] [--chrome <path>] [--headed]";
+export const USAGE = "usage: bun run playtest -- (--url <base url> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart|queen] [--chrome <path>] [--headed]";
 
 // ---- Scenarios ----
 
@@ -75,9 +78,6 @@ export type Scenario = {
   roles: (n: number) => Role[];
 };
 
-/** The follow-up issue for the scenario not built yet. */
-export const QUEEN_ISSUE = 96;
-
 export const SCENARIOS: Record<ScenarioName, Scenario> = {
   basic: { name: "basic", followUp: null, why: "", minPlayers: 2, roles: (n) => Array.from({ length: n }, () => "fighter") },
   // With FILL_TARGET people no new fill bot is added, but bots added while the pages were joining
@@ -93,7 +93,9 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
   "late-join": { name: "late-join", followUp: null, why: "", minPlayers: 3, roles: (n) => Array.from({ length: n }, () => "fighter") },
   // The server restarts mid-fight through its graceful path and every page rejoins (#95). Needs --serve.
   restart: { name: "restart", followUp: null, why: "", minPlayers: 2, roles: (n) => Array.from({ length: n }, () => "fighter") },
-  queen: { name: "queen", followUp: QUEEN_ISSUE, why: "a queen check and a run to wave 5", minPlayers: 2, roles: () => [] },
+  // Every page fights with queen focus (Plan.queenFirst): it plays on until the hive queen's `q`
+  // shows, then fights her until her `queen` event (#96).
+  queen: { name: "queen", followUp: null, why: "", minPlayers: 2, roles: (n) => Array.from({ length: n }, () => "fighter") },
 };
 
 /** The late-join scenario's last page joins once an early page's snapshot reads this wave: (LATE_JOIN_WAVE - 1) * WAVE_S s in (sim.ts `wave`). */
@@ -109,6 +111,15 @@ export const RESTART_AT_S = 40;
 export const REJOIN_CAP_S = 30;
 /** After the last page rejoins it plays on this long, s. */
 export const AFTER_RESTART_S = 40;
+
+/** The queen scenario's wave: the hive queen comes on the first tick of every QUEEN_EVERY_WAVES-th wave (#85). */
+export const QUEEN_WAVE = QUEEN_EVERY_WAVES;
+/** If no page's `q` is non-empty by this many seconds of play, the run stops (and fails). */
+export const QUEEN_APPEAR_CAP_S = (QUEEN_WAVE - 1) * WAVE_S + 60;
+/** If she is still alive this long after any page first read her alive, the run stops (and fails): `bun run skill`'s cap on her kill. */
+export const QUEEN_KILL_CAP_S = QUEEN_CAP_S;
+/** Play goes on this long after her `queen` event, so every page has it and the `q` of `[]` after it, s. */
+export const QUEEN_AFTER_S = 5;
 
 // ---- Arguments ----
 
@@ -184,12 +195,14 @@ export function parseArgs(argv: string[]): PlaytestArgs {
  * after a restart, so the pages' rejoins reach it), a scratch DATA_DIR, and a fixed BUILD_ID (so a
  * rejoin is not refused as another build, which would show "Updating..." and reload). Without
  * RAILWAY_GIT_COMMIT_SHA (it beats BUILD_ID), NODE_ENV (production listens on every interface)
- * and BUG_SWARM_START_WAVE (late-join needs the real wave 6).
+ * and an inherited BUG_SWARM_START_WAVE (late-join needs the real wave 6). `startWave` sets it
+ * instead: the queen scenario passes QUEEN_WAVE, so each new arena opens 10 s before her wave (#96).
  */
-export function serverEnv(base: Record<string, string | undefined>, port: number, dataDir: string, buildId: string): Record<string, string> {
+export function serverEnv(base: Record<string, string | undefined>, port: number, dataDir: string, buildId: string, startWave: number | null = null): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(base)) if (v !== undefined) out[k] = v;
   for (const k of ["RAILWAY_GIT_COMMIT_SHA", "NODE_ENV", "BUG_SWARM_START_WAVE"]) delete out[k];
+  if (startWave !== null) out.BUG_SWARM_START_WAVE = String(startWave);
   out.PORT = String(port);
   out.DATA_DIR = dataDir;
   out.BUILD_ID = buildId;
@@ -254,8 +267,8 @@ export function pageSpecs(n: number, scenario: ScenarioName, seed: number): Page
 
 // ---- Recording ----
 
-/** A snapshot as kept: what the checks read (the bugs, shots and floor are dropped to save memory). */
-export type Kept = { tick: number; ack: number; p: SnapshotPlayer[]; k: SnapshotKill[]; d: SnapshotDown[]; w: number; me: SnapshotMe };
+/** A snapshot as kept: what the checks read (the bugs, shots and floor are dropped to save memory). `q`: the hive queen, decoded (her marker's ticks left). */
+export type Kept = { tick: number; ack: number; p: SnapshotPlayer[]; k: SnapshotKill[]; d: SnapshotDown[]; w: number; q: SnapshotQueen; me: SnapshotMe };
 /**
  * `at`: Chrome's receipt time, ms; `hat`: the harness's clock when it heard, ms; `you`: the page's
  * id then; `gen`: the server lifetime it came from (its connection's welcome's, connGen).
@@ -327,7 +340,7 @@ export function addFrame(log: PageLog, at: number, hat: number, m: ServerMessage
   if (log.you === 0) return;
   const gen = connGen(log);
   if (m.t === SNAPSHOT) {
-    log.frames.push({ at, hat, you: log.you, gen, s: { tick: m.tick, ack: m.ack, p: m.p, k: m.k, d: m.d, w: m.w, me: m.me } });
+    log.frames.push({ at, hat, you: log.you, gen, s: { tick: m.tick, ack: m.ack, p: m.p, k: m.k, d: m.d, w: m.w, q: m.q, me: m.me } });
   } else if (m.t === EVENT) {
     const last = log.frames[log.frames.length - 1];
     const sinceWelcome = last && last.at >= log.welcomes[log.welcomes.length - 1]!.at;
@@ -373,6 +386,13 @@ export const BURST_OFF_S = [0.3, 0.6] as const;
 /** A new wander point at most this often, seconds, or once reached. */
 export const WANDER_S = [4, 8] as const;
 const WANDER_MARGIN = 200;
+/**
+ * With queen focus a page stands off her at least this far, units (twice CONTACT_UNITS: her radius
+ * is 40), and strafes round her out to QUEEN_FAR_SHARE of the nearer half of its view. Not
+ * KEEP_UNITS: a phone's view is 370 units wide, so at 250 she would leave its screen.
+ */
+export const QUEEN_NEAR_UNITS = CONTACT_UNITS * 2;
+export const QUEEN_FAR_SHARE = 0.9;
 
 export type Plan = {
   role: Role;
@@ -387,10 +407,12 @@ export type Plan = {
   partner: number;
   /** Which way it strafes round a bug: 1 or -1, picked again with each new wander point. */
   strafe: number;
+  /** The queen scenario (#96): while the hive queen is alive it shoots her when she is on screen and walks to her when not. */
+  queenFirst: boolean;
 };
 
 export function createPlan(role: Role, seed: number): Plan {
-  return { role, rng: createRng(seed), firing: false, burstUntil: 0, wander: { x: WORLD_W / 2, y: WORLD_H / 2 }, wanderUntil: 0, giveUp: false, partner: 0, strafe: 1 };
+  return { role, rng: createRng(seed), firing: false, burstUntil: 0, wander: { x: WORLD_W / 2, y: WORLD_H / 2 }, wanderUntil: 0, giveUp: false, partner: 0, strafe: 1, queenFirst: false };
 }
 
 /** What a page sees: its own row and numbers, every bug and player in the arena, who is down, and its camera's view. */
@@ -401,6 +423,8 @@ export type View = {
   players: SnapshotPlayer[];
   bugs: SnapshotBug[];
   downs: SnapshotDown[];
+  /** The hive queen as the snapshot's `q` (never culled, unlike her bug row). */
+  queen: SnapshotQueen;
   /** The view's centre and size, world units. */
   cam: Pick<Camera, "x" | "y" | "w" | "h">;
 };
@@ -473,7 +497,9 @@ function rowOf(players: SnapshotPlayer[], id: number): SnapshotPlayer | null {
  * the nearest bug on screen is aimed at and fired at in bursts while keeping KEEP_UNITS from it
  * (backing off inside it, strafing round it out to STRAFE_UNITS);
  * else it wanders. Pages that never revive keep away from anyone down, and keep-away pages from
- * the victim.
+ * the victim. With queen focus (#96), while `q` reads her alive, she is the target whenever she is
+ * on screen (aimed at through revives and evades too), and the page stands off her between
+ * QUEEN_NEAR_UNITS and the edge of its view; off screen, it walks to her.
  */
 export function decide(view: View, plan: Plan, t: number): Intent {
   const me = view.me;
@@ -505,8 +531,12 @@ export function decide(view: View, plan: Plan, t: number): Intent {
     return { mode: plan.giveUp ? "give-up" : "victim", mx: to.x, my: to.y, aim: null, fire: false, dash: false };
   }
 
-  const aim = seen ? Math.atan2(seen.b[3] - y, seen.b[2] - x) : null;
-  const fire = seen ? burst(plan, t) : false;
+  // Queen focus: her position from `q` ([1, id, x, y, hp, maxHp]).
+  const q = plan.queenFirst && view.queen[0] === 1 ? { x: view.queen[2], y: view.queen[3] } : null;
+  const qSeen = q !== null && onScreen(view.cam, q.x, q.y);
+  const target = qSeen ? q : seen ? { x: seen.b[2], y: seen.b[3] } : null;
+  const aim = target ? Math.atan2(target.y - y, target.x - x) : null;
+  const fire = target ? burst(plan, t) : false;
 
   if (revives) {
     let target: SnapshotPlayer | null = null;
@@ -532,6 +562,22 @@ export function decide(view: View, plan: Plan, t: number): Intent {
     const away = unit(x - all.b[2], y - all.b[3]);
     const canDash = view.nums.dc === 0 && view.nums.dk === 0;
     return { mode: "evade", mx: away.x, my: away.y, aim: aim ?? Math.atan2(-away.y, -away.x), fire, dash: canDash };
+  }
+
+  if (q && !avoid) {
+    const d = Math.hypot(q.x - x, q.y - y);
+    if (!qSeen) {
+      const to = unit(q.x - x, q.y - y);
+      return { mode: "queen-seek", mx: to.x, my: to.y, aim, fire, dash: false };
+    }
+    const far = Math.max(QUEEN_NEAR_UNITS + 30, (QUEEN_FAR_SHARE * Math.min(view.cam.w, view.cam.h)) / 2);
+    let move: { x: number; y: number };
+    if (d < QUEEN_NEAR_UNITS) move = unit(x - q.x, y - q.y);
+    else if (d < far) {
+      wanderTo(plan, x, y, t);
+      move = unit(-(q.y - y) * plan.strafe, (q.x - x) * plan.strafe);
+    } else move = unit(q.x - x, q.y - y);
+    return { mode: "queen", mx: move.x, my: move.y, aim, fire, dash: false };
   }
 
   let move: { x: number; y: number };
@@ -1228,12 +1274,173 @@ export function checkScenarioRestart(logs: PageLog[], r: RestartReport | null, b
   };
 }
 
+/** A page's id at a tick of server lifetime `gen`: its frame's there, else its last welcome in that lifetime (0: none). */
+function idAt(l: PageLog, gen: number, tick: number): number {
+  const f = l.frames.find((x) => x.gen === gen && x.s.tick === tick);
+  if (f) return f.you;
+  return l.welcomes.filter((w) => w.gen === gen).at(-1)?.you ?? 0;
+}
+
+/**
+ * The queen scenario (#96), her state: every tick two or more pages received carries the same `q`
+ * on each (decoded, so her marker's ticks left too), and they shared at least one tick of her
+ * marker and one of her alive. Pages that joined after her marker are not required to have seen it.
+ */
+export function checkQueenSnapshots(logs: PageLog[]): CheckResult {
+  const name = "queen q";
+  const byTick = new Map<string, { gen: number; tick: number; seen: { page: string; q: string }[] }>();
+  for (const l of logs) for (const f of l.frames) {
+    const k = `${f.gen}:${f.s.tick}`;
+    const a = byTick.get(k) ?? { gen: f.gen, tick: f.s.tick, seen: [] };
+    a.seen.push({ page: l.name, q: JSON.stringify(f.s.q) });
+    byTick.set(k, a);
+  }
+  const wrong: string[] = [];
+  const shared = { none: 0, marker: 0, alive: 0 };
+  let hpFirst: number | null = null;
+  let hpLast: number | null = null;
+  let hpMax: number | null = null;
+  const ticks = [...byTick.values()].sort((a, b) => a.gen - b.gen || a.tick - b.tick);
+  for (const { tick, seen } of ticks) {
+    if (seen.length < 2) continue;
+    const first = seen[0]!;
+    const other = seen.find((x) => x.q !== first.q);
+    if (other) {
+      wrong.push(`tick ${tick}: ${first.page} ${first.q}, ${other.page} ${other.q}`);
+      continue;
+    }
+    const q = JSON.parse(first.q) as SnapshotQueen;
+    if (q.length === 0) shared.none++;
+    else if (q[0] === 0) shared.marker++;
+    else {
+      shared.alive++;
+      hpFirst ??= q[4];
+      hpLast = q[4];
+      hpMax = q[5];
+    }
+  }
+  if (wrong.length > 0) return { name, pass: false, detail: `${wrong.length} ticks differ: ${wrong.slice(0, 3).join("; ")}` };
+  const total = shared.none + shared.marker + shared.alive;
+  const counts = `${total} shared ticks agree: ${shared.marker} marker, ${shared.alive} alive${hpMax !== null ? ` (hp from ${hpFirst} to ${hpLast} of ${hpMax})` : ""}, ${shared.none} none`;
+  if (shared.marker === 0) return { name, pass: false, detail: `${counts}; no two pages shared a tick of her marker (they joined after it: use --serve, or an empty server)` };
+  if (shared.alive === 0) return { name, pass: false, detail: `${counts}; no two pages shared a tick of her alive` };
+  return { name, pass: true, detail: counts };
+}
+
+/**
+ * The queen scenario: her `queen` event (top damage dealer, `paid`) reached every page connected
+ * at its tick, the same on each, no more than DELIVERY_MAX_MS apart across pages (the counts over
+ * INTERP_DELAY_MS and DELIVERY_SLOW_MS are reported), and at least one page was paid: it damaged her.
+ */
+export function checkQueenEvent(logs: PageLog[]): CheckResult {
+  const name = "queen event";
+  const seen = new Map<string, { gen: number; tick: number; at: number[]; who: Set<number>; body: Set<string> }>();
+  for (const l of logs) for (const e of l.events) {
+    if (e.ev.kind !== QUEEN || e.tick < 0) continue;
+    const key = `${e.gen}:${e.tick}`;
+    const s = seen.get(key) ?? { gen: e.gen, tick: e.tick, at: [], who: new Set(), body: new Set() };
+    s.at.push(e.at);
+    s.who.add(l.index);
+    s.body.add(JSON.stringify([e.ev.id ?? 0, [...(e.ev.paid ?? [])].sort((a, b) => a[0] - b[0])]));
+    seen.set(key, s);
+  }
+  if (seen.size === 0) return { name, pass: false, detail: "no page had a queen event: she was never killed" };
+  const wrong: string[] = [];
+  const parts: string[] = [];
+  let worst = 0;
+  let over = 0;
+  let slow = 0;
+  let paidPages = 0;
+  for (const { gen, tick, at, who, body } of seen.values()) {
+    for (const l of logs) {
+      const sp = span(l, gen);
+      if (sp && sp[0] < tick && tick <= sp[1] && !who.has(l.index)) wrong.push(`${l.name} missed the queen event at tick ${tick}`);
+    }
+    if (body.size > 1) wrong.push(`the queen event at tick ${tick} differs: ${[...body].join(" vs ")}`);
+    const spread = Math.max(...at) - Math.min(...at);
+    worst = Math.max(worst, spread);
+    if (spread > INTERP_DELAY_MS) over++;
+    if (spread > DELIVERY_SLOW_MS) slow++;
+    if (spread > DELIVERY_MAX_MS) wrong.push(`the queen event at tick ${tick} spread ${ms(spread)}`);
+    const [top, paid] = JSON.parse([...body][0]!) as [number, [number, number][]];
+    const nameOf = (id: number) => logs.find((l) => idAt(l, gen, tick) === id)?.name ?? null;
+    const paidNames = paid.map(([id]) => nameOf(id)).filter((n): n is string => n !== null);
+    paidPages += paidNames.length;
+    parts.push(`tick ${tick}: ${top === 0 ? "nobody" : (nameOf(top) ?? "a fill bot")} dealt the most; ${paid.length} paid${paidNames.length > 0 ? ` (${paidNames.join(", ")})` : ""}; on ${who.size} pages`);
+  }
+  if (paidPages === 0) wrong.push("no page was paid: none of them damaged her");
+  return {
+    name,
+    pass: wrong.length === 0,
+    detail:
+      wrong.length === 0
+        ? `${parts.join("; ")}; spread max ${ms(worst)} (fails above ${DELIVERY_MAX_MS} ms), ${over} over ${INTERP_DELAY_MS} ms, ${slow} over ${DELIVERY_SLOW_MS} ms`
+        : wrong.slice(0, 4).join("; "),
+  };
+}
+
+/**
+ * The queen scenario: each paid page's own score (`me.sc`) moved at her kill tick by exactly its
+ * `paid` points plus that tick's kills by it (any page's kill rows, by bug id) and revives by it
+ * (her reward is paid in the step that kills her, payQueen). The score check skips a whole life
+ * span with a kill no view had, so this one reads the kill tick alone, and needs one paid page
+ * judged. A page with no frame at the tick before and at it, or a kill there no view had, is not judged.
+ */
+export function checkQueenPay(logs: PageLog[]): CheckResult {
+  const name = "queen pay";
+  const events = new Map<string, { gen: number; tick: number; paid: [number, number][] }>();
+  for (const l of logs) for (const e of l.events) {
+    if (e.ev.kind === QUEEN && e.tick >= 0) events.set(`${e.gen}:${e.tick}`, { gen: e.gen, tick: e.tick, paid: e.ev.paid ?? [] });
+  }
+  if (events.size === 0) return { name, pass: false, detail: "no queen event: nothing paid to check" };
+  const wrong: string[] = [];
+  const ok: string[] = [];
+  let unjudged = 0;
+  for (const { gen, tick, paid } of events.values()) {
+    const kills = new Map<number, SnapshotKill>();
+    for (const l of logs) for (const f of l.frames) if (f.gen === gen && f.s.tick === tick) for (const k of f.s.k) kills.set(k[0], k);
+    const revives = new Map<number, { by: number; points: number }>();
+    for (const l of logs) for (const e of l.events) if (e.ev.kind === REVIVE && e.gen === gen && e.tick === tick) revives.set(e.ev.id, { by: e.ev.by ?? 0, points: e.ev.points ?? 0 });
+    for (const [id, pts] of paid) {
+      const l = logs.find((x) => idAt(x, gen, tick) === id);
+      if (!l) continue;
+      const before = l.frames.find((f) => f.gen === gen && f.s.tick === tick - 1 && f.you === id);
+      const now = l.frames.find((f) => f.gen === gen && f.s.tick === tick && f.you === id);
+      if (!before || !now) {
+        unjudged++;
+        continue;
+      }
+      let killPts = 0;
+      let seenKills = 0;
+      for (const k of kills.values()) {
+        if (k[1] !== id) continue;
+        killPts += k[4];
+        seenKills++;
+      }
+      if (now.s.me.ki - before.s.me.ki > seenKills) {
+        unjudged++;
+        continue;
+      }
+      let revivePts = 0;
+      for (const r of revives.values()) if (r.by === id) revivePts += r.points;
+      const own = now.s.me.sc - before.s.me.sc;
+      const expected = pts + killPts + revivePts;
+      if (own !== expected) wrong.push(`${l.name} at tick ${tick}: own score +${own}, expected +${expected} (paid ${pts}, kills ${killPts}, revives ${revivePts})`);
+      else ok.push(`${l.name} +${pts}`);
+    }
+  }
+  if (wrong.length > 0) return { name, pass: false, detail: wrong.slice(0, 4).join("; ") };
+  if (ok.length === 0) return { name, pass: false, detail: `no paid page could be judged at the kill tick (${unjudged} not judged: a frame missing, or a kill no view had)` };
+  return { name, pass: true, detail: `${ok.length} paid pages' own scores moved by their pay at the kill tick (${ok.join(", ")}); ${unjudged} not judged` };
+}
+
 /** Every check for a scenario, in table order. */
 export function runChecks(logs: PageLog[], scenario: ScenarioName, restart: { report: RestartReport | null; budgetMs: number } | null = null): CheckResult[] {
   const out = [checkSameArena(logs), checkRoster(logs), checkDelivery(logs), checkPositions(logs), checkEvents(logs, DOWN), checkEvents(logs, REVIVE), checkKills(logs), checkScore(logs), checkInput(logs), checkLifeOver(logs)];
   if (scenario === "revive") out.push(checkScenarioRevive(logs));
   if (scenario === "late-join") out.push(checkScenarioLateJoin(logs));
   if (scenario === "restart") out.push(checkScenarioRestart(logs, restart?.report ?? null, restart?.budgetMs ?? 0));
+  if (scenario === "queen") out.push(checkQueenSnapshots(logs), checkQueenEvent(logs), checkQueenPay(logs));
   return out;
 }
 

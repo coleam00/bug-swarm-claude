@@ -1,4 +1,4 @@
-// `bun run playtest -- (--url <base> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart]` (#94, #95):
+// `bun run playtest -- (--url <base> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart|queen]` (#94, #95, #96):
 // several real browser players in one arena at once, each a headless Chrome page (desktops with a
 // mouse and keyboard and phones with two-point touch, mixed) that joins through the start screen
 // with its own name and team and plays a scripted human (playtest-lib.ts decide) with real
@@ -12,9 +12,9 @@
 // Raw Chrome DevTools Protocol over Bun's WebSocket: no browser library.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOWN_S, WAVE_S } from "../src/shared/arena/constants";
+import { DOWN_S, DT, WAVE_S } from "../src/shared/arena/constants";
 import { SHUTDOWN_BUDGET_MS, SHUTDOWN_MESSAGE } from "../src/server/serve";
-import { DOWN, EVENT, OVER, REVIVE, SNAPSHOT, parseServerMessage, type Snapshot } from "../src/shared/arena/protocol";
+import { DOWN, EVENT, OVER, QUEEN, REVIVE, SNAPSHOT, parseServerMessage, type Snapshot } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import { RESTART_DELAY_MS } from "../src/web/game/guard";
 import {
@@ -25,6 +25,10 @@ import {
   LATE_JOIN_WAVE,
   LATE_PLAY_S,
   MOVE_FINGER,
+  QUEEN_AFTER_S,
+  QUEEN_APPEAR_CAP_S,
+  QUEEN_KILL_CAP_S,
+  QUEEN_WAVE,
   REJOIN_CAP_S,
   RESTART_AT_S,
   SCENARIOS,
@@ -131,7 +135,7 @@ async function startServer(): Promise<void> {
   const log = join(outDir, `server-${process.pid}-${serverGen}.log`);
   const proc = Bun.spawn([process.execPath, join("src", "server", "main.ts")], {
     cwd: root,
-    env: serverEnv(process.env, serverPort, dataDir, buildId),
+    env: serverEnv(process.env, serverPort, dataDir, buildId, args.scenario === "queen" ? QUEEN_WAVE : null),
     // Straight to a file: nothing to drain, so the server never stalls on a full pipe.
     stdout: Bun.file(log),
     stderr: Bun.file(log.replace(/\.log$/, ".err.log")),
@@ -529,7 +533,7 @@ async function step(pg: Page): Promise<void> {
   }
   const me = snap.p.find((r) => r[0] === pg.log.you) ?? null;
   const cam = me ? cameraAt(pg.spec.device, me[1], me[2]) : { x: 0, y: 0, w: 0, h: 0 };
-  const intent = decide({ you: pg.log.you, me, nums: snap.me, players: snap.p, bugs: snap.b, downs: snap.d, cam }, pg.plan, secs());
+  const intent = decide({ you: pg.log.you, me, nums: snap.me, players: snap.p, bugs: snap.b, downs: snap.d, queen: snap.q, cam }, pg.plan, secs());
   await dispatch(pg, intent, me ? { x: me[1], y: me[2], vx: me[3], vy: me[4] } : { x: 0, y: 0, vx: 0, vy: 0 });
 }
 
@@ -625,6 +629,10 @@ try {
   if (lateSpec) say(`${lateSpec.name} waits for wave ${LATE_JOIN_WAVE} (${(LATE_JOIN_WAVE - 1) * WAVE_S} s into the arena)`);
   const victim = pages.find((p) => p.spec.role === "victim");
   if (victim) for (const p of pages) if (p.spec.role === "reviver" || p.spec.role === "keepaway") p.plan.partner = victim.log.you;
+  if (args.scenario === "queen") {
+    for (const p of pages) p.plan.queenFirst = true;
+    say(`every page waits for the hive queen (wave ${QUEEN_WAVE}${args.serve ? ": the arena opened 10 s before it" : ""}) and fights her`);
+  }
 
   const start = secs();
   let nextShot = 0;
@@ -635,6 +643,12 @@ try {
   let restartReport: RestartReport | null = null;
   let restartAt: number | null = null;
   let rejoinedAt: number | null = null;
+  // The queen scenario (#96): when any page first read her marker (or her), her alive, and her queen event.
+  let queenSeenAt: number | null = null;
+  let queenUpAt: number | null = null;
+  let queenDownAt: number | null = null;
+  let queenUpShot = false;
+  const queenNow = () => pages.map((p) => p.latest?.q ?? []).find((q) => q.length > 0) ?? null;
   const loop = setInterval(() => {
     for (const pg of pages) {
       if (pg.busy || stopping) continue;
@@ -696,10 +710,45 @@ try {
         break;
       }
     }
+    if (args.scenario === "queen") {
+      const q = queenNow();
+      if (queenSeenAt === null && q) {
+        queenSeenAt = t;
+        say(q[0] === 0 ? `queen marker at wave ${Math.max(...pages.map((p) => p.latest?.w ?? 0))}: she appears in ${(q[3] * DT).toFixed(1)} s` : "queen already up");
+      }
+      if (queenUpAt === null && q && q[0] === 1) {
+        queenUpAt = t;
+        say(`queen up: id ${q[1]}, ${q[4]}/${q[5]} hit points`);
+      }
+      if (queenUpAt !== null && !queenUpShot && t >= queenUpAt + 3) {
+        queenUpShot = true;
+        void screenshots("queen-up");
+      }
+      if (queenDownAt === null) {
+        const ev = pages.flatMap((p) => p.log.events).find((e) => e.ev.kind === QUEEN);
+        if (ev) {
+          queenDownAt = t;
+          const nameOf = (id: number) => pages.find((p) => p.log.you === id)?.spec.name ?? (id === 0 ? "none" : `id ${id} (not a page)`);
+          say(`queen down at tick ${ev.tick}: ${nameOf(ev.ev.id ?? 0)} dealt the most; paid ${(ev.ev.paid ?? []).map(([id, pts]) => `${nameOf(id)} +${pts}`).join(", ") || "nobody"}`);
+          await wait(1000);
+          await screenshots("queen-down");
+        }
+      }
+      if (queenSeenAt === null && t > QUEEN_APPEAR_CAP_S) {
+        say(`no queen after ${QUEEN_APPEAR_CAP_S} s`);
+        break;
+      }
+      if (queenUpAt !== null && queenDownAt === null && t - queenUpAt > QUEEN_KILL_CAP_S) {
+        const hp = q && q[0] === 1 ? `${q[4]}/${q[5]}` : "?";
+        say(`queen still alive at hp ${hp} after ${QUEEN_KILL_CAP_S} s`);
+        break;
+      }
+    }
     if (stopping) break;
     const lateDone = !lateSpec || (lateAt !== null && t >= lateAt + LATE_PLAY_S + 3);
     const restartDone = args.scenario !== "restart" || (rejoinedAt !== null && t >= rejoinedAt + AFTER_RESTART_S);
-    if (t >= args.seconds && lateDone && restartDone && (!victim || revived || t >= REVIVE_WAIT_S)) break;
+    const queenDone = args.scenario !== "queen" || (queenDownAt !== null && t >= queenDownAt + QUEEN_AFTER_S);
+    if (t >= args.seconds && lateDone && restartDone && queenDone && (!victim || revived || t >= REVIVE_WAIT_S)) break;
     await wait(200);
   }
   // End: everyone stops fighting until every life is over.
