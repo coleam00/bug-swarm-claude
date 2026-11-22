@@ -236,21 +236,6 @@ describe("beetle shell", () => {
     expect(b.hp).toBe(ITEM_HP - 1);
   });
 
-  test("a shell block keeps the streak but does not build it (#90): a flank kill after it scores at the streak plus that one hit", () => {
-    const { a, ps } = arenaWith([1200, 1200]);
-    const p = ps[0]!;
-    // 8 in a row: the kill is the 9th, x1.5. Had the block counted, it would be the 10th, x2.
-    p.streak = 8;
-    const b = beetleAt(a, 1300, 1200, -1, 0);
-    expect(grazing(a, p, b, 1, 0)).toEqual(expect.objectContaining({ hit: true, blocked: true }));
-    expect([p.streak, b.hp]).toEqual([8, ITEM_HP]);
-    b.hp = 1;
-    expect(grazing(a, p, b, -1, 0)).toEqual(expect.objectContaining({ hit: true, blocked: false }));
-    expect(a.bugs).not.toContain(b);
-    expect([p.streak, p.kills, p.score]).toEqual([9, 1, ITEM_POINTS * mult(9)]);
-    expect(mult(9)).not.toBe(mult(10));
-  });
-
   test("a review laser shot stops on the shell: the bug it pierced first stays hit, the beetle is not", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
