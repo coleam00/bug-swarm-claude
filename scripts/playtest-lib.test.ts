@@ -25,6 +25,7 @@ import {
   checkInput,
   checkKills,
   checkLifeOver,
+  checkPositions,
   checkRoster,
   checkSameArena,
   checkScenarioRevive,
@@ -98,7 +99,7 @@ describe("pages and scenarios", () => {
     expect(new Set(pages.map((p) => p.seed)).size).toBe(4);
   });
 
-  test("revive: a victim, a reviver and keep-away pages, with enough people that no fill bot is added", () => {
+  test("revive: a victim, a reviver and keep-away pages, with enough people that no new fill bot is added", () => {
     expect(pageSpecs(5, "revive", 1).map((p) => p.role)).toEqual(["victim", "reviver", "keepaway", "keepaway", "keepaway"]);
     expect(SCENARIOS.revive.minPlayers).toBe(4);
   });
@@ -141,7 +142,8 @@ function game(): PageLog[] {
       const aSc = t >= 30 ? 60 : t >= 10 ? 10 : 0;
       const bDown = t >= 20 && t < 30;
       const mine = i === 0 ? me({ sc: aSc, ki: t >= 10 ? 1 : 0, al: t === 40 ? 0 : 1 }) : me({ dn: bDown ? 1 : 0 });
-      const p = [row(1, 100 + t * 15, 300, 0.5, t === 40 ? 0 : 1), row(2, 900 - t * 15, -300, 2)];
+      // A fill bot (id 3) too: the one row both pages have of someone else.
+      const p = [row(1, 100 + t * 15, 300, 0.5, t === 40 ? 0 : 1), row(2, 900 - t * 15, -300, 2), row(3, 500 + t, 0, 1)];
       const k: SnapshotKill[] = t === 10 ? [[77, 1, 300, 500, 10, 0]] : [];
       const d: SnapshotDown[] = bDown ? [[2, 9, 1, 0.1]] : [];
       // What the harness dispatched just before, and what the page sent from it.
@@ -207,6 +209,19 @@ describe("checks", () => {
     const o = checkDelivery(onePage);
     expect(o.detail).toContain("1 over 100 ms on one page only");
     expect(o.pass).toBe(true);
+  });
+
+  test("positions fail when two pages had a player somewhere else at the same tick; a page's own row is not compared", () => {
+    const logs = game();
+    expect(checkPositions(logs).detail).toContain("40 player rows");
+    const own = game();
+    own[0]!.frames[5]!.s.p[0]![1] += 5; // A's own row on A's page
+    expect(checkPositions(own).pass).toBe(true);
+    const moved = game();
+    moved[1]!.frames[5]!.s.p[2]![1] += 0.1; // the bot's row on B's page
+    const r = checkPositions(moved);
+    expect(r.pass).toBe(false);
+    expect(r.detail).toContain("tick 6 player 3");
   });
 
   test("downs and revives fail when a page missed one, or saw another reviver; a run with no down has nothing to compare", () => {

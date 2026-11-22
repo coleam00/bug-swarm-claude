@@ -10,8 +10,9 @@
 // screens agree when they received the same content by id within INTERP_DELAY_MS of each other.
 // Since #89 each page is sent its own view (bugs, pickups and kills culled to a square around its
 // camera, as deltas between keyframes), so the checks compare what two pages both had, by id.
-// Every page gets every player and every down, built from one quantized frame per tick (view.ts),
-// so the players' rows are equal by construction and are not a check.
+// Every page gets every player and every down; the players come as deltas against what that
+// socket was sent before, so their positions are compared too (a page's own row carries its exact
+// `me` numbers and is left out).
 import { join } from "node:path";
 import { ACCEL, DT, FILL_TARGET, INTERP_DELAY_MS, MAX_SPEED, REVIVE_RANGE, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import {
@@ -74,7 +75,8 @@ export const QUEEN_ISSUE = 96;
 
 export const SCENARIOS: Record<ScenarioName, Scenario> = {
   basic: { name: "basic", followUp: null, why: "", minPlayers: 2, roles: (n) => Array.from({ length: n }, () => "fighter") },
-  // With fewer than FILL_TARGET people the arena gets fill bots, and a bot can revive the victim.
+  // With FILL_TARGET people no new fill bot is added, but bots added while the pages were joining
+  // stay until their life ends, and a bot can revive the victim: the scenario waits for the reviver's.
   revive: {
     name: "revive",
     followUp: null,
@@ -643,6 +645,36 @@ export function checkDelivery(logs: PageLog[]): CheckResult {
   };
 }
 
+/**
+ * Positions: every player row two pages received for the same tick is the same on both (x, y,
+ * aim, alive, untouchable, dashing, spawn-protected, effects), each page's own row left out (it
+ * carries the page's exact `me` numbers, not the shared quantized ones).
+ */
+export function checkPositions(logs: PageLog[]): CheckResult {
+  const byTick = new Map<number, Map<number, { row: string; page: string }>>();
+  let compared = 0;
+  const wrong: string[] = [];
+  for (const l of logs) for (const f of l.frames) {
+    let rows = byTick.get(f.s.tick);
+    if (!rows) byTick.set(f.s.tick, (rows = new Map()));
+    for (const r of f.s.p) {
+      if (r[0] === f.you) continue;
+      const row = JSON.stringify([r[1], r[2], r[5], r[6], r[7], r[8], r[9], r[10]]);
+      const prev = rows.get(r[0]);
+      if (!prev) rows.set(r[0], { row, page: l.name });
+      else if (prev.page !== l.name) {
+        compared++;
+        if (prev.row !== row) wrong.push(`tick ${f.s.tick} player ${r[0]}: ${prev.page} ${prev.row}, ${l.name} ${row}`);
+      }
+    }
+  }
+  return {
+    name: "positions",
+    pass: compared > 0 && wrong.length === 0,
+    detail: wrong.length === 0 ? `${compared} player rows two pages had for the same tick, all the same` : `${wrong.length} differ: ${wrong.slice(0, 3).join("; ")}`,
+  };
+}
+
 /** The first and last tick a page received for its current id: it was connected then. */
 function span(l: PageLog): [number, number] | null {
   const f = l.frames;
@@ -949,7 +981,7 @@ export function checkScenarioRevive(logs: PageLog[]): CheckResult {
 
 /** Every check for a scenario, in table order. */
 export function runChecks(logs: PageLog[], scenario: ScenarioName): CheckResult[] {
-  const out = [checkSameArena(logs), checkRoster(logs), checkDelivery(logs), checkEvents(logs, DOWN), checkEvents(logs, REVIVE), checkKills(logs), checkScore(logs), checkInput(logs), checkLifeOver(logs)];
+  const out = [checkSameArena(logs), checkRoster(logs), checkDelivery(logs), checkPositions(logs), checkEvents(logs, DOWN), checkEvents(logs, REVIVE), checkKills(logs), checkScore(logs), checkInput(logs), checkLifeOver(logs)];
   if (scenario === "revive") out.push(checkScenarioRevive(logs));
   return out;
 }

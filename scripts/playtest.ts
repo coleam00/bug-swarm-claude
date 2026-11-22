@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DOWN_S } from "../src/shared/arena/constants";
-import { DOWN, OVER, REVIVE, SNAPSHOT, parseServerMessage, type Snapshot } from "../src/shared/arena/protocol";
+import { DOWN, EVENT, OVER, REVIVE, SNAPSHOT, parseServerMessage, type Snapshot } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import { RESTART_DELAY_MS } from "../src/web/game/guard";
 import {
@@ -286,7 +286,7 @@ async function openPage(spec: PageSpec): Promise<Page> {
         let bots = 0;
         for (const r of m.p) if (!people.has(r[0])) bots++;
         pg.maxBots = Math.max(pg.maxBots, bots);
-      } else if (m.t === "event") {
+      } else if (m.t === EVENT) {
         if (m.kind === OVER && m.id === pg.log.you) {
           pg.overAt = now();
           pg.overs++;
