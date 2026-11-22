@@ -7,6 +7,7 @@
 import type { Team } from "../../server/rules";
 import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
+import { stepDrone } from "./pickups/drone";
 import { stepDowns } from "./downs";
 import { stepPickups } from "./pickups";
 import { shieldBlocks } from "./pickups/shield";
@@ -110,6 +111,8 @@ export type Player = Mover & {
   lockTicks: number;
   /** Seconds until the next shot may leave (negative: owed this tick). */
   fireCooldown: number;
+  /** Seconds until the CI drone's next shot (#84, pickups/drone.ts); 0 without the drone. */
+  droneCooldown: number;
   /** Ticks left untouchable after a hit. */
   invulnTicks: number;
   /** Ticks left of spawn protection (bugs cannot hurt you); holding fire ends it. */
@@ -167,6 +170,8 @@ export type Shot = {
   pierce: number;
   /** Fired under the review laser (drawn as a beam). */
   laser: boolean;
+  /** Fired by a CI drone (#84): scores x1 and never touches its owner's streak; drawn violet. */
+  drone: boolean;
   /** Ids of the bugs it already hit (0: none), so a piercing shot never hits one bug twice. */
   hitA: number;
   hitB: number;
@@ -179,8 +184,11 @@ export type FloorPickup = { id: number; kind: PickupId; x: number; y: number; ti
 /** Player `player` took a pickup of `kind` this tick. */
 export type PickupTaken = { player: number; kind: PickupId };
 
-/** A shot fired this tick: where it left the barrel, its angle (spread included), and whether it is a review laser shot. */
-export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number; laser: boolean };
+/**
+ * A shot fired this tick: where it left the barrel (a drone's shot: the drone), its angle (spread
+ * included), and whether it is a review laser shot or a CI drone's (#84).
+ */
+export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number; laser: boolean; drone: boolean };
 /**
  * A shot that ended this tick: on a bug (`hit`) or at its range or a wall (not `hit`; a review
  * laser shot may have hit bugs on the way), `travelled` units from the barrel. `blocked` (#80): it
@@ -219,6 +227,8 @@ export type ArenaEvents = {
   shellBlocks: number[];
   /** The taker of each bug a refactor bomb killed (#78; for `bun run skill`; not sent: the kill is in `kills`). */
   bombKills: number[];
+  /** The owner of each bug a CI drone's shot killed (#84; for `bun run skill`; not sent: the kill is in `kills`). */
+  droneKills: number[];
 };
 
 export type ArenaState = {
@@ -256,7 +266,7 @@ export function createArena(seed: number): ArenaState {
     nextPickupId: 1,
     // Not seed ^ 0x5bd1e995: skill-lib seeds the policies' own generators with that.
     dropRng: createRng(seed ^ 0x68e31da4),
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [] },
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [] },
   };
 }
 
@@ -281,6 +291,7 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.heat = 0;
   p.lockTicks = 0;
   p.fireCooldown = 0;
+  p.droneCooldown = 0;
   p.invulnTicks = 0;
   p.protectTicks = Math.round(SPAWN_PROTECT_S / DT);
   p.budget = 0;
@@ -411,6 +422,7 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
     heat: 0,
     lockTicks: 0,
     fireCooldown: 0,
+    droneCooldown: 0,
     invulnTicks: 0,
     protectTicks: 0,
     firstLife: true,
@@ -645,7 +657,7 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  *    and its dash ignored; an out player whose input has dash, RESPAWN_DELAY_S or more after
  *    going out, respawns at a safeSpot in a life that is no longer their first; a player who is
  *    up and holding fire loses any spawn protection left, before they fire;
- * 2. fire and heat, players who are up only (combat.ts);
+ * 2. fire and heat, then a CI drone's shots, players who are up only (combat.ts, pickups/drone.ts);
  * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits (a test
  *    shield blocks one: strikePlayer); the last hit puts a player down (bugs/);
  * 4. shots: travel, hits (a review laser shot pierces), kills, misses (combat.ts);
@@ -672,6 +684,7 @@ export function stepArena(state: ArenaState): void {
   ev.laserHits.length = 0;
   ev.shellBlocks.length = 0;
   ev.bombKills.length = 0;
+  ev.droneKills.length = 0;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;
@@ -692,7 +705,11 @@ export function stepArena(state: ArenaState): void {
     }
     if (canAct(p) && p.input.fire) p.protectTicks = 0;
   }
-  for (const p of state.players) if (canAct(p)) stepFire(state, p);
+  for (const p of state.players) {
+    if (!canAct(p)) continue;
+    stepFire(state, p);
+    stepDrone(state, p);
+  }
   stepBugs(state);
   stepShots(state);
   stepPickups(state);

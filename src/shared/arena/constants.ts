@@ -73,8 +73,8 @@ export const INPUT_STALE_TICKS = 10;
 export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
-/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell. */
-export const PROTOCOL_VERSION = 9;
+/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's style 2, a CI drone's. */
+export const PROTOCOL_VERSION = 10;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
@@ -142,7 +142,7 @@ export type BugKind = (typeof BUG_KINDS)[number];
  * Every pickup id, in protocol order (a snapshot carries a pickup's index in this list, and a
  * player's active effects as a bitmask over it).
  */
-export const PICKUP_IDS = ["shield", "laser", "bomb"] as const;
+export const PICKUP_IDS = ["shield", "laser", "bomb", "drone"] as const;
 export type PickupId = (typeof PICKUP_IDS)[number];
 /** The most pickups lying on the floor of one arena; a drop past it is lost, never queued. */
 export const MAX_PICKUPS_PER_ARENA = 6;

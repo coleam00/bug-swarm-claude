@@ -209,7 +209,7 @@ describe("beetle shell", () => {
    * starting 40 units from it (no spread); one step; returns how it ended (null: still flying).
    */
   function grazing(a: ArenaState, p: Player, b: Bug, from: 1 | -1, off: number): ShotEnded | null {
-    a.shots.push({ id: a.nextShotId++, owner: p.id, life: p.lifeStartTick, x: b.x - from * 40, y: b.y + off, dx: from, dy: 0, travelled: 0, pierce: 1, laser: false, hitA: 0, hitB: 0, hits: 0 });
+    a.shots.push({ id: a.nextShotId++, owner: p.id, life: p.lifeStartTick, x: b.x - from * 40, y: b.y + off, dx: from, dy: 0, travelled: 0, pierce: 1, laser: false, drone: false, hitA: 0, hitB: 0, hits: 0 });
     stepQuiet(a);
     return a.events.shotsEnded[0] ?? null;
   }

@@ -159,8 +159,10 @@ describe("server messages", () => {
       ],
       events: {
         shotsFired: [
-          { id: 11, owner: 1, x: 30.123, y: 20.5, angle: 0.12345, laser: false },
-          { id: 12, owner: 2, x: 1, y: 2, angle: 3, laser: true },
+          { id: 11, owner: 1, x: 30.123, y: 20.5, angle: 0.12345, laser: false, drone: false },
+          { id: 12, owner: 2, x: 1, y: 2, angle: 3, laser: true, drone: false },
+          // A CI drone's shot (v10, #84): style 2.
+          { id: 13, owner: 1, x: 40, y: 22, angle: -1, laser: false, drone: true },
         ],
         shotsEnded: [
           { id: 10, hit: true, blocked: false, travelled: 123.456 },
@@ -196,6 +198,7 @@ describe("server messages", () => {
       s: [
         [11, 1, 30.12, 20.5, 0.123, 0],
         [12, 2, 1, 2, 3, 1],
+        [13, 1, 40, 22, -1, 2],
       ],
       e: [
         [10, 1, 123.5],

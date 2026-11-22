@@ -11,10 +11,12 @@ export type PickupDraw = {
   glyph(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void;
   /**
    * Optional: what it draws on a robot that has it (world units), the robot at (x, y) aiming
-   * `aim`, at `t` seconds; `glow` is a soft glow sprite in its colour. Drawn for every player,
-   * so others see it. Leaves the canvas state as it found it.
+   * `aim`, at `t` seconds; `glow` is a soft glow sprite in its colour; `id` is the robot's player
+   * id and `tick` the (fractional) server tick it is drawn at, the same clock its shots are drawn
+   * on (#84: the CI drone's orbit is a function of both). Drawn for every player, so others see
+   * it. Leaves the canvas state as it found it.
    */
-  on?(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, t: number, glow: HTMLCanvasElement): void;
+  on?(ctx: CanvasRenderingContext2D, x: number, y: number, aim: number, t: number, glow: HTMLCanvasElement, id: number, tick: number): void;
 };
 
 /** A floor pickup blinks this many times a second in its last PICKUP_BLINK_S. */
