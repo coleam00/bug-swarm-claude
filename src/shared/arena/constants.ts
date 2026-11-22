@@ -73,8 +73,26 @@ export const INPUT_STALE_TICKS = 10;
 export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
-/** The protocol version. A hello with another one is refused with error "version". v8: watching (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's style 2, a CI drone's; v11 (#85): the hive queen's `q` and `queen` event. */
-export const PROTOCOL_VERSION = 11;
+/**
+ * The protocol version. A hello with another one is refused with error "version". v8: watching
+ * (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's
+ * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
+ * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event.
+ */
+export const PROTOCOL_VERSION = 12;
+
+// ---- Snapshots at stream scale (#89, view.ts). ----
+
+/** Every recipient gets a full snapshot (a keyframe) this often, ticks (1 s), and deltas between. */
+export const KEYFRAME_TICKS = 20;
+/**
+ * A player is sent the bugs, pickups and kills inside a square around where their camera centres,
+ * VIEW_MAX / 2 + CULL_MARGIN from that centre on each axis. The margin covers VIEW_PAD, the largest
+ * bug's radius, 100 ms of the fastest bug (a dasher's lunge, 48 units) and pop-in at the edge.
+ */
+export const CULL_MARGIN = 200;
+/** The minimap's far bugs (outside that square) come on keyframes, in cells this many units wide. */
+export const MINIMAP_CELL = 16;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 

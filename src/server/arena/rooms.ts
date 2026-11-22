@@ -56,15 +56,27 @@ export type RoomsOptions = {
   demoTo?: number;
   /** Each new arena's first tick (default 0; BUG_SWARM_START_WAVE, a debug aid, #85). */
   startTick?: number;
+  /** The process's memory, MB, for the stats (default process.memoryUsage; tests pass their own). */
+  memory?: () => { rssMb: number; heapUsedMb: number };
 };
 
-/** `players` counts people only; `bots` the server's fill bots; `watchers` the watching sockets. */
+/**
+ * `players` counts people only; `bots` the server's fill bots; `watchers` the watching sockets;
+ * `memory` the server process's resident set and JS heap in use, MB (#89, for `bun run bots`).
+ */
 export type ArenaStats = {
   arenas: { id: number; players: number; bots: number; watchers: number }[];
   players: number;
   bots: number;
   watchers: number;
   tick: { p50: number | null; p95: number | null };
+  memory: { rssMb: number; heapUsedMb: number };
+};
+
+const MB = 1024 * 1024;
+const processMemory = () => {
+  const m = process.memoryUsage();
+  return { rssMb: Math.round((m.rss / MB) * 10) / 10, heapUsedMb: Math.round((m.heapUsed / MB) * 10) / 10 };
 };
 
 /** One open arena as the stream board shows it: people only, never fill bots. */
@@ -98,6 +110,7 @@ export class Rooms {
   private readonly maxWatchers: number;
   private readonly demoTo: number;
   private readonly startTick: number;
+  private readonly memory: () => { rssMb: number; heapUsedMb: number };
   /** Every watcher: the arena it watches and its socket's send. */
   private readonly watchers = new Map<number, { room: number; send: Send }>();
   private nextWatcher = 1;
@@ -114,6 +127,7 @@ export class Rooms {
     this.maxWatchers = opts.maxWatchers ?? MAX_WATCHERS;
     this.demoTo = opts.demoTo ?? DEMO_BOTS;
     this.startTick = opts.startTick ?? 0;
+    this.memory = opts.memory ?? processMemory;
   }
 
   private welcome(room: Room, you: number): Welcome {
@@ -212,6 +226,7 @@ export class Rooms {
       bots: arenas.reduce((n, a) => n + a.bots, 0),
       watchers: this.watchers.size,
       tick: this.ticks.percentiles(this.now()),
+      memory: this.memory(),
     };
   }
 

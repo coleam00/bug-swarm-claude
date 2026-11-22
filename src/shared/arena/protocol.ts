@@ -2,7 +2,7 @@
 // its type. One validator, `parseClientMessage`, is the only way the server reads a client
 // message: anything malformed, unknown or over MAX_CLIENT_MESSAGE_BYTES is dropped (null). The
 // validator rejects junk only; the simulation still clamps what it accepts (sim.ts clampInput).
-import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES, REVIVE_TICKS, TICK_MS } from "./constants";
+import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 
 /** Client to server. */
 export const CLIENT_TYPES = ["hello", "input", "watch"] as const;
@@ -17,7 +17,7 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
 /**
  * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
  * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
- * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v11,
+ * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v12,
  * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points).
  * Hits, kills and shots travel in snapshots, and so do who is down now (`d`), the pickups on the
  * floor (`f`) and the hive queen's marker or health (`q`), for a late joiner.
@@ -99,7 +99,8 @@ export type Welcome = {
  * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable after a hit or a
  * revive (0/1), dashing (0/1, v3), spawn-protected (0/1, v5, #58), effects (v7, #73: bit i set
  * while the pickup PICKUP_IDS[i] is active on a player in a life, so everyone sees a shield bubble
- * or a laser). Positions and velocities to 0.01, aim to 0.001. Fields are only ever appended, never
+ * or a laser). Since v11 (#89) positions to 0.1 and aim to 0.01, and vx and vy are 0 on every row
+ * but your own (exact, from `me`). Fields are only ever appended, never
  * reordered.
  */
 export type SnapshotPlayer = [
@@ -116,15 +117,15 @@ export type SnapshotPlayer = [
   effects: number,
 ];
 /**
- * One bug: id, its kind's index in BUG_KINDS, x, y (to 0.1). v6: a bug whose phase is not 0 (its
+ * One bug: id, its kind's index in BUG_KINDS, x, y (whole units since v11). v6: a bug whose phase is not 0 (its
  * kind's first) adds a tail: phase (an index into its kind's phases), angle (its locked
  * direction, radians to 0.01) and ticksIn (ticks spent in that phase). A bug in phase 0, every
  * crawler for one, costs no more bytes than before.
  */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number] | [id: number, kind: number, x: number, y: number, phase: number, angle: number, ticksIn: number];
 /**
- * A shot fired this tick: id, owner, where it left the barrel (a CI drone's shot: the drone), its
- * angle (to 0.001), and its style: the gun's (0), a review laser shot (1, v7) or a CI drone's (2,
+ * A shot fired this tick: id, owner, where it left the barrel (to 0.1; a CI drone's shot: the drone),
+ * its angle (to 0.001), and its style: the gun's (0), a review laser shot (1, v7) or a CI drone's (2,
  * v10, #84). It flies per shotTravelAt.
  */
 export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number, style: ShotStyle];
@@ -149,10 +150,11 @@ export type SnapshotDown = [id: number, secondsLeft: number, reviver: number, pr
 /** A pickup on the floor (v7, #73): id, its index in PICKUP_IDS, x, y (to 0.1), ticks before it goes. */
 export type SnapshotPickup = [id: number, pickup: number, x: number, y: number, ticksLeft: number];
 /**
- * The hive queen (v11, #85): empty with none; her marker while she arrives (stage 0: x, y, ticks
- * before she appears); or her alive (stage 1: her bug id, x, y, hit points left and at the start).
- * Her position travels here as well as in her bug row, so her arrow, minimap mark and health bar
- * never depend on which bugs a snapshot carries.
+ * The hive queen (v12, #85), decoded: empty with none; her marker while she arrives (stage 0: x, y,
+ * ticks before she appears); or her alive (stage 1: her bug id, x, y, hit points left and at the
+ * start). Every recipient gets it, never culled to the view, so her arrow, minimap mark and health
+ * bar never depend on which bugs a snapshot carries. On the wire the marker carries the tick she
+ * appears instead of the ticks left, and positions are whole units.
  */
 export type SnapshotQueen = [] | [stage: 0, x: number, y: number, ticksLeft: number] | [stage: 1, id: number, x: number, y: number, hp: number, maxHp: number];
 
@@ -177,8 +179,21 @@ export type SnapshotMe = {
   dn: 0 | 1;
   /** Ticks left of each pickup's effect, by its index in PICKUP_IDS (0: not active; v7). */
   fx: number[];
+  /**
+   * Your robot's position and velocity to 0.01 (v11, #89): the `p` rows carry positions to 0.1
+   * and no velocities, and prediction reconciles against these. The decoded self row has them.
+   */
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
 };
 
+/**
+ * A snapshot as the browser and the bots use it, decoded from the wire by view.ts (v11, #89): the
+ * same shape every version had. Positions are as quantized on the wire (players to 0.1, bugs to
+ * whole units), other players' vx and vy are 0, and your own row carries `me`'s exact numbers.
+ */
 export type Snapshot = {
   t: typeof SNAPSHOT;
   tick: number;
@@ -186,21 +201,76 @@ export type Snapshot = {
   ack: number;
   /** Every player in the arena (at most 20), so the minimap shows everyone. */
   p: SnapshotPlayer[];
-  /** Every bug in the arena (at most MAX_BUGS_PER_ARENA, plus a hive queen, #85). */
+  /** The bugs in your view square plus CULL_MARGIN (every bug when watching). */
   b: SnapshotBug[];
-  /** Shots fired, shots ended and bugs killed in this tick. */
+  /** Shots fired, shots ended and bugs killed in this tick that you could see. */
   s: SnapshotShot[];
   e: SnapshotShotEnd[];
   k: SnapshotKill[];
   /** Every downed player now. */
   d: SnapshotDown[];
-  /** Every pickup on the floor now (at most MAX_PICKUPS_PER_ARENA; v7). */
+  /** The pickups on the floor in your view square (at most MAX_PICKUPS_PER_ARENA; v7). */
   f: SnapshotPickup[];
-  /** The hive queen's marker or health (v11, #85). */
-  q: SnapshotQueen;
   /** The arena's wave. */
   w: number;
+  /** The hive queen's marker or health (v12, #85), never culled. */
+  q: SnapshotQueen;
   me: SnapshotMe;
+  /**
+   * On keyframes only (v11): every bug outside your view square, globs left out, as minimap cells
+   * `[cx0, cy0, cx1, cy1, ...]`, each round(x / MINIMAP_CELL). Absent on deltas and when watching.
+   */
+  m?: number[];
+};
+
+/**
+ * A snapshot as it travels (v11, #89; view.ts writes and reads it). A keyframe (`key: 1`) is whole:
+ * - `you`: the recipient's entity id (0 watching);
+ * - `p`: every player, `[id, x10, y10, aim100, flags, effects]` (x10 = round(x * 10), aim100 =
+ *   round(aim * 100); flags: 1 alive, 2 untouchable, 4 dashing, 8 spawn-protected);
+ * - `b`: the bugs in view, `[id, kind, x, y]` in whole units, a bug out of phase 0 adding
+ *   `phase, angle100, ticksIn`;
+ * - `f`: the pickups in view, `[id, pickup, x10, y10, goneTick]`;
+ * - `d`: every downed player, `[id, downTick, reviver, progress100]`;
+ * - `w`, `me` (every key) and `m` (the minimap's far bugs);
+ * - `q` (v12, #85): the hive queen, `[]`, `[0, x, y, appearTick]` or `[1, id, x, y, hp, maxHp]`,
+ *   never culled.
+ *
+ * A delta (`base`: the tick of the previous snapshot this recipient was sent) changes the
+ * receiver's copy of that snapshot, in this order: `gb` the mirror indices of bugs gone; `b` a flat
+ * `dx, dy` per remaining bug in mirror order, plus `dangle100, dticksIn` for each whose mirror row
+ * has a tail (0, 0 when `bt` replaces it); `bt` `[index, phase, angle100, ticksIn]` for a new tail
+ * (`[index, 0]` drops it); `nb` new bug rows, appended. Players the same way: `gp`, `p` (flat
+ * `dx10, dy10, daim100`), `pf` `[index, flags, effects]`, `np`. Pickups: `gf` gone ids, `nf` new
+ * rows. `d`, `w` and `q` only when they changed; `me` only its changed keys. A field with nothing in it
+ * is left out. `s`, `e` and `k` (this tick's events, culled to the view) are on every snapshot.
+ */
+export type WireSnapshot = {
+  t: typeof SNAPSHOT;
+  tick: number;
+  ack: number;
+  key?: 1;
+  you?: number;
+  base?: number;
+  p?: number[] | number[][];
+  b?: number[] | number[][];
+  f?: number[][];
+  d?: number[][];
+  w?: number;
+  q?: number[];
+  me?: Partial<SnapshotMe>;
+  m?: number[];
+  gb?: number[];
+  bt?: number[][];
+  nb?: number[][];
+  gp?: number[];
+  pf?: number[][];
+  np?: number[][];
+  gf?: number[];
+  nf?: number[][];
+  s?: SnapshotShot[];
+  e?: SnapshotShotEnd[];
+  k?: SnapshotKill[];
 };
 
 export type ArenaEvent = {
@@ -215,7 +285,7 @@ export type ArenaEvent = {
   points?: number;
   /** With "pickup": the pickup's index in PICKUP_IDS (v7). */
   pickup?: number;
-  /** With "queen" (v11): each rewarded player's id and points. */
+  /** With "queen" (v12): each rewarded player's id and points. */
   paid?: [id: number, points: number][];
   /** With "over": the life's score, kills and length. */
   score?: number;
@@ -226,7 +296,10 @@ export type ArenaEvent = {
 /** With code `build`: the server's build id. */
 export type ErrorMessage = { t: typeof ERROR; code: ErrorCode; build?: string };
 
+/** A server message as the browser and the bots handle it, its snapshot decoded (view.ts). */
 export type ServerMessage = Welcome | Snapshot | ArenaEvent | ErrorMessage;
+/** A server message as it travels. */
+export type WireMessage = Welcome | WireSnapshot | ArenaEvent | ErrorMessage;
 
 /** UTF-8 length of a string, without allocating. */
 export function utf8Bytes(s: string): number {
@@ -291,144 +364,17 @@ export function parseClientMessage(raw: string | ArrayBuffer | Uint8Array): Clie
 
 /**
  * Reads one server message in the browser, or null if it is not one. The server is trusted, so
- * this checks only that it is an object with a known `t`.
+ * this checks only that it is an object with a known `t`. A snapshot still needs decoding
+ * (view.ts createSnapshotReader).
  */
-export function parseServerMessage(raw: unknown): ServerMessage | null {
+export function parseServerMessage(raw: unknown): WireMessage | null {
   if (typeof raw !== "string") return null;
   try {
     const m: unknown = JSON.parse(raw);
-    return isRecord(m) && (SERVER_TYPES as readonly unknown[]).includes(m.t) ? (m as ServerMessage) : null;
+    return isRecord(m) && (SERVER_TYPES as readonly unknown[]).includes(m.t) ? (m as WireMessage) : null;
   } catch {
     return null;
   }
-}
-
-const q1 = (v: number) => Math.round(v * 10) / 10;
-const q2 = (v: number) => Math.round(v * 100) / 100;
-const q3 = (v: number) => Math.round(v * 1000) / 1000;
-
-type PlayerRow = {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  aim: number;
-  alive: boolean;
-  invulnTicks: number;
-  dashTicks: number;
-  protectTicks: number;
-  down: boolean;
-  downTick: number;
-  reviver: number;
-  reviveTicks: number;
-  /** Ticks left of each pickup's effect, by its index in PICKUP_IDS. */
-  effect: readonly number[];
-};
-
-/** A player's effects as a bitmask: bit i while effect i is active in a life (v7). */
-function effectBits(p: PlayerRow): number {
-  if (!p.alive) return 0;
-  let bits = 0;
-  for (let i = 0; i < p.effect.length; i++) if (p.effect[i]! > 0) bits |= 1 << i;
-  return bits;
-}
-
-/** The players part of a snapshot, as JSON: `[[id,x,y,vx,vy,aim,alive,inv,dash,prot,effects],...]`, quantized. */
-export function encodeSnapshotPlayers(players: readonly PlayerRow[]): string {
-  let s = "[";
-  for (let i = 0; i < players.length; i++) {
-    const p = players[i]!;
-    if (i > 0) s += ",";
-    s += `[${p.id},${q2(p.x)},${q2(p.y)},${q2(p.vx)},${q2(p.vy)},${q3(p.aim)},${p.alive ? 1 : 0},${p.alive && p.invulnTicks > 0 ? 1 : 0},${p.alive && p.dashTicks > 0 ? 1 : 0},${p.alive && p.protectTicks > 0 ? 1 : 0},${effectBits(p)}]`;
-  }
-  return s + "]";
-}
-
-/** What the shared part of a snapshot is built from: sim.ts ArenaState fits it. */
-export type SharedSource = {
-  tick: number;
-  players: readonly PlayerRow[];
-  bugs: readonly { id: number; kind: string; x: number; y: number; hp: number; phase: number; phaseTicks: number; dx: number; dy: number }[];
-  floor: readonly { id: number; kind: string; x: number; y: number; ticksLeft: number }[];
-  /** The hive queen (#85; sim.ts QueenState): stage 0 none, 1 her marker, 2 alive as bug `bugId`. */
-  queen: { stage: number; x: number; y: number; ticksLeft: number; bugId: number; maxHp: number };
-  events: {
-    shotsFired: readonly { id: number; owner: number; x: number; y: number; angle: number; laser: boolean; drone: boolean }[];
-    shotsEnded: readonly { id: number; hit: boolean; blocked: boolean; travelled: number }[];
-    kills: readonly { bug: number; by: number; x: number; y: number; points: number; kind: string }[];
-  };
-};
-
-/**
- * The part of a snapshot every socket in an arena shares, built once per tick: `"p":...,"b":...,
- * "s":...,"e":...,"k":...,"d":...,"f":...,"q":...,"w":...` (no braces). `kinds` is BUG_KINDS and `pickups`
- * PICKUP_IDS, passed in so this file imports no simulation; `wave` is the arena's wave. `src.tick` is the tick after the step
- * (the snapshot's tick), so a player who went down in the step just run shows DOWN_S less one
- * tick left.
- */
-export function encodeSnapshotShared(src: SharedSource, kinds: readonly string[], wave: number, pickups: readonly string[]): string {
-  let b = "[";
-  for (let i = 0; i < src.bugs.length; i++) {
-    const g = src.bugs[i]!;
-    if (i > 0) b += ",";
-    b += `[${g.id},${kinds.indexOf(g.kind)},${q1(g.x)},${q1(g.y)}`;
-    b += g.phase === 0 ? "]" : `,${g.phase},${q2(Math.atan2(g.dy, g.dx))},${g.phaseTicks}]`;
-  }
-  b += "]";
-  const ev = src.events;
-  let s = "[";
-  for (let i = 0; i < ev.shotsFired.length; i++) {
-    const f = ev.shotsFired[i]!;
-    if (i > 0) s += ",";
-    s += `[${f.id},${f.owner},${q2(f.x)},${q2(f.y)},${q3(f.angle)},${f.drone ? SHOT_DRONE : f.laser ? SHOT_LASER : SHOT_GUN}]`;
-  }
-  s += "]";
-  let e = "[";
-  for (let i = 0; i < ev.shotsEnded.length; i++) {
-    const x = ev.shotsEnded[i]!;
-    if (i > 0) e += ",";
-    e += `[${x.id},${x.blocked ? 2 : x.hit ? 1 : 0},${q1(x.travelled)}]`;
-  }
-  e += "]";
-  let k = "[";
-  for (let i = 0; i < ev.kills.length; i++) {
-    const x = ev.kills[i]!;
-    if (i > 0) k += ",";
-    k += `[${x.bug},${x.by},${q1(x.x)},${q1(x.y)},${x.points},${kinds.indexOf(x.kind)}]`;
-  }
-  k += "]";
-  let d = "[";
-  for (let i = 0; i < src.players.length; i++) {
-    const p = src.players[i]!;
-    if (!p.down) continue;
-    if (d.length > 1) d += ",";
-    const left = (Math.max(0, DOWN_TICKS - (src.tick - p.downTick)) * TICK_MS) / 1000;
-    d += `[${p.id},${q2(left)},${p.reviver},${q2(p.reviveTicks / REVIVE_TICKS)}]`;
-  }
-  d += "]";
-  let f = "[";
-  for (let i = 0; i < src.floor.length; i++) {
-    const x = src.floor[i]!;
-    if (i > 0) f += ",";
-    f += `[${x.id},${pickups.indexOf(x.kind)},${q1(x.x)},${q1(x.y)},${x.ticksLeft}]`;
-  }
-  f += "]";
-  return `"p":${encodeSnapshotPlayers(src.players)},"b":${b},"s":${s},"e":${e},"k":${k},"d":${d},"f":${f},"q":${encodeQueen(src)},"w":${wave}`;
-}
-
-/** The hive queen's `q` (SnapshotQueen, v11): `[]`, `[0,x,y,ticksLeft]` or `[1,id,x,y,hp,maxHp]`. */
-function encodeQueen(src: SharedSource): string {
-  const q = src.queen;
-  if (q.stage === 1) return `[0,${q1(q.x)},${q1(q.y)},${q.ticksLeft}]`;
-  if (q.stage !== 2) return "[]";
-  for (const g of src.bugs) if (g.id === q.bugId) return `[1,${g.id},${q1(g.x)},${q1(g.y)},${g.hp},${q.maxHp}]`;
-  return "[]";
-}
-
-/** One socket's snapshot: its own ack and numbers around the shared part. */
-export function encodeSnapshot(tick: number, ack: number, me: SnapshotMe, shared: string): string {
-  return `{"t":"${SNAPSHOT}","tick":${tick},"ack":${ack},"me":{"sc":${me.sc},"ki":${me.ki},"st":${me.st},"mu":${me.mu},"he":${q2(me.he)},"lk":${me.lk},"hl":${me.hl},"al":${me.al},"dk":${me.dk},"dc":${me.dc},"dn":${me.dn},"fx":[${me.fx.join(",")}]},${shared}}`;
 }
 
 export function encodeHello(v: number, name: string, team: string, player: string, touch: boolean, build = ""): string {

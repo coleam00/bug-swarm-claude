@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { TICK_MS } from "../../shared/arena/constants";
 import type { SnapshotPlayer } from "../../shared/arena/protocol";
-import { DELAY_TICKS, INTERP_BUFFER, bugSpan, createInterp, downAt, newestDown, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
+import { DELAY_TICKS, INTERP_BUFFER, easeHeading, bugSpan, createInterp, downAt, newestDown, pushSnapshot, renderTick, sample, type BugSpan } from "./interp";
 
 const row = (id: number, x: number, y: number, aim = 0, dash: 0 | 1 = 0, fx = 0): SnapshotPlayer => [id, x, y, 0, 0, aim, 1, 0, dash, 0, fx];
 const out = () => ({ x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false, fx: 0 });
@@ -166,5 +166,20 @@ describe("downs", () => {
     expect(newestDown(it, 1)).toBeUndefined();
     pushSnapshot(it, 12, [row(1, 0, 0)], 100, [], [[1, 4.9, 0, 0]]);
     expect(newestDown(it, 1)).toEqual([1, 4.9, 0, 0]);
+  });
+});
+
+describe("a bug's heading (#89)", () => {
+  test("a bug seen for the first time faces its direction at once; after that it eases toward it the short way round", () => {
+    expect(easeHeading(undefined, 1.2, 1 / 60)).toBe(1.2);
+    const step = easeHeading(0, 0.5, 1 / 60);
+    expect(step).toBeGreaterThan(0);
+    expect(step).toBeLessThan(0.5);
+    // Across the wrap: from just under +pi toward just over -pi turns up through pi, not back through 0.
+    expect(easeHeading(3.1, -3.1, 1 / 60)).toBeGreaterThan(3.1);
+    // About a tick of frames covers most of a turn.
+    let h = 0;
+    for (let i = 0; i < 6; i++) h = easeHeading(h, 1, 1 / 60);
+    expect(h).toBeGreaterThan(0.75);
   });
 });

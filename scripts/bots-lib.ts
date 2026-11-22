@@ -134,9 +134,11 @@ export function randomPlayerId(): string {
 }
 
 /**
- * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`), every
- * bug, with each bug's velocity derived from how far it moved since the last snapshot that had it,
- * and every pickup on the floor (`f`, #73), as `bun run skill`'s observe sees them.
+ * What a policy bot sees, kept from its snapshots: itself (from its `p` row and `me`), the bugs
+ * its snapshot carries, with each bug's velocity derived from how far it moved since the last
+ * snapshot that had it, and the pickups on the floor (`f`, #73). Since #89 a snapshot holds only the
+ * bugs and pickups in the bot's view square, so this is less than `bun run skill`'s observe, which
+ * sees the whole arena.
  */
 export type ObservationTracker = { obs: Observation; update(m: Snapshot, you: number): void };
 
@@ -185,6 +187,73 @@ export function createObservationTracker(): ObservationTracker {
   };
 }
 
+/** The stream-scale budgets `bun run bots` holds a run to (#89, architecture.md "Load"). */
+export const TICK_P95_BUDGET_MS = 10;
+export const KBPS_PER_PLAYER_BUDGET = 40;
+
+/** One bot's received payload: bytes after its welcome in each half of the run, and when it was welcomed (ms). */
+export type BotBytes = { first: number; second: number; welcomedAt: number | null };
+
+/**
+ * Counts one message's payload `bytes`, received at `nowMs`, toward a bot's run: nothing before its
+ * welcome, the first half before `midMs`, the gated second half from it.
+ */
+export function countBytes(b: BotBytes, bytes: number, nowMs: number, midMs: number): void {
+  if (b.welcomedAt === null) return;
+  if (nowMs >= midMs) b.second += bytes;
+  else b.first += bytes;
+}
+
+/** The process exit code for a run: 1 when budgetVerdict named any miss, else 0. */
+export function exitCode(misses: readonly string[]): 0 | 1 {
+  return misses.length > 0 ? 1 : 0;
+}
+
+/**
+ * A bot's KB/s (1 KB = 1000 B) over the second half of the run, `midMs` to `endMs`, or over its
+ * share of it when it was welcomed later. The first half is left out: bugs are still ramping up to
+ * the arena's cap then, so it under-reads. Null for a bot never welcomed or welcomed too late.
+ */
+export function secondHalfKbps(b: BotBytes, midMs: number, endMs: number): number | null {
+  if (b.welcomedAt === null) return null;
+  const from = Math.max(midMs, b.welcomedAt);
+  return endMs - from >= 1000 ? b.second / (endMs - from) : null;
+}
+
+/** A bot's KB/s over the first half of the run, from its welcome to `midMs` (the ramp), or null. */
+export function firstHalfKbps(b: BotBytes, midMs: number): number | null {
+  if (b.welcomedAt === null || midMs - b.welcomedAt < 1000) return null;
+  return b.first / (midMs - b.welcomedAt);
+}
+
+export type Rates = { mean: number; p95: number; max: number; count: number };
+
+/** Mean, p95 and max of per-player rates, or null with none. */
+export function rateStats(rates: readonly number[]): Rates | null {
+  if (rates.length === 0) return null;
+  const v = [...rates].sort((a, b) => a - b);
+  return { mean: v.reduce((a, b) => a + b, 0) / v.length, p95: v[Math.min(v.length - 1, Math.ceil(v.length * 0.95) - 1)]!, max: v[v.length - 1]!, count: v.length };
+}
+
+/**
+ * Which budgets a run missed, as lines to print (empty: it passed). Errors and a stats endpoint
+ * that never answered always count; with players (`count` above 0) every bot must have joined,
+ * the tick p95 must be under TICK_P95_BUDGET_MS and no bot may receive over KBPS_PER_PLAYER_BUDGET.
+ */
+export function budgetVerdict(v: { errors: number; joins: number; count: number; tick: TickStats; kbps: Rates | null }): string[] {
+  const misses: string[] = [];
+  if (v.errors > 0) misses.push(`${v.errors} error(s)`);
+  if (!v.tick) misses.push("server stats unavailable");
+  if (v.count === 0) return misses;
+  if (v.joins < v.count) misses.push(`only ${v.joins} of ${v.count} bots joined`);
+  const p95 = v.tick?.p95;
+  if (v.tick && (p95 === null || p95 === undefined)) misses.push("no tick p95 measured");
+  else if (p95 !== null && p95 !== undefined && p95 >= TICK_P95_BUDGET_MS) misses.push(`tick p95 ${p95.toFixed(2)} ms is not under ${TICK_P95_BUDGET_MS} ms`);
+  if (!v.kbps) misses.push("no per-player bandwidth measured");
+  else if (v.kbps.max > KBPS_PER_PLAYER_BUDGET) misses.push(`a player received ${v.kbps.max.toFixed(1)} KB/s, over ${KBPS_PER_PLAYER_BUDGET} KB/s`);
+  return misses;
+}
+
 export type Tally = {
   joins: number;
   /** The arena id in each welcome. */
@@ -197,10 +266,18 @@ export type Tally = {
   lives: number[];
   /** Each watcher's bandwidth: UTF-8 bytes received, over the seconds since its welcome. */
   watchers: { bytes: number; seconds: number }[];
+  /** Each bot's KB/s over the second half of the run (secondHalfKbps), the gated one. */
+  kbps: number[];
+  /** Each bot's KB/s over the first half (firstHalfKbps), printed only: bugs are still ramping up. */
+  kbpsFirst: number[];
+  /** Server memory from the stats, MB. */
+  memory: { rssMb: number; heapUsedMb: number } | null;
+  /** Arenas open on the server at the end. */
+  serverArenas: number | null;
 };
 
 export function createTally(): Tally {
-  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watchers: [] };
+  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watchers: [], kbps: [], kbpsFirst: [], memory: null, serverArenas: null };
 }
 
 /** Watchers' received KB/s (1 KB = 1000 bytes): mean and max, or null with none measured. */
@@ -217,7 +294,7 @@ function median(values: number[]): number | null {
   return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
 }
 
-type TickStats = { p50: number | null; p95: number | null } | null;
+export type TickStats = { p50: number | null; p95: number | null } | null;
 
 const ms = (v: number | null | undefined) => (v === null || v === undefined ? "-" : `${v.toFixed(2)} ms`);
 
@@ -235,9 +312,27 @@ export function formatSummary(args: BotsArgs, tally: Tally, seconds: number, tic
     `errors: ${tally.errors.length}${errorKinds.size ? ` (${[...errorKinds].map(([k, n]) => `${k} x${n}`).join(", ")})` : ""}`,
     `server tick: p50 ${ms(tick?.p50)}, p95 ${ms(tick?.p95)}${tick ? "" : " (stats unavailable)"}`,
   ];
+  if (tally.memory) lines.push(`server memory: rss ${tally.memory.rssMb.toFixed(1)} MB, heap used ${tally.memory.heapUsedMb.toFixed(1)} MB, ${tally.serverArenas ?? "-"} arena(s) open`);
+  const kbps = rateStats(tally.kbps);
+  if (args.count > 0) {
+    lines.push(
+      kbps
+        ? `per player (second half, payload): mean ${kbps.mean.toFixed(1)} KB/s, p95 ${kbps.p95.toFixed(1)} KB/s, max ${kbps.max.toFixed(1)} KB/s over ${kbps.count} bot(s)`
+        : "per player: no bandwidth measured",
+    );
+    const first = rateStats(tally.kbpsFirst);
+    if (first) lines.push(`per player (first half, not gated: bugs still ramping up): mean ${first.mean.toFixed(1)} KB/s, max ${first.max.toFixed(1)} KB/s`);
+  }
   if (args.watchers > 0) {
     const r = watcherRates(tally.watchers);
     lines.push(`watchers: ${tally.watchers.length} of ${args.watchers} watching, ${r ? `${r.mean.toFixed(1)} KB/s each on average, ${r.max.toFixed(1)} KB/s max` : "no bandwidth measured"}`);
   }
+  const misses = budgetVerdict({ errors: tally.errors.length, joins: tally.joins, count: args.count, tick, kbps });
+  if (args.count > 0) {
+    lines.push(`budget: tick p95 under ${TICK_P95_BUDGET_MS} ms: ${tick?.p95 !== null && tick?.p95 !== undefined && tick.p95 < TICK_P95_BUDGET_MS ? "pass" : "MISS"}`);
+    lines.push(`budget: at most ${KBPS_PER_PLAYER_BUDGET} KB/s per player: ${kbps && kbps.max <= KBPS_PER_PLAYER_BUDGET ? "pass" : "MISS"}`);
+  }
+  lines.push(`budget: 0 errors: ${tally.errors.length === 0 ? "pass" : "MISS"}`);
+  lines.push(misses.length === 0 ? "verdict: pass" : `verdict: MISS (${misses.join("; ")})`);
   return lines;
 }

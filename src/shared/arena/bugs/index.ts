@@ -47,8 +47,11 @@ export function pressureAge(p: Pick<Player, "lifeStartTick" | "firstLife">, tick
   return p.firstLife ? Math.max(0, age - FIRST_LIFE_EASY_S) : age;
 }
 
-/** The view square's centre on one axis: the camera's clamp at the wall (camera.ts clampAxis). */
-function viewCentre(c: number, world: number): number {
+/**
+ * The view square's centre on one axis: the camera's clamp at the wall (camera.ts clampAxis). Also
+ * where a player's snapshot is culled around (view.ts, #89).
+ */
+export function viewCentre(c: number, world: number): number {
   const lo = VIEW_MAX / 2 - VIEW_WALL_MARGIN;
   const hi = world - VIEW_MAX / 2 + VIEW_WALL_MARGIN;
   return Math.min(hi, Math.max(lo, c));
