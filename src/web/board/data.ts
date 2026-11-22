@@ -64,6 +64,9 @@ export function parseBoard(body: unknown): Board | null {
   return { top, teams, playing: body.playing, arenas };
 }
 
+/** "1 QUEEN", "2 QUEENS", or null for none: the folded queens on '+N more'. */
+const queensLine = (n: number): string | null => (n === 0 ? null : n === 1 ? "1 QUEEN" : `${n} QUEENS`);
+
 /**
  * The arena strip with room for `slots` chips: one pill per open arena, by id (the order holds still
  * on stream). With more arenas than slots, the last slot becomes '+N more' for the rest. view.ts
@@ -72,8 +75,6 @@ export function parseBoard(body: unknown): Board | null {
  * folded into '+N more' with a queen alive are counted on that chip instead, "2 QUEENS" (owner
  * ruling on #102), so a queen never goes unseen; the order stays by id.
  */
-const queensLine = (n: number): string | null => (n === 0 ? null : n === 1 ? "1 QUEEN" : `${n} QUEENS`);
-
 export function arenaPills(arenas: LiveArena[], slots: number): ArenaPills {
   const sorted = [...arenas].sort((a, b) => a.id - b.id);
   const shown = sorted.length <= slots ? sorted : sorted.slice(0, Math.max(0, slots - 1));
