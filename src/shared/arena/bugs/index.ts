@@ -191,7 +191,8 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
  * 1. each player who is up has their budget grow by spawnRate(pressureAge) times DT (capped at
  *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them, chasing them, while the arena
  *    has room; its kind is picked by the mix (pickKind); a downed player's budget waits;
- * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one up);
+ * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one up)
+ *    and that target's pressureAge (0 with no target);
  *    a step may launch a bug (launch: it is not stepped until the next tick, but it can touch in
  *    this one) or expire (it leaves with no touch, kill or score);
  * 3. a bug touching a player who is up and can be hit (within PLAYER_RADIUS plus its kind's
@@ -214,7 +215,7 @@ export function stepBugs(state: ArenaState): void {
     const b = bugs[i]!;
     const target = chooseTarget(state, b);
     b.target = target ? target.id : 0;
-    const r = bugDef(b.kind).step(b, target);
+    const r = bugDef(b.kind).step(b, target, target ? pressureAge(target, state.tick) : 0);
     if (r === STEP_LAUNCH) launch(state, b);
     else if (r === STEP_EXPIRE) b.hp = 0;
   }

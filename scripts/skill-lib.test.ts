@@ -120,7 +120,7 @@ describe("bun run skill", () => {
   test("quantiles and arguments", () => {
     expect(quantile([1, 2, 3, 4], 0.5)).toBe(2.5);
     expect(quantile([], 0.5)).toBe(0);
-    expect(parseSkillArgs([])).toEqual({ seeds: 30, lateSeeds: 60, max: 300 });
+    expect(parseSkillArgs([])).toEqual({ seeds: 30, lateSeeds: 240, max: 300 });
     expect(parseSkillArgs(["--seeds", "8", "--late-seeds", "12", "--max", "60"])).toEqual({ seeds: 8, lateSeeds: 12, max: 60 });
     expect(parseSkillArgs(["--late-seeds", "0"])).toBe(USAGE);
     expect(parseSkillArgs(["--seeds", "0"])).toBe(USAGE);

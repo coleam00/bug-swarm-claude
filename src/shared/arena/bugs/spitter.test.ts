@@ -2,7 +2,7 @@
 // tells before every glob, leads a moving target, and its spawn rules and kill.
 import { describe, expect, test } from "bun:test";
 import { DT, MAX_SPEED, WAVE_S } from "../constants";
-import { createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Kill } from "../sim";
+import { createArena, joinPlayer, stepArena, type ArenaState, type Bug, type Kill, type Player } from "../sim";
 import { arenaWith, downNow, hold, placeBug, stepQuiet } from "../testkit";
 import { GLOB_RADIUS, GLOB_SPEED } from "./glob";
 import { bugDef } from "./registry";
@@ -30,6 +30,12 @@ const ITEM_TELL_TICKS = 16; // 0.8 s
 const ITEM_GLOB_SPEED = 300;
 
 const globs = (a: ArenaState) => a.bugs.filter((b) => b.kind === GLOB);
+
+/** Makes `p`'s life `seconds` old in pressure age (not a first life, so nothing is held back). */
+function aged(a: ArenaState, p: Player, seconds: number): void {
+  p.firstLife = false;
+  p.lifeStartTick = a.tick - Math.round(seconds / DT);
+}
 
 /** A spitter at the end of its tell, `gap` units right of (x, y): its next step launches. */
 function aboutToSpit(a: ArenaState, x: number, y: number): Bug {
@@ -86,6 +92,7 @@ describe("spitter tell and spit", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
     p.invulnTicks = 1e9;
+    aged(a, p, 120);
     const s = placeBug(a, 1500, 1200, SPITTER);
     const phases: number[] = [];
     const seen = new Set<number>();
@@ -136,6 +143,7 @@ describe("spitter tell and spit", () => {
   test("it does not tell before RELOAD_TICKS in keep, counted from its spawn", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     ps[0]!.invulnTicks = 1e9;
+    aged(a, ps[0]!, 120);
     const s = placeBug(a, 1500, 1200, SPITTER);
     let first = -1;
     for (let n = 0; n < RELOAD_TICKS + 5 && first < 0; n++) {
@@ -165,6 +173,67 @@ describe("spitter tell and spit", () => {
     expect([g!.x, g!.y, g!.dx, g!.dy, g!.vx, g!.vy, g!.phase]).toEqual([1500 - MUZZLE, 1200, -1, 0, -GLOB_SPEED, 0, 0]);
     stepQuiet(a);
     expect(g!.x).toBeCloseTo(1500 - MUZZLE - GLOB_SPEED * DT, 9);
+  });
+});
+
+describe("spitter spares young lives (owner ruling)", () => {
+  /** Steps a spitter beside `p` for `ticks`; returns how many steps it spent telling and how many globs it lobbed. */
+  function watch(a: ArenaState, p: Player, ticks: number): { tells: number; launches: number } {
+    p.invulnTicks = 1e9;
+    const s = placeBug(a, p.x + 300, p.y, SPITTER);
+    let tells = 0;
+    let launches = 0;
+    for (let n = 0; n < ticks; n++) {
+      const before = a.nextBugId;
+      stepQuiet(a);
+      if (s.phase === TELL) tells++;
+      launches += a.nextBugId - before;
+    }
+    return { tells, launches };
+  }
+
+  test("it never tells at a life under 60 s old", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    aged(a, p, 0);
+    // From 0 to 59 s of pressure age: never a tell.
+    expect(watch(a, p, Math.round(59 / DT))).toEqual({ tells: 0, launches: 0 });
+  });
+
+  test("a first life's 10 s hold-back counts: at 65 s old it is 55 s of pressure age, and spared", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.lifeStartTick = a.tick - Math.round(65 / DT);
+    expect(p.firstLife).toBe(true);
+    expect(watch(a, p, Math.round(4 / DT)).launches).toBe(0);
+  });
+
+  test("from 60 s of pressure age it tells and spits as usual", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    aged(a, p, 60);
+    const r = watch(a, p, 200);
+    expect(r.tells).toBeGreaterThan(0);
+    expect(r.launches).toBeGreaterThan(0);
+  });
+
+  test("a spitter between a young life and an old one, nearer the young, holds fire until the young life comes of age", () => {
+    const { a, ps } = arenaWith([1200, 1200], [1200, 1900]);
+    const [young, old] = [ps[0]!, ps[1]!];
+    aged(a, young, 40);
+    aged(a, old, 300);
+    young.invulnTicks = 1e9;
+    old.invulnTicks = 1e9;
+    const s = placeBug(a, 1200, 1500, SPITTER);
+    let firstTell = -1;
+    for (let n = 0; n < Math.round(30 / DT) && firstTell < 0; n++) {
+      stepQuiet(a);
+      if (s.phase === TELL) firstTell = n;
+    }
+    // Its target is the young life (nearer), so it waits for that life's 60th second: about 20 s.
+    expect(s.target).toBe(young.id);
+    expect(firstTell * DT).toBeGreaterThanOrEqual(20 - DT);
+    expect(firstTell * DT).toBeLessThan(21);
   });
 });
 

@@ -3,7 +3,10 @@
 // - keep: holds KEEP_NEAR to KEEP_FAR units from the nearest player who is up: closing in or
 //   backing off at MOVE_SPEED outside the band, strafing slowly round them inside it (one way by
 //   its id, turning back when a wall stops it). Once it has spent RELOAD_TICKS in keep (counted
-//   from its spawn too) with its target within TELL_RANGE, it starts its tell.
+//   from its spawn too) with its target within TELL_RANGE, it starts its tell, but never at a
+//   life whose pressure age is under SPITTER_FROM_S (owner ruling, #72): a spitter spawns for no
+//   life younger than that, so a newcomer joining an arena full of spitters gets the same first
+//   minute as one joining at the start. It circles them without spitting.
 // - tell: stands still, swelling and glowing (the browser draws it), for TELL_TICKS ticks, the
 //   first one included, facing where its target was when it began. It never cancels. On its last
 //   tick it aims with lead (leadAim) and launches one glob (glob.ts) from its mouth: the stepper
@@ -39,14 +42,14 @@ export const SPIT_TICKS = Math.round(0.3 / DT);
 export const MUZZLE = SPITTER_RADIUS + GLOB_RADIUS;
 /** The longest lead it aims for, seconds of glob flight. */
 export const LEAD_MAX_S = 2;
-/** A life must be this old (pressure age) before a spitter spawns for it, seconds. */
+/** A life must be this old (pressure age) before a spitter spawns for it or spits at it, seconds. */
 export const SPITTER_FROM_S = 60;
 /** Its share of a life's spawns at SPITTER_FROM_S, rising by SPITTER_SHARE_RAMP a second to SPITTER_SHARE_MAX. */
 export const SPITTER_SHARE_START = 0.08;
 export const SPITTER_SHARE_RAMP = 0.004;
 export const SPITTER_SHARE_MAX = 0.2;
-/** The most spitters alive in one arena. Not final: at 4 the late-joiner gate reads 0.74x on 240 seeds, so the owner's answer to #72's ask sets the rule and this cap. */
-export const SPITTER_MAX_PER_ARENA = 4;
+/** The most spitters alive in one arena (owner ruling, #72). */
+export const SPITTER_MAX_PER_ARENA = 6;
 
 export const SPITTER_PHASES = ["keep", "tell", "spit"] as const;
 export const [KEEP, TELL, SPIT] = [0, 1, 2] as const;
@@ -109,7 +112,7 @@ function enter(b: Bug, phase: number): void {
 }
 
 /** One keep tick: back to the band, or strafe inside it; then maybe start the tell. */
-function keep(b: Bug, target: Player | null): void {
+function keep(b: Bug, target: Player | null, targetAge: number): void {
   b.vx = 0;
   b.vy = 0;
   if (!target) {
@@ -119,7 +122,7 @@ function keep(b: Bug, target: Player | null): void {
   const tx = target.x - b.x;
   const ty = target.y - b.y;
   const d = Math.hypot(tx, ty);
-  if (b.phaseTicks >= RELOAD_TICKS && d <= TELL_RANGE) {
+  if (b.phaseTicks >= RELOAD_TICKS && d <= TELL_RANGE && targetAge >= SPITTER_FROM_S) {
     enter(b, TELL);
     if (d > 0) {
       b.dx = tx / d;
@@ -181,7 +184,7 @@ export const spitter: BugKindDef = {
   points: 30,
   spawn: { unlockWave: 3, share: spitterShare, maxPerArena: SPITTER_MAX_PER_ARENA },
   launches: { kind: "glob", speed: GLOB_SPEED },
-  step(b, target) {
+  step(b, target, targetAge) {
     switch (b.phase) {
       case TELL:
         b.vx = 0;
@@ -201,6 +204,6 @@ export const spitter: BugKindDef = {
         enter(b, KEEP);
         return;
     }
-    keep(b, target);
+    keep(b, target, targetAge);
   },
 };
