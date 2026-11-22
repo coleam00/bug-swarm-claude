@@ -142,7 +142,7 @@ export type BugKind = (typeof BUG_KINDS)[number];
  * Every pickup id, in protocol order (a snapshot carries a pickup's index in this list, and a
  * player's active effects as a bitmask over it).
  */
-export const PICKUP_IDS = ["shield", "laser"] as const;
+export const PICKUP_IDS = ["shield", "laser", "bomb"] as const;
 export type PickupId = (typeof PICKUP_IDS)[number];
 /** The most pickups lying on the floor of one arena; a drop past it is lost, never queued. */
 export const MAX_PICKUPS_PER_ARENA = 6;
