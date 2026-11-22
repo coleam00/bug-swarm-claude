@@ -952,7 +952,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       subW = bannerSub ? ctx.measureText(bannerSub).width : 0;
     }
     const halfW = Math.min(maxW, coming ? comingW : Math.max(downW, subW)) / 2 + BANNER_MARGIN;
-    const hudBottom = hud.top + LINE_MIDDLE + QUEEN_BAR_SHIFT + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
+    const hudBottom = hud.top + LINE_MIDDLE + barShift(sc) + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
     const y = bannerY(cssH, bannerFloor(cx, halfW, minimap.x, minimap.y + minimap.size + BANNER_MARGIN * 2, hudBottom, BANNER_MARGIN));
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
