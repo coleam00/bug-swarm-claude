@@ -166,8 +166,16 @@ export const SPAWN_RAMP_PER_S2 = 0.05;
 export const SPAWN_MAX_PER_S = 8;
 /** A player's unspent spawn budget is capped here, so a full arena does not bank spawns. */
 export const SPAWN_BUDGET_CAP = 2;
-/** The most bugs in one arena; past it no bug spawns (keeps the tick inside its budget). */
+/**
+ * The most bugs in one arena; past it no bug spawns or is launched (keeps the tick inside its
+ * budget). A hive queen (#85) is placed whatever the count, so an arena holds at most one more.
+ */
 export const MAX_BUGS_PER_ARENA = 150;
+/**
+ * While a hive queen (#85) is arriving or alive, the spawn mix stops this many short of
+ * MAX_BUGS_PER_ARENA, so her brood and her ring of globs have room (bugs/index.ts spawnCap).
+ */
+export const QUEEN_RESERVE = 16;
 /** A bug spawns this far from the player it targets, units. */
 export const SPAWN_DIST_MIN = 560;
 export const SPAWN_DIST_MAX = 720;

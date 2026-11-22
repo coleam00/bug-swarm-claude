@@ -16,7 +16,7 @@
 //   nothing is launched and it goes back to keep.
 // - spit: stands for SPIT_TICKS ticks (the recoil), then keeps its distance again.
 // Contact is the stepper's, as for every kind. A sidestep or a dash beats a glob, or a shot does.
-import { DT, MAX_SPEED, WORLD_H, WORLD_W } from "../constants";
+import { DT, MAX_BUGS_PER_ARENA, MAX_SPEED, WORLD_H, WORLD_W } from "../constants";
 import type { Bug, Player } from "../sim";
 import { GLOB_RADIUS, GLOB_SPEED } from "./glob";
 import { STEP_LAUNCH, type BugKindDef } from "./kind";
@@ -185,7 +185,7 @@ export const spitter: BugKindDef = {
   hp: 3,
   points: 30,
   spawn: { unlockWave: 3, share: spitterShare, maxPerArena: SPITTER_MAX_PER_ARENA },
-  launches: { kind: "glob", speed: GLOB_SPEED },
+  launches: [{ kind: "glob", speed: GLOB_SPEED, count: 1, capAt: MAX_BUGS_PER_ARENA }],
   step(b, target, targetAge) {
     switch (b.phase) {
       case TELL:

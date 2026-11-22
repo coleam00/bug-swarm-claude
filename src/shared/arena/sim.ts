@@ -126,6 +126,13 @@ export type Player = Mover & {
    * at the join, never replaced; a new life, the life ending and going down clear it (#73).
    */
   effect: number[];
+  /** A server fill bot (#66): a hive queen's toughness counts it as half a person, and it takes no reward (#85). */
+  bot: boolean;
+  /**
+   * Damage this life has dealt the hive queen now in the arena (#85, queen.ts): zeroed by a new
+   * life and by her arrival, so only the life that dealt it is paid.
+   */
+  queenDmg: number;
 };
 
 /**
@@ -151,6 +158,9 @@ export type Bug = {
   dy: number;
   /** Units left in a committed move. */
   travel: number;
+  /** A goal point another part of the arena gives it (#85: a hive queen drifts toward the largest group). */
+  gx: number;
+  gy: number;
 };
 
 export type Shot = {
@@ -203,6 +213,17 @@ export type Touch = { player: number; kind: BugKind };
 export type LifeEnd = { id: number; score: number; kills: number; ticks: number };
 /** A revive this tick: player `id` brought back by `by`, who scored `points`. */
 export type Revive = { id: number; by: number; points: number };
+/**
+ * A hive queen killed this tick (#85, queen.ts payQueen): `top` dealt her the most damage of the
+ * players still in a life (0: none), and `paid` is each rewarded player's id and points.
+ */
+export type QueenDown = { top: number; paid: [id: number, points: number][] };
+
+/**
+ * The arena's hive queen (#85, queen.ts): stage 0 none, 1 arriving (her marker shows for
+ * `ticksLeft` more ticks at x, y), 2 alive as bug `bugId` with `maxHp` hit points to start.
+ */
+export type QueenState = { stage: 0 | 1 | 2; x: number; y: number; ticksLeft: number; bugId: number; maxHp: number };
 
 /** What happened in the last stepArena. The arrays are reused: cleared at the start of each step. */
 export type ArenaEvents = {
@@ -229,6 +250,8 @@ export type ArenaEvents = {
   bombKills: number[];
   /** The owner of each bug a CI drone's shot killed (#84; for `bun run skill`; not sent: the kill is in `kills`). */
   droneKills: number[];
+  /** A hive queen killed this step and who was paid (#85), else null. */
+  queenDown: QueenDown | null;
 };
 
 export type ArenaState = {
@@ -245,6 +268,10 @@ export type ArenaState = {
   nextPickupId: number;
   /** Pickup drops draw from here, never from `rng`, so spawns and spread replay as with no pickups. */
   dropRng: Rng;
+  /** The hive queen (#85). */
+  queen: QueenState;
+  /** Her arrival spot draws from here, never from `rng`, so spawns and spread replay as with no queen. */
+  queenRng: Rng;
   events: ArenaEvents;
 };
 
@@ -266,7 +293,9 @@ export function createArena(seed: number): ArenaState {
     nextPickupId: 1,
     // Not seed ^ 0x5bd1e995: skill-lib seeds the policies' own generators with that.
     dropRng: createRng(seed ^ 0x68e31da4),
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [] },
+    queen: { stage: 0, x: 0, y: 0, ticksLeft: 0, bugId: 0, maxHp: 0 },
+    queenRng: createRng(seed ^ 0x2c1b3c6d),
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [], queenDown: null },
   };
 }
 
@@ -302,6 +331,7 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.dashCooldown = DASH_SPAWN_LOCK_TICKS;
   p.effect.fill(0);
   if (p.firstLife) p.effect[SHIELD] = FIRST_LIFE_SHIELD_TICKS;
+  p.queenDmg = 0;
 }
 
 function clearDown(p: Player): void {
@@ -397,8 +427,8 @@ function safeSpot(state: ArenaState, selfId: number): { x: number; y: number } {
   return spot;
 }
 
-/** Adds a player, in a new life at a safe random spot. */
-export function joinPlayer(state: ArenaState, name: string, team: Team): Player {
+/** Adds a player, in a new life at a safe random spot. `bot`: a server fill bot (#66, #85). */
+export function joinPlayer(state: ArenaState, name: string, team: Team, bot = false): Player {
   const id = state.nextId++;
   safeSpot(state, id);
   const p: Player = {
@@ -435,6 +465,8 @@ export function joinPlayer(state: ArenaState, name: string, team: Team): Player 
     dashCooldown: 0,
     dashWas: false,
     effect: PICKUP_IDS.map(() => 0),
+    bot,
+    queenDmg: 0,
   };
   startLife(state, p, spot.x, spot.y);
   state.players.push(p);
@@ -689,6 +721,7 @@ export function stepArena(state: ArenaState): void {
   ev.shellBlocks.length = 0;
   ev.bombKills.length = 0;
   ev.droneKills.length = 0;
+  ev.queenDown = null;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;

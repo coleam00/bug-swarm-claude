@@ -7,6 +7,7 @@ import {
   FIRST_LIFE_EASY_S,
   MAX_BUGS_PER_ARENA,
   PLAYER_RADIUS,
+  QUEEN_RESERVE,
   SPAWN_BASE_PER_S,
   SPAWN_BUDGET_CAP,
   SPAWN_DIST_MAX,
@@ -23,7 +24,7 @@ import {
 } from "../constants";
 import { nextRandom } from "../rng";
 import { canAct, canBeHit, strikePlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
-import { STEP_EXPIRE, STEP_LAUNCH } from "./kind";
+import { STEP_EXPIRE, STEP_LAUNCH, STEP_LAUNCH_ALT, type Launch } from "./kind";
 import { BASE_KIND, MAX_BUG_RADIUS, bugDef } from "./registry";
 
 /**
@@ -74,7 +75,7 @@ function inAnyView(state: ArenaState, x: number, y: number): boolean {
  * place a bug is made (spawns, launches, testkit.ts placeBug), so the shape cannot drift.
  */
 export function newBug(state: ArenaState, kind: BugKind, x: number, y: number, target: number): Bug {
-  const b: Bug = { id: state.nextBugId++, kind, x, y, vx: 0, vy: 0, hp: bugDef(kind).hp, target, phase: 0, phaseTicks: 0, dx: 0, dy: 0, travel: 0 };
+  const b: Bug = { id: state.nextBugId++, kind, x, y, vx: 0, vy: 0, hp: bugDef(kind).hp, target, phase: 0, phaseTicks: 0, dx: 0, dy: 0, travel: 0, gx: 0, gy: 0 };
   state.bugs.push(b);
   return b;
 }
@@ -135,25 +136,46 @@ function trySpawn(state: ArenaState, p: Player): boolean {
 }
 
 /**
- * Bug `b` launches one bug of its kind's `launches` kind (#72): from its muzzle (its edge plus the
- * launched bug's radius along (b.dx, b.dy), clamped inside the walls), flying along (b.dx, b.dy)
- * at the launch speed. Nothing is launched while the arena holds MAX_BUGS_PER_ARENA bugs or the
- * launched kind's maxPerArena: the launcher's tell has still happened.
+ * The most bugs the spawn mix fills the arena to (#85): MAX_BUGS_PER_ARENA, less QUEEN_RESERVE
+ * while a hive queen is arriving or alive, so her brood and her ring have room.
  */
-function launch(state: ArenaState, b: Bug): void {
-  const l = bugDef(b.kind).launches;
-  if (!l || state.bugs.length >= MAX_BUGS_PER_ARENA) return;
+export function spawnCap(state: ArenaState): number {
+  return state.queen.stage === 0 ? MAX_BUGS_PER_ARENA : MAX_BUGS_PER_ARENA - QUEEN_RESERVE;
+}
+
+/**
+ * Bug `b` launches `l` (#72; #85: a count and a cap): `l.count` bugs of `l.kind`, the first along
+ * (b.dx, b.dy) exactly and the rest evenly round the full turn from it, each from its muzzle (b's
+ * edge plus the launched bug's radius along its line, clamped inside the walls) at `l.speed`. Each
+ * is launched only while the arena holds fewer than `l.capAt` bugs and fewer than its kind's
+ * maxPerArena of that kind: the launcher's tell has still happened.
+ */
+function launch(state: ArenaState, b: Bug, l: Launch | undefined): void {
+  if (!l) return;
   const def = bugDef(l.kind);
-  if (countKind(state, l.kind) >= def.spawn.maxPerArena) return;
   const r = def.radius;
   const off = bugDef(b.kind).radius + r;
-  const x = Math.min(WORLD_W - r, Math.max(r, b.x + b.dx * off));
-  const y = Math.min(WORLD_H - r, Math.max(r, b.y + b.dy * off));
-  const g = newBug(state, l.kind, x, y, b.target);
-  g.dx = b.dx;
-  g.dy = b.dy;
-  g.vx = b.dx * l.speed;
-  g.vy = b.dy * l.speed;
+  const step = (Math.PI * 2) / l.count;
+  for (let i = 0; i < l.count; i++) {
+    if (state.bugs.length >= l.capAt) return;
+    if (countKind(state, l.kind) >= def.spawn.maxPerArena) return;
+    // The first leaves along (b.dx, b.dy) as it is, not through cos and sin of an angle.
+    let dx = b.dx;
+    let dy = b.dy;
+    if (i > 0) {
+      const c = Math.cos(step * i);
+      const s = Math.sin(step * i);
+      dx = b.dx * c - b.dy * s;
+      dy = b.dx * s + b.dy * c;
+    }
+    const x = Math.min(WORLD_W - r, Math.max(r, b.x + dx * off));
+    const y = Math.min(WORLD_H - r, Math.max(r, b.y + dy * off));
+    const g = newBug(state, l.kind, x, y, b.target);
+    g.dx = dx;
+    g.dy = dy;
+    g.vx = dx * l.speed;
+    g.vy = dy * l.speed;
+  }
 }
 
 /**
@@ -190,21 +212,24 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
  * One tick of bugs:
  * 1. each player who is up has their budget grow by spawnRate(pressureAge) times DT (capped at
  *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them, chasing them, while the arena
- *    has room; its kind is picked by the mix (pickKind); a downed player's budget waits;
+ *    holds fewer than spawnCap bugs; its kind is picked by the mix (pickKind); a downed player's
+ *    budget waits;
  * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one up)
  *    and that target's pressureAge (0 with no target);
- *    a step may launch a bug (launch: it is not stepped until the next tick, but it can touch in
- *    this one) or expire (it leaves with no touch, kill or score);
+ *    a step may launch bugs (launch: they are not stepped until the next tick, but they can touch
+ *    in this one) or expire (it leaves with no touch, kill or score);
  * 3. a bug touching a player who is up and can be hit (within PLAYER_RADIUS plus its kind's
  *    radius) strikes them (sim.ts strikePlayer: a hit, or a test shield spent) and is gone, with
- *    no score, whatever its kind and phase; bugs pass over downed players.
+ *    no score, whatever its phase; a kind that stays on contact (#85, the hive queen) strikes
+ *    every such player and is kept; bugs pass over downed players.
  */
 export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
+  const cap = spawnCap(state);
   for (const p of state.players) {
     if (!canAct(p)) continue;
     p.budget = Math.min(SPAWN_BUDGET_CAP, p.budget + spawnRate(pressureAge(p, state.tick)) * DT);
-    while (p.budget >= 1 && bugs.length < MAX_BUGS_PER_ARENA) {
+    while (p.budget >= 1 && bugs.length < cap) {
       if (!trySpawn(state, p)) break;
       p.budget -= 1;
     }
@@ -215,8 +240,10 @@ export function stepBugs(state: ArenaState): void {
     const b = bugs[i]!;
     const target = chooseTarget(state, b);
     b.target = target ? target.id : 0;
-    const r = bugDef(b.kind).step(b, target, target ? pressureAge(target, state.tick) : 0);
-    if (r === STEP_LAUNCH) launch(state, b);
+    const def = bugDef(b.kind);
+    const r = def.step(b, target, target ? pressureAge(target, state.tick) : 0);
+    if (r === STEP_LAUNCH) launch(state, b, def.launches?.[0]);
+    else if (r === STEP_LAUNCH_ALT) launch(state, b, def.launches?.[1]);
     else if (r === STEP_EXPIRE) b.hp = 0;
   }
   let keep = 0;
@@ -225,13 +252,16 @@ export function stepBugs(state: ArenaState): void {
     // Expired this tick: it leaves untouched (a bug is never at 0 hit points otherwise here).
     if (b.hp <= 0) continue;
     let gone = false;
-    const touch = PLAYER_RADIUS + bugDef(b.kind).radius;
+    const def = bugDef(b.kind);
+    const touch = PLAYER_RADIUS + def.radius;
     for (const p of state.players) {
       if (!canBeHit(p)) continue;
       const dx = p.x - b.x;
       const dy = p.y - b.y;
       if (dx * dx + dy * dy < touch * touch) {
         strikePlayer(state, p, b.kind);
+        // A kind that stays on contact (#85) strikes everyone it touches and is kept.
+        if (def.staysOnContact) continue;
         gone = true;
         break;
       }

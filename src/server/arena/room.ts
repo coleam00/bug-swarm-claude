@@ -191,7 +191,7 @@ export class Room {
   /** Adds a fill bot now and tells everyone. The tick tops arenas up; tests call it directly. */
   addBot(): Player {
     const used = (n: string) => this.state.players.some((p) => p.name === n);
-    const player = joinPlayer(this.state, botName(used), botTeam(this.state.players));
+    const player = joinPlayer(this.state, botName(used), botTeam(this.state.players), true);
     this.bots.set(player.id, {
       player,
       obs: createObservation(),
