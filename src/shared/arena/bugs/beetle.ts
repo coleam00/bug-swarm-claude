@@ -3,9 +3,9 @@
 // shots from the side or behind hurt it. It turns slowly toward its target, so two players coming
 // at it from different sides kill it fast, and one player who walks round it can shoot its back.
 // - new: only until its first step, which faces it at its target ((1, 0) with none, or with a
-//   young one: see below) and moves it to walk. A beetle is never in phase 0 after that, so every snapshot row carries its facing in
-//   the v6 tail, and the browser and the bots see where its shell points. It spawns out of every
-//   view, so its one tail-less row is never seen.
+//   young one: see below) and moves it to walk. A beetle is never in phase 0 after that, so every
+//   snapshot row carries its facing in the v6 tail, and the browser and the bots see where its
+//   shell points. It spawns out of every view, so its one tail-less row is never seen.
 // - walk: each tick it turns its facing (b.dx, b.dy) toward its target by at most TURN_PER_TICK,
 //   then walks along that facing at BEETLE_SPEED times how straight ahead its target is
 //   (max(0, facing . to-target)): a target beside or behind it stalls it while it turns. With no
@@ -14,8 +14,8 @@
 // A young target counts as none (#86): a target under BEETLE_FROM_S of pressure age is one the
 // spawn mix spares beetles for, so the beetle neither turns toward nor walks at it; it stands,
 // keeping its facing, until that life comes of age. So a late joiner meeting an arena's
-// established beetles gets the same opening an early joiner gets before wave 4 (direction.md
-// "Fair drop-in"). Its body still hurts on contact.
+// established beetles gets the opening an early joiner gets, who meets none in its first minute
+// (direction.md "Fair drop-in"). Its body still hurts on contact.
 // Contact is the stepper's, as for every kind.
 import { DT, WORLD_H, WORLD_W } from "../constants";
 import type { Bug, Player } from "../sim";
