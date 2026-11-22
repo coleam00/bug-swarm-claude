@@ -32,8 +32,8 @@ export const QUEEN_GRID_STEP = 100;
 /**
  * Her hit points: a base plus this much per person in the arena when she arrives, half for a fill
  * bot. The item's 150 + 60 (390 for 4 people) took 4 scripted aimers past 180 s on every one of 30
- * seeds, as their two-minute-old lives are swarmed by their own spawns and they shoot only the
- * nearest bug; these numbers bring the median under the item's 60 s (`bun run skill`, #85).
+ * seeds (on 41b96f7), as their two-minute-old lives are swarmed by their own spawns and they shoot
+ * only the nearest bug; these numbers bring the median under the item's 60 s (`bun run skill`, #85).
  */
 export const QUEEN_HP_BASE = 40;
 export const QUEEN_HP_PERSON = 20;

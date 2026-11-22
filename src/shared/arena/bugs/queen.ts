@@ -22,8 +22,8 @@ export const QUEEN_RADIUS = 40;
 /**
  * Drift speed toward her goal, units per second: 40% of a player's top speed, so anyone can walk
  * away from her. The item's 45 kept her off the scripted aimers' screens (they keep away from bugs
- * and shoot only the nearest): 4 aimers never killed her within 180 s on 30 seeds. Set with her hit
- * points (queen.ts) by `bun run skill`'s queen line (#85).
+ * and shoot only the nearest): 4 aimers never killed her within 180 s on 30 seeds (on 41b96f7). Set
+ * with her hit points (queen.ts) by `bun run skill`'s queen line (#85).
  */
 export const QUEEN_SPEED = 120;
 /** She stops this far short of her goal, units. */
@@ -36,9 +36,10 @@ export const RING_COUNT = 12;
 export const RING_TURN = Math.PI / 12;
 /**
  * Crawlers in a brood, and the ticks between broods (4 s, the first 4 s after she arrives). The
- * item's 3 read the late-joiner gate at 0.797x (FAIL) on 240 late seeds and 0.81x on 480; 2 read
- * 0.82x on both (3 every 5 s: 0.81x on both). The late joiner meets the wave-20 queen 30 s after she
- * arrived (#85).
+ * item's 3, on d44af2b: the gates pass (late 0.86x on 240 late seeds, 0.83x on 480), but 4 aimers
+ * take a median 60.3 s to kill her, past the item's 60 s; 2 take 56.3 s. (On f2cbba9, before #86,
+ * 3 also read the late gate at 0.797x, FAIL, where 2 read 0.82x.) The late joiner meets the
+ * wave-20 queen 30 s after she arrived (#85).
  */
 export const BROOD_COUNT = 2;
 export const BROOD_TICKS = Math.round(4 / DT);
