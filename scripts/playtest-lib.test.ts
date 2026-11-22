@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { INTERP_DELAY_MS, REVIVE_RANGE, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
-import type { ServerMessage, SnapshotBug, SnapshotDown, SnapshotKill, SnapshotMe, SnapshotPlayer } from "../src/shared/arena/protocol";
+import type { ServerMessage, SnapshotBug, SnapshotDown, SnapshotKill, SnapshotMe, SnapshotPlayer, SnapshotQueen } from "../src/shared/arena/protocol";
 import { checkName, TEAMS } from "../src/server/rules";
 import { dashButtonAt, DASH_BUTTON_RADIUS } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
@@ -17,6 +17,8 @@ import {
   MOUSE_REACH,
   MOVE_FINGER,
   PHONE,
+  QUEEN_NEAR_UNITS,
+  QUEEN_WAVE,
   REVIVE_HOLD_UNITS,
   SCENARIOS,
   SCENARIO_NAMES,
@@ -29,6 +31,9 @@ import {
   checkKills,
   checkLifeOver,
   checkPositions,
+  checkQueenEvent,
+  checkQueenPay,
+  checkQueenSnapshots,
   checkRoster,
   checkSameArena,
   checkScenarioLateJoin,
@@ -85,6 +90,11 @@ describe("parseArgs", () => {
     expect(() => parseArgs([])).toThrow("--url or --serve");
   });
 
+  test("queen runs with --url or --serve (#96)", () => {
+    expect(parseArgs(["--url", "http://x", "--scenario", "queen"]).scenario).toBe("queen");
+    expect(parseArgs(["--serve", "--scenario=queen"])).toMatchObject({ serve: true, scenario: "queen" });
+  });
+
   test("refuses a missing url, unknown flags, unknown scenarios and out-of-range numbers", () => {
     for (const argv of [[], ["--url", "ftp://x"], ["--url", "nope"], ["--url", "http://x", "--players", "1"], ["--url", "http://x", "--players", "21"], ["--url", "http://x", "--seconds", "2.5"], ["--url", "http://x", "--scenario", "chaos"], ["--url", "http://x", "--bots", "3"], ["--url", "http://x", "--headed=1"], ["--url"]]) {
       expect(() => parseArgs(argv)).toThrow();
@@ -96,6 +106,12 @@ describe("serverEnv", () => {
   test("pins the port, scratch data and build; drops what would change the build, the interface or the wave", () => {
     const env = serverEnv({ PATH: "/bin", RAILWAY_GIT_COMMIT_SHA: "abc", NODE_ENV: "production", BUG_SWARM_START_WAVE: "5", BUILD_ID: "old", PORT: "3000", UNSET: undefined }, 4567, "/tmp/d", "playtest-1");
     expect(env).toEqual({ PATH: "/bin", PORT: "4567", DATA_DIR: "/tmp/d", BUILD_ID: "playtest-1" });
+  });
+
+  test("the queen scenario sets BUG_SWARM_START_WAVE to her wave, over an inherited one (#96)", () => {
+    const env = serverEnv({ PATH: "/bin", BUG_SWARM_START_WAVE: "9" }, 4567, "/tmp/d", "playtest-1", QUEEN_WAVE);
+    expect(env.BUG_SWARM_START_WAVE).toBe("5");
+    expect(serverEnv({ BUG_SWARM_START_WAVE: "9" }, 1, "d", "b", null).BUG_SWARM_START_WAVE).toBeUndefined();
   });
 });
 
@@ -139,12 +155,14 @@ describe("pages and scenarios", () => {
     expect(SCENARIOS["late-join"].minPlayers).toBe(3);
   });
 
-  test("basic, revive, late-join and restart run; the others name the issue that tracks them", () => {
-    for (const name of SCENARIO_NAMES) {
-      const s = SCENARIOS[name];
-      if (name === "basic" || name === "revive" || name === "late-join" || name === "restart") expect(s.followUp).toBeNull();
-      else expect(s.followUp).toBeGreaterThan(94);
-    }
+  test("every scenario runs: none names a follow-up issue (queen was the last, #96)", () => {
+    for (const name of SCENARIO_NAMES) expect(SCENARIOS[name].followUp).toBeNull();
+  });
+
+  test("queen: every page fights, none joins late", () => {
+    const pages = pageSpecs(4, "queen", 1);
+    expect(pages.map((p) => p.role)).toEqual(["fighter", "fighter", "fighter", "fighter"]);
+    expect(pages.some((p) => p.late)).toBe(false);
   });
 });
 
@@ -399,7 +417,7 @@ describe("checks", () => {
 // ---- The scripted human ----
 
 const ME = { x: 1200, y: 1200 };
-function view(o: { bugs?: SnapshotBug[]; players?: SnapshotPlayer[]; downs?: SnapshotDown[]; nums?: Partial<SnapshotMe>; device?: typeof DESKTOP } = {}): View {
+function view(o: { bugs?: SnapshotBug[]; players?: SnapshotPlayer[]; downs?: SnapshotDown[]; nums?: Partial<SnapshotMe>; queen?: SnapshotQueen; device?: typeof DESKTOP } = {}): View {
   const mine = row(1, ME.x, 0, 0);
   mine[2] = ME.y;
   return {
@@ -409,6 +427,7 @@ function view(o: { bugs?: SnapshotBug[]; players?: SnapshotPlayer[]; downs?: Sna
     players: [mine, ...(o.players ?? [])],
     bugs: o.bugs ?? [],
     downs: o.downs ?? [],
+    queen: o.queen ?? [],
     cam: cameraAt(o.device ?? DESKTOP, ME.x, ME.y),
   };
 }
@@ -724,6 +743,46 @@ describe("decide", () => {
     expect(plan.wander.x).toBeLessThan(WORLD_W);
     expect(plan.wander.y).toBeLessThan(WORLD_H);
   });
+
+  // The hive queen at (dx, dy) from the page, alive with 100 of 150 hit points.
+  const queenAt = (dx: number, dy: number): SnapshotQueen => [1, 50, ME.x + dx, ME.y + dy, 100, 150];
+  const queenPlan = (on = true) => Object.assign(createPlan("fighter", 1), { queenFirst: on });
+
+  test("queen focus: she is the target when on screen, over a nearer bug; without it, the nearest bug is", () => {
+    const v = view({ bugs: [bug(1, 0, 150)], queen: queenAt(300, 0) });
+    const i = decide(v, queenPlan(), 0);
+    expect(i.mode).toBe("queen");
+    expect(i.aim).toBeCloseTo(0, 6);
+    expect(i.fire).toBe(true);
+    const plain = decide(v, queenPlan(false), 0);
+    expect(plain.mode).toBe("fight");
+    expect(plain.aim).toBeCloseTo(Math.PI / 2, 6);
+  });
+
+  test("queen focus: off screen it walks to her, shooting what is on screen; on a phone it stands off where she stays on screen", () => {
+    const i = decide(view({ bugs: [bug(1, 0, -150)], queen: queenAt(-1000, 0) }), queenPlan(), 0);
+    expect(i.mode).toBe("queen-seek");
+    expect(i.mx).toBeCloseTo(-1, 6);
+    expect(i.aim).toBeCloseTo(-Math.PI / 2, 6);
+    // A phone's view is about 370 units wide: 160 to her side she is on it, and the page strafes rather than backing off her screen.
+    const p = decide(view({ queen: queenAt(160, 0), device: PHONE }), queenPlan(), 0);
+    expect(p.mode).toBe("queen");
+    expect(p.mx).toBeCloseTo(0, 6);
+    expect(Math.abs(p.my)).toBeCloseTo(1, 6);
+    // Too close: it backs off.
+    const close = decide(view({ queen: queenAt(QUEEN_NEAR_UNITS - 20, 0) }), queenPlan(), 0);
+    expect(close.mx).toBeCloseTo(-1, 6);
+  });
+
+  test("queen focus: in contact with a bug it still dashes, aiming at her; her marker alone changes nothing", () => {
+    const e = decide(view({ bugs: [bug(1, 0, CONTACT_UNITS - 10)], queen: queenAt(300, 0) }), queenPlan(), 0);
+    expect([e.mode, e.dash]).toEqual(["evade", true]);
+    expect(e.aim).toBeCloseTo(0, 6);
+    const marker: SnapshotQueen = [0, ME.x + 300, ME.y, 30];
+    const m = decide(view({ bugs: [bug(1, 0, 150)], queen: marker }), queenPlan(), 0);
+    expect(m.mode).toBe("fight");
+    expect(m.aim).toBeCloseTo(Math.PI / 2, 6);
+  });
 });
 
 describe("intent to input", () => {
@@ -760,5 +819,79 @@ describe("intent to input", () => {
     expect(aim.x).toBeLessThan(l.right.x);
     const [, rest] = touchPoints(l, { mode: "fight", mx: 0, my: 0, aim: Math.PI, fire: false, dash: false });
     expect(rest).toEqual({ id: AIM_FINGER, x: l.right.x, y: l.right.y });
+  });
+});
+
+// ---- The queen scenario (#96): A (id 1) and B (id 2) share her marker (ticks 6 to 10), her alive (11 to 19) and her kill at tick 20. ----
+
+const KILL_TICK = 20;
+const PAID: [number, number][] = [
+  [1, 575],
+  [2, 100],
+];
+
+/**
+ * `bHp`: a tick at which B reads her hit points one higher; `bMissing`: B has no queen event;
+ * `paid`: every page's copy of `paid`, `bPaid` B's only; `aShort`: A's score at the kill is this
+ * short; `marker`: false for no marker; `top`: the top dealer's id.
+ */
+function queenGame(o: { bHp?: number; bMissing?: boolean; paid?: [number, number][]; bPaid?: [number, number][]; aShort?: number; marker?: boolean; top?: number } = {}): PageLog[] {
+  const specs = pageSpecs(2, "queen", 7);
+  const logs = specs.map((s, i) => Object.assign(createLog(s), { name: ROSTER[i]!.name }));
+  logs.forEach((l, i) => {
+    const id = i + 1;
+    const off = i * 2;
+    addFrame(l, 1 + off, 1 + off, welcome(id, 0, ROSTER));
+    for (let t = 1; t <= 25; t++) {
+      const at = t * 50 + off;
+      let q: SnapshotQueen = [];
+      if (t >= 6 && t <= 10 && o.marker !== false) q = [0, 1200, 1200, 11 - t];
+      else if (t >= 11 && t < KILL_TICK) q = [1, 50, 1200, 1200, 100 - (t - 11) * 10 + (i === 1 && t === o.bHp ? 1 : 0), 150];
+      if (t === KILL_TICK && !(i === 1 && o.bMissing)) {
+        const paid = i === 1 && o.bPaid ? o.bPaid : (o.paid ?? PAID);
+        addFrame(l, at - 1, at - 1, msg(JSON.stringify({ t: "event", kind: "queen", id: o.top ?? 1, paid })));
+      }
+      const pay = PAID.find((p) => p[0] === id)![1] - (i === 0 ? (o.aShort ?? 0) : 0);
+      const mine = me({ sc: t >= KILL_TICK ? pay : 0 });
+      const p = [row(1, 100, 0, 0), row(2, 900, 0, 0)];
+      addFrame(l, at, at, msg(JSON.stringify({ t: "snapshot", tick: t, ack: t, p, b: [], s: [], e: [], k: [], d: [], f: [], w: 5, q, me: mine })));
+    }
+  });
+  return logs;
+}
+
+describe("the queen scenario", () => {
+  test("pages that agree on her q, her event and their pay pass all three; the queen table has them", () => {
+    const logs = queenGame();
+    expect(logs[0]!.frames[5]!.s.q).toEqual([0, 1200, 1200, 5]);
+    for (const r of [checkQueenSnapshots(logs), checkQueenEvent(logs), checkQueenPay(logs)]) expect(`${r.name}: ${r.pass} ${r.detail}`).toBe(`${r.name}: true ${r.detail}`);
+    expect(checkQueenSnapshots(logs).detail).toBe("25 shared ticks agree: 5 marker, 9 alive (hp from 100 to 20 of 150), 11 none");
+    expect(checkQueenEvent(logs).detail).toContain("PT-A dealt the most; 2 paid (PT-A, PT-B)");
+    expect(checkQueenPay(logs).detail).toContain("PT-A +575, PT-B +100");
+    expect(runChecks(logs, "queen").map((r) => r.name)).toEqual(expect.arrayContaining(["queen q", "queen event", "queen pay"]));
+    expect(runChecks(game(), "basic").map((r) => r.name)).not.toContain("queen q");
+  });
+
+  test("queen q fails on one tick where B reads other hit points, or with no shared tick of her marker", () => {
+    const hp = checkQueenSnapshots(queenGame({ bHp: 14 }));
+    expect(hp.pass).toBe(false);
+    expect(hp.detail).toContain("tick 14: PT-A [1,50,1200,1200,70,150], PT-B [1,50,1200,1200,71,150]");
+    const late = checkQueenSnapshots(queenGame({ marker: false }));
+    expect(late.pass).toBe(false);
+    expect(late.detail).toContain("no two pages shared a tick of her marker");
+  });
+
+  test("queen event fails when a connected page missed it, its copies differ, no page was paid, or she was never killed", () => {
+    expect(checkQueenEvent(queenGame({ bMissing: true }))).toMatchObject({ pass: false, detail: "PT-B missed the queen event at tick 20" });
+    const differs = checkQueenEvent(queenGame({ bPaid: [[1, 575]] }));
+    expect([differs.pass, differs.detail]).toEqual([false, "the queen event at tick 20 differs: [1,[[1,575],[2,100]]] vs [1,[[1,575]]]"]);
+    expect(checkQueenEvent(queenGame({ paid: [[3, 675]], top: 3 }))).toMatchObject({ pass: false, detail: "no page was paid: none of them damaged her" });
+    expect(checkQueenEvent(queenGame({ top: 9 })).detail).toContain("a fill bot dealt the most");
+    expect(checkQueenEvent(queenGame().map((l) => ({ ...l, events: [] }))).pass).toBe(false);
+  });
+
+  test("queen pay fails when a page's own score at the kill lacks its paid points", () => {
+    expect(checkQueenPay(queenGame({ aShort: 75 }))).toMatchObject({ pass: false, detail: "PT-A at tick 20: own score +500, expected +575 (paid 575, kills 0, revives 0)" });
+    expect(checkQueenPay(queenGame().map((l) => ({ ...l, events: [] }))).pass).toBe(false);
   });
 });
