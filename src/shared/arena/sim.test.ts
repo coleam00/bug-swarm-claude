@@ -450,6 +450,7 @@ describe("fair drop-in: spawn protection", () => {
   test("a bug touching a newly joined player costs nothing for 2 s, then a hit", () => {
     const a = createArena(1);
     const p = joinPlayer(a, "new", "tabs");
+    p.effect.fill(0); // without the first-life shield (#90), which would block that hit
     expect(canBeHit(p)).toBe(false);
     for (let t = 0; t < PROTECT; t++) {
       placeBug(a, p.x + 5, p.y);
@@ -486,6 +487,7 @@ describe("fair drop-in: spawn protection", () => {
   test("holding fire ends protection at once: a touch in that very step costs a hit", () => {
     const a = createArena(3);
     const p = joinPlayer(a, "trigger", "tabs");
+    p.effect.fill(0); // without the first-life shield (#90)
     stepQuiet(a, 5);
     expect(p.protectTicks).toBe(PROTECT - 5);
     hold(p, { fire: true });

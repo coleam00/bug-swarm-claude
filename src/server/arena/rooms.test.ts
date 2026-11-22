@@ -217,6 +217,7 @@ describe("lives", () => {
     tick(30);
     p.invulnTicks = 0;
     p.protectTicks = 0;
+    p.effect.fill(0); // no first-life shield (#90)
     p.hits = HITS_PER_LIFE - 1;
     p.score = 120;
     p.kills = 9;
@@ -258,6 +259,7 @@ describe("lives", () => {
     for (const p of [out, downed]) {
       p.invulnTicks = 0;
       p.protectTicks = 0;
+      p.effect.fill(0);
       p.hits = HITS_PER_LIFE - 1;
       placeBug(room.state, p.x + 5, p.y);
       tick();
@@ -311,6 +313,7 @@ describe("lives", () => {
     pb.y = pa.y;
     pa.invulnTicks = 0;
     pa.protectTicks = 0; // past spawn protection (#58)
+    pa.effect.fill(0); // and without the first-life shield (#90)
     pa.hits = HITS_PER_LIFE - 1;
     pb.invulnTicks = 1000; // Bob can't be hit while he revives
     placeBug(room.state, pa.x - 5, pa.y);
@@ -368,6 +371,7 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.hits = 1;
   p.dashTicks = 2;
   p.dashCooldown = 27;
+  p.effect.fill(0);
   p.effect[1] = 37;
   const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[] };
   const fx = me.fx;
@@ -424,6 +428,7 @@ describe("fill bots (#66)", () => {
     const grace = bots(rooms, 1).find((p) => p.name === "bot Grace")!;
     grace.invulnTicks = 0;
     grace.protectTicks = 0;
+    grace.effect.fill(0);
     grace.dashTicks = 0;
     grace.hits = HITS_PER_LIFE - 1;
     placeBug(room.state, grace.x + 5, grace.y);

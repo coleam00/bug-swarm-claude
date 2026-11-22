@@ -1,5 +1,5 @@
 // The beetle (#80): a big, slow, steel-blue bug with a shell over its front 120 degrees. Shots
-// that come at the shell spark off it (combat.ts shellBlocks: no damage, the streak still grows);
+// that come at the shell spark off it (combat.ts shellBlocks: no damage, the streak kept but not grown, #90);
 // shots from the side or behind hurt it. It turns slowly toward its target, so two players coming
 // at it from different sides kill it fast, and one player who walks round it can shoot its back.
 // - new: only until its first step, which faces it at its target ((1, 0) with none, or with a

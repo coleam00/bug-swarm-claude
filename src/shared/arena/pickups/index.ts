@@ -36,7 +36,8 @@ const TOUCH = PLAYER_RADIUS + PICKUP_RADIUS;
  *    the floor (then it is lost, never queued);
  * 4. touch: each floor pickup, in order, goes to the first player in the list who is up and within
  *    PLAYER_RADIUS + PICKUP_RADIUS: its effect is set to its full duration (taking one you already
- *    have refreshes it; an instant pickup's is 0), events.pickups says who took what, and it leaves
+ *    have refreshes it, never shortening one already running, such as a first life's shield, #90;
+ *    an instant pickup's is 0), events.pickups says who took what, and it leaves
  *    the floor. A refactor bomb goes off there and then (#78, bomb.ts bombGoesOff);
  * 5. after a bomb: its kills draw their drops as in 3 (landing on the floor after this step's
  *    touches, so they can be taken from the next step on), and the bugs it killed leave the arena
@@ -68,7 +69,8 @@ export function stepPickups(state: ArenaState): void {
       const dx = p.x - f.x;
       const dy = p.y - f.y;
       if (dx * dx + dy * dy > TOUCH * TOUCH) continue;
-      p.effect[PICKUP_IDS.indexOf(f.kind)] = PICKUP_DEFS[f.kind].durationTicks;
+      const e = PICKUP_IDS.indexOf(f.kind);
+      p.effect[e] = Math.max(p.effect[e]!, PICKUP_DEFS[f.kind].durationTicks);
       ev.pickups.push({ player: p.id, kind: f.kind });
       if (f.kind === bomb.id) bombGoesOff(state, p);
       taken = true;

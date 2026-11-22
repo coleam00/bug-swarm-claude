@@ -1,8 +1,10 @@
-// The test shield by stepping (#73): it blocks exactly one hit, then lapses.
+// The test shield by stepping (#73): it blocks exactly one hit, then lapses. A first life in a
+// session starts with it up (#90); a respawn does not.
 import { describe, expect, test } from "bun:test";
-import { DT, INVULN_S } from "../constants";
-import { arenaWith, effectOf, placeBug, placePickup, stepQuiet } from "../testkit";
-import { shield } from "./shield";
+import { DT, INVULN_S, RESPAWN_DELAY_S, SPAWN_PROTECT_S } from "../constants";
+import { createArena, joinPlayer } from "../sim";
+import { arenaWith, bleedNow, downNow, effectOf, hold, placeBug, placePickup, stepQuiet } from "../testkit";
+import { FIRST_LIFE_SHIELD_TICKS, shield } from "./shield";
 
 const INVULN_TICKS = Math.round(INVULN_S / DT);
 
@@ -65,5 +67,45 @@ describe("the test shield", () => {
     expect(a.events.blocks).toEqual([]);
     expect(a.events.touches.length).toBe(1);
     expect(p.hits).toBe(1);
+  });
+});
+
+describe("the first-life shield (#90)", () => {
+  /** A player joined to a fresh arena, stepped past spawn protection, with no bugs about. */
+  function joined() {
+    const a = createArena(7);
+    const p = joinPlayer(a, "new", "tabs");
+    expect(effectOf(p, "shield")).toBe(FIRST_LIFE_SHIELD_TICKS);
+    stepQuiet(a, Math.round(SPAWN_PROTECT_S / DT));
+    expect(p.protectTicks).toBe(0);
+    return { a, p };
+  }
+
+  test("a join spawns with it up, longer than the pickup's, and it blocks the first hit; the next one lands", () => {
+    const { a, p } = joined();
+    expect(FIRST_LIFE_SHIELD_TICKS).toBeGreaterThan(shield.durationTicks);
+    placeBug(a, p.x + 5, p.y);
+    stepQuiet(a);
+    expect(a.events.blocks).toEqual([p.id]);
+    expect(p.hits).toBe(0);
+    expect(effectOf(p, "shield")).toBe(0);
+    stepQuiet(a, INVULN_TICKS);
+    placeBug(a, p.x + 5, p.y);
+    stepQuiet(a);
+    expect(a.events.blocks).toEqual([]);
+    expect(p.hits).toBe(1);
+  });
+
+  test("a respawn does not get it", () => {
+    const { a, p } = joined();
+    p.effect.fill(0);
+    downNow(a, p);
+    bleedNow(a, p);
+    expect(p.alive).toBe(false);
+    stepQuiet(a, Math.round(RESPAWN_DELAY_S / DT));
+    hold(p, { dash: true });
+    stepQuiet(a);
+    expect([p.alive, p.firstLife]).toEqual([true, false]);
+    expect(effectOf(p, "shield")).toBe(0);
   });
 });

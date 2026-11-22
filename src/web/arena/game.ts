@@ -87,7 +87,7 @@ import { connectArena, watchArena, type Connection, type PlayHandlers, type Watc
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
 import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
-import { isBot } from "./tag";
+import { countPeople, isBot } from "./tag";
 import { createTings, spawnTing, updateTings } from "./tings";
 
 /** Local steps one frame may run; a stalled tab drops the rest rather than burst inputs. */
@@ -211,6 +211,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
 
   // Who is in the arena: names and teams come once, in the welcome and in join events.
   const roster = new Map<number, Robot>();
+  /** The people in the roster, bots never counted (#90): the HUD's "N playing". Recounted only when the roster changes. */
+  let people = 0;
   /** The robots drawn this frame, reused. */
   const drawn: Robot[] = [];
   let you: number | null = null;
@@ -310,6 +312,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       clearKills(kills);
       resetHudFx(hudFx);
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
+      people = countPeople(roster.values());
     } else if (m.t === SNAPSHOT) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
@@ -345,9 +348,13 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         mode.on.alive();
       }
     } else if (m.t === EVENT) {
-      if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) robotFor(m.id, m.name, m.team);
-      else if (m.kind === LEAVE) roster.delete(m.id);
-      else if (m.kind === OVER && m.id === you) lifeOver(m.score ?? 0, m.kills ?? 0, m.seconds ?? 0);
+      if (m.kind === JOIN && typeof m.name === "string" && isTeam(m.team)) {
+        robotFor(m.id, m.name, m.team);
+        people = countPeople(roster.values());
+      } else if (m.kind === LEAVE) {
+        roster.delete(m.id);
+        people = countPeople(roster.values());
+      } else if (m.kind === OVER && m.id === you) lifeOver(m.score ?? 0, m.kills ?? 0, m.seconds ?? 0);
       else if (m.kind === REVIVE) {
         // Everyone sees the reviver's points float up over the robot they brought back.
         const r = roster.get(m.id);
@@ -756,7 +763,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.you = you;
     scene.me = haveMe ? me : null;
     scene.wave = wave;
-    scene.players = roster.size;
+    scene.players = people;
     scene.out = spawned && !alive;
     scene.stats = showStats ? statsText : null;
     scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;

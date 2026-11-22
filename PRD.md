@@ -21,8 +21,8 @@ Release 1 played well alone, but the robot fired by itself, so there was little 
 - Swarm pressure is personal: it starts low with each life and rises with that life's age, so late joiners get an opening. Bugs chase the nearest player, so groups share pressure. The arena's wave clock (every 30 s) unlocks bug kinds and events, never raw spawn volume.
 - Bug kinds, each with a tell and a counter: **crawler** (chases), **dasher** (crouches and glows, then lunges in a line: sidestep or dash), **spitter** (keeps its distance, swells, lobs slow globs you can dodge or shoot), **beetle** (a front shell blocks shots: flank it). Every fifth wave a **hive queen** arrives that only a group takes down quickly.
 - 3 hits put you **down**. Anyone standing next to you for 2 s revives you with 1 hit left. If nobody does within 10 s, the life ends, its score is saved, and one tap drops you back in.
-- Scoring: kills score by kind; consecutive hits build a streak multiplier (x1 to x3) that a miss resets; a revive scores 50. Every point counts for your team.
-- Pickups drop from kills and last a short time: review laser (shots pierce), test shield (blocks one hit), refactor bomb (clears bugs around you), CI drone (an orbiting helper that fires on its own for 12 s).
+- Scoring: kills score by kind; consecutive hits build a streak multiplier (x1 to x3) that a miss resets; a shot a beetle's shell blocks neither builds nor resets it; a revive scores 50. Every point counts for your team.
+- Pickups drop from kills and last a short time: review laser (shots pierce), test shield (blocks one hit), refactor bomb (clears bugs around you), CI drone (an orbiting helper that fires on its own for 12 s). Your first life of a session starts with a test shield up.
 - The life-over screen shows the score, best, rank and team totals, and one tap or key starts the next life.
 - `/board` shows the top 10 lives, the Tabs vs Spaces totals and how many people are playing now, readable on a stream.
 - Merges during the stream redeploy the game; players reconnect on their own and no life's score is lost to a deploy.
