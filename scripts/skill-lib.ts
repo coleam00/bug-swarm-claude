@@ -9,6 +9,7 @@
 // and per pickup (#73) how many the player took, how many hits a shield blocked, how many bugs
 // its review laser shots hit and how many its refactor bombs killed (#78); and for bugs with a
 // shell (#80, the beetle), how many the player killed and how many of its shots a shell blocked.
+// It reports how long aimers take to kill the wave-5 hive queen (#85, runQueen), not gated.
 // Every gate is played with pickups dropping. Tested in skill-lib.test.ts on a few seeds.
 import { BUG_KINDS, DASH_TICKS, DT, PICKUP_IDS, WORLD_H, WORLD_W, type BugKind, type PickupId } from "../src/shared/arena/constants";
 import { bugDef } from "../src/shared/arena/bugs/registry";
