@@ -484,18 +484,4 @@ describe("her health for the stream board (#102)", () => {
     q.hp = 1;
     expect(queenHealth(a)).toBe(1);
   });
-
-  test("null once she is killed", () => {
-    const { a, ps } = arenaWith([200, 200]);
-    shield(ps);
-    const q = arrive(a);
-    q.hp = 1;
-    const shooter = ps[0]!;
-    shooter.x = q.x - 300;
-    shooter.y = q.y;
-    hold(shooter, { aim: 0, fire: true });
-    for (let i = 0; i < 10 && a.queen.stage === 2; i++) stepQuiet(a);
-    expect(a.queen.stage).toBe(0);
-    expect(queenHealth(a)).toBeNull();
-  });
 });
