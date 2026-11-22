@@ -1,4 +1,4 @@
-// `bun run playtest -- --url <base> [--players 4] [--seconds 90] [--scenario basic|revive]` (#94):
+// `bun run playtest -- --url <base> [--players 4] [--seconds 90] [--scenario basic|revive|late-join]` (#94, #95):
 // several real browser players in one arena at once, each a headless Chrome page (desktops with a
 // mouse and keyboard and phones with two-point touch, mixed) that joins through the start screen
 // with its own name and team and plays a scripted human (playtest-lib.ts decide) with real
@@ -9,13 +9,16 @@
 // Raw Chrome DevTools Protocol over Bun's WebSocket: no browser library.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOWN_S } from "../src/shared/arena/constants";
+import { DOWN_S, WAVE_S } from "../src/shared/arena/constants";
 import { DOWN, EVENT, OVER, REVIVE, SNAPSHOT, parseServerMessage, type Snapshot } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import { RESTART_DELAY_MS } from "../src/web/game/guard";
 import {
   AIM_FINGER,
   DASH_FINGER,
+  LATE_JOIN_CAP_S,
+  LATE_JOIN_WAVE,
+  LATE_PLAY_S,
   MOVE_FINGER,
   SCENARIOS,
   USAGE,
@@ -478,12 +481,16 @@ try {
   const seed = Math.floor(Math.random() * 2 ** 31);
   const specs = pageSpecs(args.players, args.scenario, seed);
   say(`scenario ${args.scenario}: ${args.players} pages against ${args.url} for ${args.seconds} s`);
+  // The late-join scenario's late page waits for wave LATE_JOIN_WAVE (#95).
+  const lateSpec = specs.find((s) => s.late) ?? null;
   for (const spec of specs) {
+    if (spec.late) continue;
     pages.push(await openPage(spec));
     await wait(JOIN_GAP_MS);
   }
   const arenas = new Set(pages.map((p) => p.log.welcomes[0]!.arena));
   if (arenas.size > 1) throw new Error(`pages landed in different arenas: ${[...arenas].join(", ")}`);
+  if (lateSpec) say(`${lateSpec.name} waits for wave ${LATE_JOIN_WAVE} (${(LATE_JOIN_WAVE - 1) * WAVE_S} s into the arena)`);
   const victim = pages.find((p) => p.spec.role === "victim");
   if (victim) for (const p of pages) if (p.spec.role === "reviver" || p.spec.role === "keepaway") p.plan.partner = victim.log.you;
 
@@ -491,6 +498,7 @@ try {
   let nextShot = 0;
   let victimDown = false;
   let revived = false;
+  let lateAt: number | null = null;
   const loop = setInterval(() => {
     for (const pg of pages) {
       if (pg.busy || stopping) continue;
@@ -520,8 +528,24 @@ try {
         break;
       }
     }
+    if (lateSpec && lateAt === null) {
+      const w = Math.max(0, ...pages.map((p) => p.latest?.w ?? 0));
+      if (w >= LATE_JOIN_WAVE) {
+        say(`${lateSpec.name} joins late: the arena reads wave ${w}`);
+        const late = await openPage(lateSpec);
+        pages.push(late);
+        lateAt = secs() - start;
+        if (late.log.welcomes[0]!.arena !== pages[0]!.log.welcomes[0]!.arena) say(`${lateSpec.name} landed in arena ${late.log.welcomes[0]!.arena}, not ${pages[0]!.log.welcomes[0]!.arena}`);
+        await wait(1000);
+        await screenshots("late-join");
+      } else if (t > LATE_JOIN_CAP_S) {
+        say(`no wave ${LATE_JOIN_WAVE} after ${LATE_JOIN_CAP_S} s: ${lateSpec.name} never joins`);
+        break;
+      }
+    }
     if (stopping) break;
-    if (t >= args.seconds && (!victim || revived || t >= REVIVE_WAIT_S)) break;
+    const lateDone = !lateSpec || (lateAt !== null && t >= lateAt + LATE_PLAY_S + 3);
+    if (t >= args.seconds && lateDone && (!victim || revived || t >= REVIVE_WAIT_S)) break;
     await wait(200);
   }
   // End: everyone stops fighting until every life is over.

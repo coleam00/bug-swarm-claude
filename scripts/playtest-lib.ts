@@ -14,7 +14,7 @@
 // socket was sent before, so their positions are compared too (a page's own row carries its exact
 // `me` numbers and is left out).
 import { join } from "node:path";
-import { ACCEL, DT, FILL_TARGET, INTERP_DELAY_MS, MAX_SPEED, REVIVE_RANGE, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { ACCEL, DT, FILL_TARGET, INTERP_DELAY_MS, MAX_SPEED, REVIVE_RANGE, WAVE_S, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import {
   DOWN,
   EVENT,
@@ -43,7 +43,7 @@ import { dashButtonAt } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
 import type { TopRow } from "../src/web/api";
 
-export const USAGE = "usage: bun run playtest -- --url <base url> [--players 4] [--seconds 90] [--scenario basic|revive] [--chrome <path>] [--headed]";
+export const USAGE = "usage: bun run playtest -- --url <base url> [--players 4] [--seconds 90] [--scenario basic|revive|late-join] [--chrome <path>] [--headed]";
 
 // ---- Scenarios ----
 
@@ -84,10 +84,18 @@ export const SCENARIOS: Record<ScenarioName, Scenario> = {
     minPlayers: FILL_TARGET,
     roles: (n) => Array.from({ length: n }, (_, i): Role => (i === 0 ? "victim" : i === 1 ? "reviver" : "keepaway")),
   },
-  "late-join": { name: "late-join", followUp: LATE_JOIN_RESTART_ISSUE, why: "a page joining at wave 6", minPlayers: 2, roles: () => [] },
+  // The early pages, and one more page that joins once the arena reads LATE_JOIN_WAVE (#95).
+  "late-join": { name: "late-join", followUp: null, why: "", minPlayers: 3, roles: (n) => Array.from({ length: n }, () => "fighter") },
   restart: { name: "restart", followUp: LATE_JOIN_RESTART_ISSUE, why: "needs the playtest to own the server process", minPlayers: 2, roles: () => [] },
   queen: { name: "queen", followUp: QUEEN_ISSUE, why: "a queen check and a run to wave 5", minPlayers: 2, roles: () => [] },
 };
+
+/** The late-join scenario's last page joins once an early page's snapshot reads this wave: (LATE_JOIN_WAVE - 1) * WAVE_S s in (sim.ts `wave`). */
+export const LATE_JOIN_WAVE = 6;
+/** The late page plays at least this long after its first snapshot, s. */
+export const LATE_PLAY_S = 30;
+/** If no early page reads LATE_JOIN_WAVE by this many seconds of play, the run stops (and fails). */
+export const LATE_JOIN_CAP_S = (LATE_JOIN_WAVE - 1) * WAVE_S + 60;
 
 // ---- Arguments ----
 
@@ -180,7 +188,8 @@ export type Device = { touch: boolean; width: number; height: number; scale: num
 export const DESKTOP: Device = { touch: false, width: 1280, height: 800, scale: 1 };
 export const PHONE: Device = { touch: true, width: 390, height: 844, scale: 1 };
 
-export type PageSpec = { index: number; name: string; team: Team; device: Device; role: Role; seed: number };
+/** `late`: the late-join scenario's late page (the last one), opened once the arena reads LATE_JOIN_WAVE. */
+export type PageSpec = { index: number; name: string; team: Team; device: Device; role: Role; seed: number; late: boolean };
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRST";
 
@@ -198,6 +207,7 @@ export function pageSpecs(n: number, scenario: ScenarioName, seed: number): Page
     device: i % 2 === 0 ? DESKTOP : PHONE,
     role: roles[i] ?? "fighter",
     seed: (seed + i * 7919) | 0,
+    late: scenario === "late-join" && i === n - 1,
   }));
 }
 
@@ -227,6 +237,7 @@ export type PageLog = {
   team: Team;
   touch: boolean;
   role: Role;
+  late: boolean;
   /** The page's id now (0 until a player welcome; a watching welcome is `you: 0`). */
   you: number;
   welcomes: WelcomeRec[];
@@ -239,7 +250,7 @@ export type PageLog = {
 };
 
 export function createLog(spec: PageSpec): PageLog {
-  return { index: spec.index, name: spec.name, team: spec.team, touch: spec.device.touch, role: spec.role, you: 0, welcomes: [], frames: [], events: [], tops: [], sent: [], intents: [], screens: [] };
+  return { index: spec.index, name: spec.name, team: spec.team, touch: spec.device.touch, role: spec.role, late: spec.late, you: 0, welcomes: [], frames: [], events: [], tops: [], sent: [], intents: [], screens: [] };
 }
 
 /**
@@ -554,19 +565,23 @@ export function touchPoints(layout: TouchLayout, intent: Intent): [TouchPoint, T
 
 export type CheckResult = { name: string; pass: boolean; detail: string };
 
-/** The id-to-name roster a page knows at the end: its last welcome's roster, then joins and leaves after it. */
-export function rosterOf(log: PageLog): Map<number, string> {
+/** The id-to-name roster a page knew at `at`: its last welcome by then, then the joins and leaves it received after it, up to `at`. */
+export function rosterAt(log: PageLog, at: number): Map<number, string> {
   const out = new Map<number, string>();
-  const w = log.welcomes[log.welcomes.length - 1];
+  let w: WelcomeRec | undefined;
+  for (const x of log.welcomes) if (x.at <= at) w = x;
   if (!w) return out;
   for (const r of w.roster) out.set(r.id, r.name);
   for (const e of log.events) {
-    if (e.at < w.at) continue;
+    if (e.at < w.at || e.at > at) continue;
     if (e.ev.kind === JOIN) out.set(e.ev.id, e.ev.name ?? "");
     else if (e.ev.kind === LEAVE) out.delete(e.ev.id);
   }
   return out;
 }
+
+/** The id-to-name roster a page knows at the end. */
+export const rosterOf = (log: PageLog): Map<number, string> => rosterAt(log, Infinity);
 
 /** a. Every page joined the same arena. */
 export function checkSameArena(logs: PageLog[]): CheckResult {
@@ -660,6 +675,9 @@ export function checkDelivery(logs: PageLog[]): CheckResult {
   };
 }
 
+/** What every page gets of another player's row: position, aim, alive and the flags. */
+const sharedRow = (r: SnapshotPlayer): string => JSON.stringify([r[1], r[2], r[5], r[6], r[7], r[8], r[9], r[10]]);
+
 /**
  * Positions: every player row two pages received for the same tick is the same on both (x, y,
  * aim, alive, untouchable, dashing, spawn-protected, effects), each page's own row left out (it
@@ -674,7 +692,7 @@ export function checkPositions(logs: PageLog[]): CheckResult {
     if (!rows) byTick.set(f.s.tick, (rows = new Map()));
     for (const r of f.s.p) {
       if (r[0] === f.you) continue;
-      const row = JSON.stringify([r[1], r[2], r[5], r[6], r[7], r[8], r[9], r[10]]);
+      const row = sharedRow(r);
       const prev = rows.get(r[0]);
       if (!prev) rows.set(r[0], { row, page: l.name });
       else if (prev.page !== l.name) {
@@ -1003,10 +1021,64 @@ export function checkScenarioRevive(logs: PageLog[]): CheckResult {
   };
 }
 
+/** A roster as sorted [id, name] pairs, for comparing. */
+const rosterKey = (r: Map<number, string>): string => JSON.stringify([...r].sort((a, b) => a[0] - b[0]));
+/** Downs by id, with their timers, for comparing. */
+const downsKey = (d: SnapshotDown[]): string => JSON.stringify([...d].sort((a, b) => a[0] - b[0]));
+
+/**
+ * The late-join scenario: the late page's first snapshot (a new socket's first is a keyframe) is
+ * at LATE_JOIN_WAVE or later, and at that tick its screen agrees with every early page's: the
+ * roster (its welcome and the joins and leaves before that snapshot, against what the early page
+ * had received by the same tick), the other players' rows and the downs (by id, with their
+ * timers). Then it plays on for LATE_PLAY_S. Roster, downs, kills and score from there on are the
+ * common checks, which include the late page.
+ */
+export function checkScenarioLateJoin(logs: PageLog[]): CheckResult {
+  const name = "late-join scenario";
+  const late = logs.find((l) => l.late);
+  const early = logs.filter((l) => !l.late);
+  if (!late) return { name, pass: false, detail: "no late page" };
+  const first = late.frames[0];
+  if (!first) return { name, pass: false, detail: `${late.name} never got a snapshot (no wave ${LATE_JOIN_WAVE} seen in time, or it never joined)` };
+  const tick = first.s.tick;
+  const wrong: string[] = [];
+  if (first.s.w < LATE_JOIN_WAVE) wrong.push(`${late.name}'s first snapshot is at wave ${first.s.w}, not ${LATE_JOIN_WAVE}`);
+  const mine = rosterAt(late, first.at);
+  let rows = 0;
+  for (const e of early) {
+    const f = e.frames.find((x) => x.s.tick === tick);
+    if (!f) {
+      wrong.push(`${e.name} has no tick ${tick}`);
+      continue;
+    }
+    const theirs = rosterAt(e, f.at);
+    if (rosterKey(mine) !== rosterKey(theirs)) wrong.push(`roster: ${late.name} ${rosterKey(mine)}, ${e.name} ${rosterKey(theirs)}`);
+    // Each page's own row carries its exact numbers, so both pages' own rows are left out.
+    const others = (fr: FrameRec) => new Map(fr.s.p.filter((r) => r[0] !== late.you && r[0] !== e.you).map((r) => [r[0], sharedRow(r)]));
+    const a = others(first);
+    const b = others(f);
+    if (a.size !== b.size || [...a].some(([id, row]) => b.get(id) !== row)) wrong.push(`players at tick ${tick}: ${late.name} and ${e.name} differ`);
+    rows += a.size;
+    if (downsKey(first.s.d) !== downsKey(f.s.d)) wrong.push(`downs at tick ${tick}: ${late.name} ${downsKey(first.s.d)}, ${e.name} ${downsKey(f.s.d)}`);
+  }
+  const playedS = (late.frames[late.frames.length - 1]!.s.tick - tick) * DT;
+  if (playedS < LATE_PLAY_S) wrong.push(`${late.name} played ${playedS.toFixed(1)} s after joining, under ${LATE_PLAY_S}`);
+  return {
+    name,
+    pass: wrong.length === 0,
+    detail:
+      wrong.length === 0
+        ? `${late.name} joined at wave ${first.s.w}, first snapshot tick ${tick} (${(tick * DT).toFixed(1)} s in): roster of ${mine.size}, ${rows} player rows and ${first.s.d.length} downs the same as on all ${early.length} early pages; then ${playedS.toFixed(1)} s of play`
+        : wrong.slice(0, 4).join("; "),
+  };
+}
+
 /** Every check for a scenario, in table order. */
 export function runChecks(logs: PageLog[], scenario: ScenarioName): CheckResult[] {
   const out = [checkSameArena(logs), checkRoster(logs), checkDelivery(logs), checkPositions(logs), checkEvents(logs, DOWN), checkEvents(logs, REVIVE), checkKills(logs), checkScore(logs), checkInput(logs), checkLifeOver(logs)];
   if (scenario === "revive") out.push(checkScenarioRevive(logs));
+  if (scenario === "late-join") out.push(checkScenarioLateJoin(logs));
   return out;
 }
 

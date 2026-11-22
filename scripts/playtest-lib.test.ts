@@ -11,6 +11,8 @@ import {
   BURST_ON_S,
   CONTACT_UNITS,
   DESKTOP,
+  LATE_JOIN_WAVE,
+  LATE_PLAY_S,
   MOUSE_REACH,
   MOVE_FINGER,
   PHONE,
@@ -28,6 +30,7 @@ import {
   checkPositions,
   checkRoster,
   checkSameArena,
+  checkScenarioLateJoin,
   checkScenarioRevive,
   checkScore,
   chromeCandidates,
@@ -40,6 +43,8 @@ import {
   moveKeys,
   pageSpecs,
   parseArgs,
+  rosterAt,
+  rosterOf,
   runChecks,
   shownNumber,
   table,
@@ -104,10 +109,18 @@ describe("pages and scenarios", () => {
     expect(SCENARIOS.revive.minPlayers).toBe(4);
   });
 
-  test("only basic and revive run; the others name the issue that tracks them", () => {
+  test("late-join: every page fights and the last one is the late page; it needs two early pages", () => {
+    const pages = pageSpecs(4, "late-join", 1);
+    expect(pages.map((p) => p.late)).toEqual([false, false, false, true]);
+    expect(pages.every((p) => p.role === "fighter")).toBe(true);
+    expect(pageSpecs(4, "basic", 1).some((p) => p.late)).toBe(false);
+    expect(SCENARIOS["late-join"].minPlayers).toBe(3);
+  });
+
+  test("basic, revive and late-join run; the others name the issue that tracks them", () => {
     for (const name of SCENARIO_NAMES) {
       const s = SCENARIOS[name];
-      if (name === "basic" || name === "revive") expect(s.followUp).toBeNull();
+      if (name === "basic" || name === "revive" || name === "late-join") expect(s.followUp).toBeNull();
       else expect(s.followUp).toBeGreaterThan(94);
     }
   });
@@ -369,6 +382,70 @@ function view(o: { bugs?: SnapshotBug[]; players?: SnapshotPlayer[]; downs?: Sna
 }
 const bug = (id: number, dx: number, dy: number): SnapshotBug => [id, 0, ME.x + dx, ME.y + dy];
 const at = (id: number, dx: number, dy: number): SnapshotPlayer => [id, ME.x + dx, ME.y + dy, 0, 0, 0, 1, 0, 0, 0, 0];
+
+// ---- Late join: A and B (ids 1, 2) since tick 2900; C (id 4) joins after tick 3000, at wave 6. ----
+
+const welcome = (you: number, tick: number, roster: { id: number; name: string; team: string }[]) =>
+  msg(JSON.stringify({ t: "welcome", v: 10, you, arena: 3, build: "b", world: { w: 2400, h: 2400 }, tickMs: 50, tick, roster }));
+const LATE_TICK = 3000;
+const BOT = { id: 3, name: "Bot", team: "tabs" };
+const C = { id: 4, name: "PT-C", team: "tabs" };
+
+/** `firstWave`: the wave C's first snapshot reads; `downTimer`: B's down timer on C's first snapshot; `play`: ticks C plays. */
+function lateGame(o: { firstWave?: number; downTimer?: number; play?: number } = {}): PageLog[] {
+  const specs = pageSpecs(3, "late-join", 7);
+  const logs = specs.map((s, i) => Object.assign(createLog(s), { name: [...ROSTER, C][i]!.name }));
+  const end = LATE_TICK + 1 + (o.play ?? Math.ceil(LATE_PLAY_S / 0.05));
+  const frame = (l: PageLog, i: number, t: number) => {
+    const p = [row(1, 100, 0, 0), row(2, 200, 0, 0), row(3, 300, 0, 0), ...(t > LATE_TICK ? [row(4, 400, 0, 0)] : [])];
+    const timer = i === 2 && t === LATE_TICK + 1 && o.downTimer !== undefined ? o.downTimer : 7;
+    const w = i === 2 && t === LATE_TICK + 1 && o.firstWave !== undefined ? o.firstWave : t >= LATE_TICK ? 6 : 5;
+    const raw = JSON.parse(snapshot(t, { p, d: [[2, timer, 1, 0.1]], me: me(), ack: 0 }));
+    addFrame(l, t * 50 + i, t * 50 + i, msg(JSON.stringify({ ...raw, w })));
+  };
+  for (const i of [0, 1]) {
+    const l = logs[i]!;
+    addFrame(l, 2900 * 50, 0, welcome(i + 1, 2900, [ROSTER[0]!, ROSTER[1]!, BOT]));
+    for (let t = 2901; t <= end; t++) {
+      // C's join reaches the early pages with tick LATE_TICK + 1's step.
+      if (t === LATE_TICK + 1) addFrame(l, t * 50 - 1, 0, msg(JSON.stringify({ t: "event", kind: "join", id: 4, name: "PT-C", team: "tabs" })));
+      frame(l, i, t);
+    }
+  }
+  const c = logs[2]!;
+  addFrame(c, LATE_TICK * 50 + 20, 0, welcome(4, LATE_TICK, [ROSTER[0]!, ROSTER[1]!, BOT, C]));
+  for (let t = LATE_TICK + 1; t <= end; t++) frame(c, 2, t);
+  return logs;
+}
+
+describe("late join", () => {
+  test("rosterAt: the last welcome by then, then the joins and leaves up to then", () => {
+    const [a] = lateGame();
+    expect([...rosterAt(a!, LATE_TICK * 50).keys()]).toEqual([1, 2, 3]);
+    expect([...rosterAt(a!, (LATE_TICK + 1) * 50).keys()]).toEqual([1, 2, 3, 4]);
+    expect(rosterOf(a!)).toEqual(rosterAt(a!, Infinity));
+    expect(rosterAt(a!, 0).size).toBe(0);
+  });
+
+  test("passes when the late page's first snapshot is at wave 6 and its roster, players and downs match the early pages'", () => {
+    const r = checkScenarioLateJoin(lateGame());
+    expect(r.detail).toContain(`joined at wave ${LATE_JOIN_WAVE}, first snapshot tick ${LATE_TICK + 1}`);
+    expect(r.pass).toBe(true);
+  });
+
+  test("fails on a first snapshot before wave 6, a down that differs, a roster missing a page, or too little play after", () => {
+    expect(checkScenarioLateJoin(lateGame({ firstWave: 5 })).pass).toBe(false);
+    const down = checkScenarioLateJoin(lateGame({ downTimer: 6 }));
+    expect(down.pass).toBe(false);
+    expect(down.detail).toContain("downs at tick");
+    const roster = lateGame();
+    roster[2]!.welcomes[0]!.roster = roster[2]!.welcomes[0]!.roster.filter((x) => x.id !== 1);
+    const r = checkScenarioLateJoin(roster);
+    expect(r.pass).toBe(false);
+    expect(r.detail).toContain("roster");
+    expect(checkScenarioLateJoin(lateGame({ play: 100 })).pass).toBe(false);
+  });
+});
 
 describe("decide", () => {
   test("aims at the nearest bug on screen, not a nearer one off it", () => {
