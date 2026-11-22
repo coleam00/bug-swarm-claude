@@ -23,8 +23,9 @@ import type { BugKindDef } from "./kind";
 
 /**
  * Collision radius, units: big, against a crawler's 12, and drawn on the circle shots meet
- * (draw/bugs/beetle.ts). The largest kind's, so it sets MAX_BUG_RADIUS and so every spawn clamp and
- * view check; at 17 all three `bun run skill` gates still pass on 240 and 480 late seeds.
+ * (draw/bugs/beetle.ts). The largest kind's but a boss's (#85: the hive queen is left out), so it
+ * sets MAX_BUG_RADIUS and so every spawn clamp and view check; at 17 all three `bun run skill` gates
+ * still pass on 240 and 480 late seeds.
  */
 export const BEETLE_RADIUS = 17;
 /** Its walking speed with its target dead ahead, units per second. */

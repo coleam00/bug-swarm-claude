@@ -11,6 +11,7 @@ import {
   QUEEN_BAR_GAP,
   QUEEN_BAR_MAX,
   bannerAlpha,
+  bannerFloor,
   bannerY,
   barFill,
   createBanner,
@@ -97,6 +98,16 @@ describe("banners", () => {
     expect(bannerY(800, 100)).toBeCloseTo(224, 9);
     expect(bannerY(390, 200)).toBe(200);
     expect(bannerY(844, 150)).toBeLessThan(844 / 3);
+  });
+
+  test("under the minimap only when the text reaches its columns: a landscape phone keeps it above your robot", () => {
+    // 844x390: the minimap is 120 wide at x 712; a 350 px banner centred at 422 ends at 597.
+    expect(bannerFloor(422, 175, 712, 164, 120, 16)).toBe(120);
+    expect(bannerY(390, bannerFloor(422, 175, 712, 164, 120, 16))).toBe(120);
+    // 390x844: the banner spans the screen, so it goes under the minimap (x 258).
+    expect(bannerFloor(195, 179, 258, 164, 120, 16)).toBe(164);
+    // It never sits above the HUD, even under a short minimap.
+    expect(bannerFloor(195, 179, 258, 100, 120, 16)).toBe(120);
   });
 
   test("text too wide for the screen is scaled to fit; text that fits is not", () => {

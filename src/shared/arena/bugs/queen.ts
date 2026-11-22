@@ -34,8 +34,13 @@ export const TELL_TICKS = Math.round(1 / DT);
 /** Globs in a ring, and how far each ring's line turns from the last, radians (15 degrees). */
 export const RING_COUNT = 12;
 export const RING_TURN = Math.PI / 12;
-/** Crawlers in a brood, and the ticks between broods (4 s, the first 4 s after she arrives). */
-export const BROOD_COUNT = 3;
+/**
+ * Crawlers in a brood, and the ticks between broods (4 s, the first 4 s after she arrives). The
+ * item's 3 read the late-joiner gate at 0.797x (FAIL) on 240 late seeds and 0.81x on 480; 2 read
+ * 0.82x on both (3 every 5 s: 0.81x on both). The late joiner meets the wave-20 queen 30 s after she
+ * arrived (#85).
+ */
+export const BROOD_COUNT = 2;
 export const BROOD_TICKS = Math.round(4 / DT);
 /** Her brood stops while the arena holds this many bugs, so a ring always has room (MAX less RING_COUNT). */
 export const BROOD_CAP = MAX_BUGS_PER_ARENA - RING_COUNT;

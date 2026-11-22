@@ -85,6 +85,7 @@ import {
   QUEEN_BAR_H,
   QUEEN_BAR_SHIFT,
   bannerAlpha,
+  bannerFloor,
   bannerY,
   barFill,
   fitScale,
@@ -938,29 +939,31 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     if (!coming && downAlpha <= 0) return;
     const maxW = cssW - safe.left - safe.right - 2 * BANNER_MARGIN;
     const cx = safe.left + (cssW - safe.left - safe.right) / 2;
-    const y = bannerY(cssH, minimap.y + minimap.size + BANNER_MARGIN * 2);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = TEXT_STROKE;
     if (comingW === 0) {
       ctx.font = BANNER_FONT;
       comingW = ctx.measureText(BANNER_COMING).width;
       downW = ctx.measureText(BANNER_DOWN).width;
-    }
-    if (coming) {
-      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(sc.t * TAU * 2);
-      ctx.fillStyle = QUEEN_COLOUR;
-      drawFitted(BANNER_COMING, comingW, BANNER_FONT, cx, y, maxW);
-      ctx.globalAlpha = 1;
-      return;
     }
     if (sc.bannerName !== bannerFor) {
       bannerFor = sc.bannerName;
       bannerSub = bannerFor ? `${bannerFor} dealt the most` : "";
       ctx.font = BANNER_SUB_FONT;
       subW = bannerSub ? ctx.measureText(bannerSub).width : 0;
+    }
+    const halfW = Math.min(maxW, coming ? comingW : Math.max(downW, subW)) / 2 + BANNER_MARGIN;
+    const hudBottom = hud.top + LINE_MIDDLE + QUEEN_BAR_SHIFT + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
+    const y = bannerY(cssH, bannerFloor(cx, halfW, minimap.x, minimap.y + minimap.size + BANNER_MARGIN * 2, hudBottom, BANNER_MARGIN));
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = TEXT_STROKE;
+    if (coming) {
+      ctx.globalAlpha = 0.75 + 0.25 * Math.sin(sc.t * TAU * 2);
+      ctx.fillStyle = QUEEN_COLOUR;
+      drawFitted(BANNER_COMING, comingW, BANNER_FONT, cx, y, maxW);
+      ctx.globalAlpha = 1;
+      return;
     }
     ctx.globalAlpha = downAlpha;
     ctx.fillStyle = QUEEN_COLOUR;

@@ -93,6 +93,17 @@ export function bannerY(cssH: number, floor: number): number {
   return Math.max(floor, cssH * 0.28);
 }
 
+/**
+ * The highest a banner `halfW` wide either side of `cx` may sit, CSS px from the top: under the
+ * minimap (`minimapBottom`) only when the text reaches the minimap's columns (from `minimapX` less
+ * `gap`), else just under the HUD (`hudBottom`: the line and the queen's bar). A landscape phone
+ * (844x390) keeps the banner above your robot that way; a portrait one, whose banner spans the
+ * screen, puts it under the minimap.
+ */
+export function bannerFloor(cx: number, halfW: number, minimapX: number, minimapBottom: number, hudBottom: number, gap: number): number {
+  return cx + halfW > minimapX - gap ? Math.max(minimapBottom, hudBottom) : hudBottom;
+}
+
 /** The scale that fits text `textW` wide into `maxW` (1 when it fits already). */
 export function fitScale(textW: number, maxW: number): number {
   return textW > maxW && textW > 0 ? Math.max(0, maxW) / textW : 1;

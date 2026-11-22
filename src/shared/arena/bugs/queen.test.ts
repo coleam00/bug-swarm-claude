@@ -64,7 +64,7 @@ describe("drift", () => {
 });
 
 describe("brood", () => {
-  test("3 crawlers a third of a turn apart at her edge, every BROOD_TICKS", () => {
+  test("BROOD_COUNT crawlers evenly round her edge, every BROOD_TICKS", () => {
     const a = quietArena();
     const q = placeQueen(a, 1200, 1200);
     const crawlers = () => a.bugs.filter((b) => b.kind === "crawler");
