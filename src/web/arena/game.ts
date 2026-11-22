@@ -19,6 +19,9 @@
 // keys), no HUD, a camera that drifts between the action (drift.ts), and a backing store at most
 // 1x (it is drawn blurred). `handoff()` stops it and hands its open connection to startArena,
 // which plays on the same socket.
+// Stream scale (#89): snapshots carry only the bugs near you; the minimap's far swarm comes once a
+// second as cells (`m`). The F readout adds the KB/s the socket receives and the p95 time from an
+// input leaving to a snapshot acknowledging it (netmeter.ts).
 import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
 import { BOMB_RADIUS, bomb } from "../../shared/arena/pickups/bomb";
 import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
@@ -41,6 +44,7 @@ import {
 import { clampInput, wrapAngle, type Input } from "../../shared/arena/sim";
 import { isTeam, type Team } from "../../server/rules";
 import { createFpsMeter, tickFps } from "../game/fps";
+import { ackP95, createNetMeter, noteAck, noteSent, readKbps, resetNetMeter } from "./netmeter";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "../game/fx/particles";
 import { createRings, spawnRing, updateRings } from "../game/fx/rings";
 import { HIT_SHAKE, createShake, kick, updateShake } from "../game/fx/shake";
@@ -221,7 +225,10 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   let seq = 0;
   let wave = 0;
   /** Your numbers from the last snapshot. */
-  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [] };
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0 };
+  /** The minimap's bugs outside your view, as cells (the last keyframe's `m`). */
+  let far: number[] = [];
+  const net = createNetMeter();
   let haveMe = false;
   /** Your last life's end, performance.now ms, until you are in a life again. */
   let overAt: number | null = null;
@@ -304,6 +311,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       haveMe = false;
       overAt = null;
       seq = 0;
+      far = [];
+      resetNetMeter(net);
       roster.clear();
       resetInterp(interp);
       clearShots(shots);
@@ -313,6 +322,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     } else if (m.t === SNAPSHOT) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
+      if (m.m) far = m.m;
+      noteAck(net, m.ack, performance.now());
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5] === 1);
       for (const e of m.e) endShot(shots, e[0], e[1], e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
@@ -484,6 +495,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       ? clampInput({ seq: ++seq, mx, my, aim, fire, dash })
       : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash: alive ? false : dash });
     conn.send(encodeInput(input));
+    noteSent(net, input.seq, performance.now());
     if (up) predictLocal(predictor, input);
   };
   // A hidden tab gets no frames: stop rather than repeat the last move until the server's stale limit.
@@ -549,6 +561,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     tings,
     shake,
     me: null,
+    far: [],
     wave: 0,
     hud: hudFx,
     players: 0,
@@ -746,7 +759,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
 
     if (showStats && statsReading === -1) {
       statsReading = 0;
-      statsText = `${Math.round(meter.fps)} fps · ${drawn.length} players · ${bugs.count} bugs · ${shots.live} shots · ${particles.live} fx`;
+      const kbps = readKbps(net, conn.received, now);
+      const ack = ackP95(net, now);
+      statsText = `${Math.round(meter.fps)} fps · ${drawn.length} players · ${bugs.count} bugs · ${shots.live} shots · ${particles.live} fx · ${kbps === null ? "-" : kbps.toFixed(1)} KB/s · ack ${ack === null ? "-" : Math.round(ack)} ms`;
     }
     scene.count = drawn.length;
     scene.self = selfIndex;
@@ -756,6 +771,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.you = you;
     scene.me = haveMe ? me : null;
     scene.wave = wave;
+    scene.far = far;
     scene.players = roster.size;
     scene.out = spawned && !alive;
     scene.stats = showStats ? statsText : null;

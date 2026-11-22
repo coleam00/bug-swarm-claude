@@ -5,7 +5,24 @@ import { stepPlayer } from "../src/shared/arena/sim";
 import { TEAMS } from "../src/server/rules";
 import type { Snapshot, SnapshotBug } from "../src/shared/arena/protocol";
 import { createObservationTracker } from "./bots-lib";
-import { AIM_TURN, WALL_AVOID, botName, botTeam, createTally, createWander, formatSummary, parseBotsArgs, stepWander, watcherRates, wsUrl } from "./bots-lib";
+import {
+  AIM_TURN,
+  KBPS_PER_PLAYER_BUDGET,
+  TICK_P95_BUDGET_MS,
+  WALL_AVOID,
+  botName,
+  botTeam,
+  budgetVerdict,
+  createTally,
+  createWander,
+  formatSummary,
+  parseBotsArgs,
+  rateStats,
+  secondHalfKbps,
+  stepWander,
+  watcherRates,
+  wsUrl,
+} from "./bots-lib";
 
 describe("parseBotsArgs", () => {
   test("defaults to 18 aimer bots for 60 seconds, and strips a trailing slash", () => {
@@ -119,7 +136,7 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
     d: [],
     f: tick === 10 ? [[1, 0, 700, 710, 200]] : [],
     w: 1,
-    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al, dk: 0, dc: 0, dn: 0, fx: [0, 0] },
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0 },
   });
   t.update(snap(10, [[7, 0, 300, 300]]), 2);
   expect(t.obs.self).toEqual({ x: 500, y: 600, vx: 30, vy: -40, aim: 1.5, alive: true, heat: 0.42, locked: true, dashReady: true });
@@ -156,7 +173,7 @@ test("a policy bot sees a beetle's shell facing from its row's tail, and no faci
     d: [],
     f: [],
     w: 4,
-    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0] },
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0 },
   });
   t.update(snap([[1, beetle, 300, 300, 1, Math.PI / 2, 0], [2, dasher, 100, 100, 1, 0.5, 3]]), 2);
   expect(t.obs.bugs[0]!.fx).toBeCloseTo(0, 9);
@@ -191,4 +208,50 @@ test("the summary gives each watcher's received KB/s, mean and max", () => {
   expect(text).toContain("45.0"); // the mean
   expect(text).toContain("65.0"); // the max
   expect(formatSummary({ ...args, watchers: 0 }, tally, 10, null).join(" ")).not.toContain("watchers:");
+});
+
+describe("the budget gate (#89)", () => {
+  const pass = { errors: 0, joins: 200, count: 200, tick: { p50: 1, p95: 2 }, kbps: rateStats([30, 35, 39.9])! };
+
+  test("a bot's KB/s is its payload over the run's second half, or its part of it when it was welcomed late", () => {
+    expect(secondHalfKbps({ first: 999_999, second: 1_800_000, welcomedAt: 0 }, 60_000, 120_000)).toBe(30);
+    expect(secondHalfKbps({ first: 0, second: 900_000, welcomedAt: 90_000 }, 60_000, 120_000)).toBe(30);
+    expect(secondHalfKbps({ first: 0, second: 0, welcomedAt: null }, 60_000, 120_000)).toBeNull();
+    expect(secondHalfKbps({ first: 0, second: 10, welcomedAt: 119_500 }, 60_000, 120_000)).toBeNull();
+  });
+
+  test("rates: mean, p95 and max", () => {
+    expect(rateStats([])).toBeNull();
+    const twenty = Array.from({ length: 20 }, (_, i) => i + 1);
+    expect(rateStats(twenty)).toEqual({ mean: 10.5, p95: 19, max: 20, count: 20 });
+  });
+
+  test("a run within every budget passes; each miss is named", () => {
+    expect(budgetVerdict(pass)).toEqual([]);
+    expect(budgetVerdict({ ...pass, errors: 2 })).toEqual(["2 error(s)"]);
+    expect(budgetVerdict({ ...pass, joins: 199 })).toEqual(["only 199 of 200 bots joined"]);
+    expect(budgetVerdict({ ...pass, tick: null })).toEqual(["server stats unavailable"]);
+    expect(budgetVerdict({ ...pass, tick: { p50: 1, p95: TICK_P95_BUDGET_MS } })).toEqual([`tick p95 10.00 ms is not under ${TICK_P95_BUDGET_MS} ms`]);
+    expect(budgetVerdict({ ...pass, tick: { p50: null, p95: null } })).toEqual(["no tick p95 measured"]);
+    expect(budgetVerdict({ ...pass, kbps: rateStats([30, KBPS_PER_PLAYER_BUDGET + 0.1]) })).toEqual(["a player received 40.1 KB/s, over 40 KB/s"]);
+    expect(budgetVerdict({ ...pass, kbps: rateStats([KBPS_PER_PLAYER_BUDGET]) })).toEqual([]);
+    expect(budgetVerdict({ ...pass, kbps: null })).toEqual(["no per-player bandwidth measured"]);
+    // Watchers only: errors and stats are all that count.
+    expect(budgetVerdict({ errors: 0, joins: 0, count: 0, tick: { p50: null, p95: null }, kbps: null })).toEqual([]);
+  });
+
+  test("the summary prints per-player KB/s, memory, a budget line per gate and the verdict", () => {
+    const tally = createTally();
+    tally.joins = 2;
+    tally.kbps.push(20, 45);
+    tally.memory = { rssMb: 80.5, heapUsedMb: 30 };
+    tally.serverArenas = 1;
+    const text = formatSummary({ url: "u", count: 2, seconds: 120, policy: "aimer", watchers: 0 }, tally, 120, { p50: 1, p95: 2 }).join("\n");
+    expect(text).toContain("mean 32.5 KB/s, p95 45.0 KB/s, max 45.0 KB/s over 2 bot(s)");
+    expect(text).toContain("rss 80.5 MB");
+    expect(text).toContain("budget: tick p95 under 10 ms: pass");
+    expect(text).toContain("budget: at most 40 KB/s per player: MISS");
+    expect(text).toContain("budget: 0 errors: pass");
+    expect(text).toContain("verdict: MISS (a player received 45.0 KB/s, over 40 KB/s)");
+  });
 });

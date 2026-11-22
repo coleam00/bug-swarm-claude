@@ -13,7 +13,7 @@
 // ring draining as it runs out. It reuses release 1's sprites and pooled
 // effects (src/web/game/sprites.ts and fx/) so the arena looks like the same game. Sprites are
 // built on resize only; a frame allocates nothing but the strings of a value that changed.
-import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
+import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, MINIMAP_CELL, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
 import { pickupDef } from "../../shared/arena/pickups/registry";
 import type { SnapshotMe } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
@@ -296,6 +296,11 @@ export type Scene = {
   shake: Shake;
   /** Your numbers, or null before the first snapshot. */
   me: SnapshotMe | null;
+  /**
+   * The minimap's bugs outside your view (#89): `[cx0, cy0, ...]` in MINIMAP_CELL cells, from the
+   * last keyframe. The bugs in view come from `bugs`.
+   */
+  far: readonly number[];
   wave: number;
   hud: HudFx;
   /** Players in your arena, you and bots included. */
@@ -1195,6 +1200,11 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       // A glob is a shot in flight, not a bug in the swarm: no dot.
       if (bugs.kind[i] === GLOB_KIND) continue;
       toMinimap(m, bugs.x[i]!, bugs.y[i]!, dot);
+      ctx.fillRect(dot.x - 1, dot.y - 1, 2, 2);
+    }
+    const far = sc.far;
+    for (let i = 0; i + 1 < far.length; i += 2) {
+      toMinimap(m, far[i]! * MINIMAP_CELL, far[i + 1]! * MINIMAP_CELL, dot);
       ctx.fillRect(dot.x - 1, dot.y - 1, 2, 2);
     }
     for (let i = 0; i < count; i++) {

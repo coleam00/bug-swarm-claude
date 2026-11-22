@@ -12,10 +12,16 @@
 //
 // Watchers (#79): sockets that only watch (the start screen). They take no player slot, send no
 // inputs and come and go unannounced; they get every broadcast event (never a life's "over") and
-// one snapshot string per tick, built once and sent to all of them. With `demoTo` above 0, an
-// arena nobody plays in but someone watches runs that many bots (fill.ts botTarget).
+// one snapshot stream, encoded once per tick and sent to all of them.
+//
+// Snapshots (v10, #89, shared/arena/view.ts): the arena is quantized once a tick, then each member
+// gets its own snapshot, culled to its view square, as a delta against what it was last sent or a
+// keyframe (its first, every KEYFRAME_TICKS, and after a send the socket dropped). Watchers see the
+// whole arena: one shared delta, and a keyframe for any watcher that is new or missed one.
+//
+// With `demoTo` above 0, an arena nobody plays in but someone watches runs that many bots (fill.ts
+// botTarget).
 import {
-  BUG_KINDS,
   HITS_PER_LIFE,
   PICKUP_IDS,
   INPUT_BUFFER,
@@ -35,8 +41,6 @@ import {
   OVER,
   PICKUP,
   REVIVE,
-  encodeSnapshot,
-  encodeSnapshotShared,
   type ArenaEvent,
   type RosterEntry,
   type SnapshotMe,
@@ -64,12 +68,13 @@ import {
   type PolicyInput,
 } from "../../shared/arena/policies";
 import { createRng, type Rng } from "../../shared/arena/rng";
+import { createArenaFrame, createViewState, encodeView, keyframeOf, quantizeArena, viewBoxOf, type ArenaFrame, type ViewBox, type ViewState } from "../../shared/arena/view";
 import type { Team } from "../rules";
 import { botName, botTeam, botTarget, fillDelta } from "./fill";
 import type { TickLog } from "./ticks";
 
-/** Sends one text frame to a member's socket. */
-export type Send = (message: string) => void;
+/** Sends one text frame to a member's socket. False when the socket dropped it (its next snapshot is a keyframe). */
+export type Send = (message: string) => boolean;
 
 /** A finished life, as the server saves it: who played it, and what the simulation scored. */
 export type LifeRecord = {
@@ -97,13 +102,18 @@ type Member = MemberInfo & {
   ack: number;
   /** The last sequence number accepted into the queue; older or repeated ones are dropped. */
   lastSeq: number;
+  /** What this member was last sent (view.ts). */
+  view: ViewState;
 };
+
+/** A watching socket: its send, and whether its next snapshot must be a keyframe. */
+type Watcher = { send: Send; needKey: boolean };
 
 /** A server fill bot: its player, and what its policy sees and remembers. */
 type Bot = { player: Player; obs: Observation; mem: FillMemory; rng: Rng; out: PolicyInput; leaving: boolean };
 
 /** A watcher's snapshot numbers: all zero (it has no robot). Shared, never written. */
-const WATCH_ME: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0) };
+const WATCH_ME: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0 };
 
 /** Ticks a late timer may run at once to catch up; any further lag is dropped, not caught up. */
 export const MAX_CATCH_UP_TICKS = 2;
@@ -121,6 +131,10 @@ export function meOf(p: Player, out: SnapshotMe): SnapshotMe {
   out.dk = p.dashTicks;
   out.dc = p.dashCooldown;
   out.dn = p.down ? 1 : 0;
+  out.x = p.x;
+  out.y = p.y;
+  out.vx = p.vx;
+  out.vy = p.vy;
   // Filled in place: the array is the room's, reused every snapshot.
   out.fx.length = p.effect.length;
   for (let i = 0; i < p.effect.length; i++) out.fx[i] = p.effect[i]!;
@@ -133,11 +147,16 @@ export class Room {
   /** Fill bots by player id, oldest first. */
   private readonly bots = new Map<number, Bot>();
   /** Watching sockets by watcher id (rooms.ts numbers them). */
-  private readonly watchers = new Map<number, Send>();
+  private readonly watchers = new Map<number, Watcher>();
+  /** What every watcher was sent: they share one stream. */
+  private readonly watchView: ViewState = createViewState();
+  /** This tick's arena, quantized once for every snapshot (view.ts). */
+  private readonly frame: ArenaFrame = createArenaFrame();
+  private readonly box: ViewBox = { cx: 0, cy: 0, half: 0 };
   private nextTickAt: number;
   /** Running warmUp: the arena plays as a watched demo arena with nobody to send to. */
   private warming = false;
-  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [] };
+  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0 };
 
   constructor(
     readonly id: number,
@@ -168,9 +187,9 @@ export class Room {
     return this.watchers.size;
   }
 
-  /** Adds a watcher, silently: nobody is told, the roster does not change. */
+  /** Adds a watcher, silently: nobody is told, the roster does not change. Its first snapshot is a keyframe. */
   watch(id: number, send: Send): void {
-    this.watchers.set(id, send);
+    this.watchers.set(id, { send, needKey: true });
     this.markLeaving();
   }
 
@@ -246,7 +265,7 @@ export class Room {
     if (this.bots.size > 0 && this.state.players.length >= MAX_PLAYERS_PER_ARENA) this.removeBot(this.botToEvict());
     const player = joinPlayer(this.state, name, team);
     this.broadcast({ t: EVENT, kind: JOIN, id: player.id, name, team });
-    this.members.set(player.id, { playerKey: info.playerKey, touch: info.touch, player, send, queue: [], ack: 0, lastSeq: 0 });
+    this.members.set(player.id, { playerKey: info.playerKey, touch: info.touch, player, send, queue: [], ack: 0, lastSeq: 0, view: createViewState() });
     this.markLeaving();
     return player;
   }
@@ -334,8 +353,9 @@ export class Room {
    * new), the arena steps, everyone is told of each player who went down and then of each
    * revive, every life that ended is handed on and its player told, and every member gets a
    * snapshot with its own ack and numbers (pickups taken and shield blocks are broadcast with the
-   * downs and revives). Events of a tick are sent before its snapshot. The
-   * shared part of the snapshot is encoded once for everyone.
+   * downs and revives). Events of a tick are sent before its snapshot. The arena is quantized once
+   * (view.ts quantizeArena); each member's snapshot is culled to its view and encoded against what
+   * it was last sent.
    */
   tick(nowMs: number): void {
     const t0 = this.clock();
@@ -385,11 +405,32 @@ export class Room {
       const m = this.members.get(life.id);
       if (m) this.lifeEnded(m, life, nowMs);
     }
-    const shared = encodeSnapshotShared(this.state, BUG_KINDS, wave(this.state.tick), PICKUP_IDS);
-    for (const m of this.members.values()) m.send(encodeSnapshot(this.state.tick, m.ack, meOf(m.player, this.me), shared));
-    if (this.watchers.size > 0) {
-      const watched = encodeSnapshot(this.state.tick, 0, WATCH_ME, shared);
-      for (const send of this.watchers.values()) send(watched);
+    // Quantized even with nobody to send to (a warm-up), so shot ends always find where their shot started.
+    const f = quantizeArena(this.state, wave(this.state.tick), this.frame);
+    for (const m of this.members.values()) {
+      const p = m.player;
+      const msg = encodeView(f, m.view, viewBoxOf(p.x, p.y, this.box), p.id, m.ack, meOf(p, this.me));
+      if (!m.send(msg)) m.view.needKey = true;
+    }
+    if (this.watchers.size > 0) this.sendWatchers(f);
+  }
+
+  /**
+   * One stream for every watcher: the delta (or keyframe) the shared view moved by, and a keyframe
+   * for each watcher that is new or had a send dropped. A dropped send marks only that watcher.
+   */
+  private sendWatchers(f: ArenaFrame): void {
+    const vs = this.watchView;
+    let behind = 0;
+    for (const w of this.watchers.values()) if (w.needKey) behind++;
+    // Everyone needs a keyframe: make the shared one a keyframe rather than encode both.
+    if (behind === this.watchers.size) vs.needKey = true;
+    const msg = encodeView(f, vs, null, 0, 0, WATCH_ME);
+    let key: string | null = vs.wasKey ? msg : null;
+    for (const w of this.watchers.values()) {
+      let out = msg;
+      if (w.needKey && !vs.wasKey) out = key ??= keyframeOf(f, vs, null, 0, 0, WATCH_ME);
+      w.needKey = !w.send(out);
     }
   }
 
@@ -415,6 +456,6 @@ export class Room {
   private broadcast(event: ArenaEvent): void {
     const msg = JSON.stringify(event);
     for (const m of this.members.values()) m.send(msg);
-    for (const send of this.watchers.values()) send(msg);
+    for (const w of this.watchers.values()) w.send(msg);
   }
 }
