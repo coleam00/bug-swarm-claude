@@ -21,8 +21,8 @@ describe("shots drawn by the browser", () => {
     const s = createShots();
     addShot(s, 5, 1, 100, 200, 0, 10);
     addShot(s, 6, 1, 100, 200, Math.PI / 2, 10);
-    endShot(s, 5, true, 70, 11);
-    endShot(s, 6, false, SHOT_RANGE, 25);
+    endShot(s, 5, 1, 70, 11);
+    endShot(s, 6, 0, SHOT_RANGE, 25);
     expect(shotTravel(s, 0, 10.9)).toBeCloseTo(70, 3);
     const sparks: number[][] = [];
     pruneShots(s, 10.9, nobody, false, (x, y) => sparks.push([x, y]));
@@ -36,12 +36,26 @@ describe("shots drawn by the browser", () => {
     expect(sparks.length).toBe(1);
   });
 
+  test("a shot a shell stopped is let go with its spark marked blocked (#80)", () => {
+    const s = createShots();
+    addShot(s, 1, 1, 0, 0, 0, 10);
+    addShot(s, 2, 1, 0, 0, 0, 10);
+    endShot(s, 1, 2, 40, 11);
+    endShot(s, 2, 1, 60, 11);
+    const sparks: [number, boolean][] = [];
+    pruneShots(s, 11, nobody, false, (x, _y, blocked) => sparks.push([x, blocked]));
+    expect(sparks).toEqual([
+      [40, true],
+      [60, false],
+    ]);
+  });
+
   test("your shots and everyone else's are let go on their own clocks", () => {
     const s = createShots();
     addShot(s, 1, 7, 0, 0, 0, 10);
     addShot(s, 2, 8, 0, 0, 0, 10);
-    endShot(s, 1, false, 90, 11);
-    endShot(s, 2, false, 90, 11);
+    endShot(s, 1, 0, 90, 11);
+    endShot(s, 2, 0, 90, 11);
     const mine = (owner: number) => owner === 7;
     pruneShots(s, 12, mine, true, () => {});
     expect(s.live).toBe(1);
@@ -55,7 +69,7 @@ describe("shots drawn by the browser", () => {
     expect(s.live).toBe(4);
     expect([...s.id]).toEqual([14, 15, 12, 13]);
     // The overwritten shots' ends are ignored.
-    endShot(s, 10, true, 5, 51);
+    endShot(s, 10, 1, 5, 51);
     expect([...s.endTick].every((t) => t === -1)).toBe(true);
   });
 });

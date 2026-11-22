@@ -31,7 +31,7 @@ import {
   type SnapshotDown,
   type SnapshotMe,
 } from "../../shared/arena/protocol";
-import { clampInput, type Input } from "../../shared/arena/sim";
+import { clampInput, wrapAngle, type Input } from "../../shared/arena/sim";
 import { isTeam, type Team } from "../../server/rules";
 import { createFpsMeter, tickFps } from "../game/fps";
 import { BURST_COUNT, createParticles, spawnBurst, updateParticles } from "../game/fx/particles";
@@ -231,7 +231,7 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5] === 1);
-      for (const e of m.e) endShot(shots, e[0], e[1] === 1, e[2], m.tick);
+      for (const e of m.e) endShot(shots, e[0], e[1], e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       Object.assign(me, m.me);
       haveMe = true;
@@ -501,13 +501,16 @@ export function startArena(canvas: HTMLCanvasElement, player: ArenaPlayer, on: A
       }
       // v6: a bug out of its kind's first phase carries its phase, locked angle and ticks in it.
       const phase = row.length > 4 ? row[4]! : 0;
-      const angle = row.length > 4 ? row[5]! : 0;
+      let angle = row.length > 4 ? row[5]! : 0;
       let phaseS = 0;
       if (phase !== 0) {
+        const nextPhase = next && next.length > 4 ? next[4]! : 0;
+        // A bug that turns within a phase (a beetle, #80) turns smoothly between snapshots, the
+        // short way round; a locked angle (a dasher's tell) is the same at both ends.
+        if (nextPhase === phase) angle += wrapAngle(next![5]! - angle) * span.t;
         // It faces the angle its phase locked (standing in a tell, it has no movement to face).
         heading = angle;
         headings.set(id, heading);
-        const nextPhase = next && next.length > 4 ? next[4]! : 0;
         phaseS = (row[6]! + (nextPhase === phase ? span.t : 0)) * DT;
       }
       const i = bugs.count++;

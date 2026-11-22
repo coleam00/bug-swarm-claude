@@ -183,9 +183,10 @@ export type PickupTaken = { player: number; kind: PickupId };
 export type ShotFired = { id: number; owner: number; x: number; y: number; angle: number; laser: boolean };
 /**
  * A shot that ended this tick: on a bug (`hit`) or at its range or a wall (not `hit`; a review
- * laser shot may have hit bugs on the way), `travelled` units from the barrel.
+ * laser shot may have hit bugs on the way), `travelled` units from the barrel. `blocked` (#80): it
+ * ended on a bug's shell (`hit` too), doing no damage.
  */
-export type ShotEnded = { id: number; hit: boolean; travelled: number };
+export type ShotEnded = { id: number; hit: boolean; blocked: boolean; travelled: number };
 /** A bug of `kind` killed this tick, at (x, y). `by` is the shot's owner, 0 if that life is over (no points). */
 export type Kill = { bug: number; by: number; x: number; y: number; points: number; kind: BugKind };
 /** A bug of `kind` touched `player` this tick, costing them a hit. */
@@ -214,6 +215,8 @@ export type ArenaEvents = {
   blocks: number[];
   /** The owner of each bug hit by a review laser shot (for `bun run skill`; not sent). */
   laserHits: number[];
+  /** The owner of each shot a bug's shell blocked (#80; for `bun run skill`; sent as the shot end's hit 2). */
+  shellBlocks: number[];
 };
 
 export type ArenaState = {
@@ -251,7 +254,7 @@ export function createArena(seed: number): ArenaState {
     nextPickupId: 1,
     // Not seed ^ 0x5bd1e995: skill-lib seeds the policies' own generators with that.
     dropRng: createRng(seed ^ 0x68e31da4),
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [] },
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [] },
   };
 }
 
@@ -664,6 +667,7 @@ export function stepArena(state: ArenaState): void {
   ev.pickups.length = 0;
   ev.blocks.length = 0;
   ev.laserHits.length = 0;
+  ev.shellBlocks.length = 0;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;

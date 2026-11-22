@@ -59,8 +59,8 @@ export const INPUT_STALE_TICKS = 10;
 export const INPUTS_PER_SECOND = 30;
 /** The biggest client message the server reads, UTF-8 bytes. */
 export const MAX_CLIENT_MESSAGE_BYTES = 1024;
-/** The protocol version. A hello with another one is refused with error "version". */
-export const PROTOCOL_VERSION = 7;
+/** The protocol version. A hello with another one is refused with error "version". v8 (#80): a shot end's hit 2, blocked by a shell. */
+export const PROTOCOL_VERSION = 8;
 /** How far behind the server the browser draws other players, ms. */
 export const INTERP_DELAY_MS = 100;
 
