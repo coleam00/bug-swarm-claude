@@ -3,23 +3,41 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { TEAMS } from "../../server/rules";
 import { TEAM_LOOK } from "../teams";
-import { NAME_MIN_SCALE, boardView, joinHost, nameScale, parseBoard, type Board } from "./data";
+import { NAME_MIN_SCALE, PILL_SLOTS, arenaPills, boardView, joinHost, nameScale, parseBoard, type Board, type LiveArena } from "./data";
 
 const [TABS, SPACES] = TEAMS;
 const board = (names: [string, number][], tabs = 0, spaces = 0): Board => ({
   top: names.map(([name, score]) => ({ name, score })),
   teams: { tabs, spaces },
+  playing: 0,
+  arenas: [],
 });
 
 describe("parseBoard", () => {
   test("takes a well-formed body and copies only the fields the board uses", () => {
-    const body = { top: [{ name: "Ann", score: 50, extra: 1 }], teams: { tabs: 70, spaces: 30, nobody: 5 }, more: true };
-    expect(parseBoard(body)).toEqual({ top: [{ name: "Ann", score: 50 }], teams: { tabs: 70, spaces: 30 } });
-    expect(parseBoard({ top: [], teams: { tabs: 0, spaces: 0 } })).toEqual(board([]));
+    const body = {
+      top: [{ name: "Ann", score: 50, extra: 1 }],
+      teams: { tabs: 70, spaces: 30, nobody: 5 },
+      more: true,
+      playing: 15,
+      arenas: [{ id: 3, players: 14, wave: 7, bots: 6 }, { id: 4, players: 1, wave: 1 }],
+    };
+    expect(parseBoard(body)).toEqual({
+      top: [{ name: "Ann", score: 50 }],
+      teams: { tabs: 70, spaces: 30 },
+      playing: 15,
+      arenas: [{ id: 3, players: 14, wave: 7 }, { id: 4, players: 1, wave: 1 }],
+    });
+    expect(parseBoard({ top: [], teams: { tabs: 0, spaces: 0 }, playing: 0, arenas: [] })).toEqual(board([]));
+    // No cap on how many arenas are open.
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, players: 20, wave: 999 }));
+    expect(parseBoard({ top: [], teams: { tabs: 0, spaces: 0 }, playing: 800, arenas: many })?.arenas.length).toBe(40);
   });
 
   test("refuses anything else", () => {
-    const ok = { top: [{ name: "Ann", score: 50 }], teams: { tabs: 1, spaces: 2 } };
+    const ok = { top: [{ name: "Ann", score: 50 }], teams: { tabs: 1, spaces: 2 }, playing: 1, arenas: [{ id: 1, players: 1, wave: 1 }] };
+    const arena = ok.arenas[0]!;
+    expect(parseBoard(ok)).not.toBeNull();
     for (const bad of [
       null,
       "board",
@@ -32,6 +50,18 @@ describe("parseBoard", () => {
       { ...ok, top: [{ name: 7, score: 50 }] },
       { ...ok, top: [null] },
       { ...ok, top: Array.from({ length: 11 }, (_, i) => ({ name: `P${i}`, score: i })) }, // 11 rows
+      { ...ok, playing: undefined },
+      { ...ok, arenas: undefined },
+      { ...ok, playing: -1 },
+      { ...ok, playing: 1.5 },
+      { ...ok, playing: "1" },
+      { ...ok, arenas: {} },
+      { ...ok, arenas: [null] },
+      { ...ok, arenas: [{ ...arena, id: 0 }] },
+      { ...ok, arenas: [{ ...arena, wave: 0 }] },
+      { ...ok, arenas: [{ ...arena, players: -1 }] },
+      { ...ok, arenas: [{ ...arena, players: "1" }] },
+      { ...ok, arenas: [{ ...arena, wave: 2.5 }] },
     ]) {
       expect(parseBoard(bad)).toBeNull();
     }
@@ -39,7 +69,7 @@ describe("parseBoard", () => {
 
   test("a name that looks like HTML passes through as the same plain string", () => {
     const name = '<img src=x onerror="alert(1)">';
-    const b = parseBoard({ top: [{ name, score: 1 }], teams: { tabs: 0, spaces: 0 } })!;
+    const b = parseBoard({ top: [{ name, score: 1 }], teams: { tabs: 0, spaces: 0 }, playing: 0, arenas: [] })!;
     expect(b.top[0]!.name).toBe(name);
     expect(boardView(null, b).rows[0]!.name).toBe(name);
   });
@@ -140,4 +170,34 @@ test("the board's DOM code never writes HTML, so names always render as text", (
       expect(src.includes(sink)).toBe(false);
     }
   }
+});
+
+describe("playing now and the arena pills (#74)", () => {
+  const arenas = (n: number): LiveArena[] => Array.from({ length: n }, (_, i) => ({ id: i + 1, players: 20, wave: 3 }));
+
+  test("the count is formatted like scores", () => {
+    expect(boardView(null, { ...board([]), playing: 1234 }).playing).toBe("1,234");
+    expect(boardView(null, board([])).playing).toBe("0");
+  });
+
+  test("one pill per arena, reading 'Arena <id> · <people> · wave <wave>', by id", () => {
+    expect(arenaPills([])).toEqual({ pills: [], more: 0 });
+    expect(arenaPills([{ id: 3, players: 14, wave: 7 }])).toEqual({ pills: [{ id: 3, text: "Arena 3 · 14 · wave 7" }], more: 0 });
+    const v = boardView(null, { ...board([]), arenas: [{ id: 5, players: 1, wave: 1 }, { id: 2, players: 20, wave: 4 }] });
+    expect(v.arenas.pills.map((p) => p.id)).toEqual([2, 5]);
+  });
+
+  test("up to the slots, every arena shows; past them the last slot is '+N more' for the rest", () => {
+    expect(arenaPills(arenas(PILL_SLOTS))).toMatchObject({ more: 0 });
+    expect(arenaPills(arenas(PILL_SLOTS)).pills.length).toBe(PILL_SLOTS);
+    const over = arenaPills(arenas(PILL_SLOTS + 1));
+    expect(over.pills.map((p) => p.id)).toEqual(Array.from({ length: PILL_SLOTS - 1 }, (_, i) => i + 1));
+    expect(over.more).toBe(2);
+    const fifteen = arenaPills(arenas(15));
+    expect(fifteen.pills.length).toBe(PILL_SLOTS - 1);
+    expect(fifteen.more).toBe(15 - PILL_SLOTS + 1);
+    expect(arenaPills(arenas(3), 3)).toMatchObject({ more: 0 });
+    expect(arenaPills(arenas(4), 3)).toMatchObject({ more: 2 });
+    expect(arenaPills(arenas(4), 3).pills.length).toBe(2);
+  });
 });

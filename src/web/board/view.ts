@@ -3,7 +3,7 @@
 // parsed as HTML (engineering.md, "Anything viewers type is untrusted").
 import { TEAMS, type Team } from "../../server/rules";
 import { TEAM_LOOK } from "../teams";
-import { TOP_SIZE, nameScale, type BoardView } from "./data";
+import { PILL_SLOTS, TOP_SIZE, nameScale, type BoardView } from "./data";
 import type { BoardStatus } from "./poll";
 
 const EMPTY = "-";
@@ -78,11 +78,27 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
   const address = el("span", "join-host");
   for (const part of host) address.append(el("span", "join-part", part), document.createElement("wbr"));
   join.append(el("span", "join-label", "Play at"), address);
-  race.append(el("h1", "title", "Bug Swarm"), el("p", "race-title", "Tabs vs Spaces"), teamsBox, bar, join);
+  // People playing now (never bots), under the title.
+  const live = el("p", "live");
+  const liveCount = el("span", "live-count", EMPTY);
+  live.append(liveCount, el("span", "live-label", "playing now"));
+  race.append(el("h1", "title", "Bug Swarm"), live, el("p", "race-title", "Tabs vs Spaces"), teamsBox, bar, join);
+
+  // The arena strip across the bottom: PILL_SLOTS chips at most (the last may be '+N more'), and a
+  // note while no arena is open, so the strip never collapses.
+  const strip = el("ul", "arenas");
+  const pills: HTMLElement[] = [];
+  for (let i = 0; i < PILL_SLOTS; i++) {
+    const pill = el("li", "pill");
+    pill.hidden = true;
+    pills.push(pill);
+  }
+  const none = el("li", "pill empty-note", "No arenas open");
+  strip.append(...pills, none);
 
   const status = el("p", "status", "reconnecting...");
   status.hidden = true;
-  root.replaceChildren(top, race, status);
+  root.replaceChildren(top, race, strip, status);
   // The stream frame can change size; names are fitted again to the new width.
   addEventListener("resize", () => rows.forEach((r) => fitName(r.name)));
 
@@ -103,6 +119,17 @@ export function createBoardDom(root: HTMLElement, host: string[]): BoardDom {
         els.root.classList.toggle("ahead", view.leader === t.team);
       }
       if (view.overtook && view.leader) flash(teams[view.leader].root);
+
+      liveCount.textContent = view.playing;
+      const { pills: shown, more } = view.arenas;
+      pills.forEach((pill, i) => {
+        const p = shown[i];
+        const isMore = !p && more > 0 && i === shown.length;
+        pill.hidden = !p && !isMore;
+        pill.classList.toggle("more", isMore);
+        pill.textContent = p ? p.text : isMore ? `+${more} more` : "";
+      });
+      none.hidden = shown.length > 0 || more > 0;
     },
     setStatus(s) {
       status.hidden = s === "live";

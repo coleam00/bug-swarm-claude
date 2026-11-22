@@ -112,10 +112,11 @@ export function hiddenNames(db: Database, now: () => number = Date.now): (name: 
 }
 
 export function startServer(opts: ServerOptions): RunningServer {
-  const app = createApp(opts.db, opts.appOptions);
   // Finished lives are saved as runs, off the tick (lives.ts).
   const lives = createLifeSaver(opts.db);
   const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill });
+  // The board reads the open arenas live from the rooms.
+  const app = createApp(opts.db, { ...opts.appOptions, live: () => rooms.live() });
   // Before servePages: its catch-all answers every path it reaches.
   mountArenaRoutes(app, rooms);
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).

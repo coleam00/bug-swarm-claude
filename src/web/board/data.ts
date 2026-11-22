@@ -1,6 +1,7 @@
 // The stream board's data: what /api/board returns, checked, and what the page shows from it.
 // Pure: no DOM, no fetch, no clock, so `bun test` covers it.
 import { TEAMS, type Team } from "../../server/rules";
+import type { LiveArena } from "../../server/arena/rooms";
 import type { TopRow } from "../api";
 import { TEAM_LOOK } from "../teams";
 
@@ -12,7 +13,19 @@ export const TOP_SIZE = 10;
  */
 export const NAME_MIN_SCALE = 5 / 8;
 
-export type Board = { top: TopRow[]; teams: Record<Team, number> };
+/**
+ * How many chips the arena strip holds, '+N more' included. Measured in Chrome on #74 at 1280x720:
+ * a worst-case pill ("Arena 999 · 20 · wave 999", 3.5vh bold) is 332 px (46vh) and the strip
+ * 1222 px, so three fit (1018 px) and four do not (1361 px). Every size is in vh, so the ratio holds
+ * at any 16:9 frame.
+ */
+export const PILL_SLOTS = 3;
+
+/** `playing` and `arenas` count people only: fill bots never reach the board. */
+export type Board = { top: TopRow[]; teams: Record<Team, number>; playing: number; arenas: LiveArena[] };
+export type { LiveArena };
+
+export type ArenaPills = { pills: { id: number; text: string }[]; more: number };
 
 export type BoardRow = { rank: number; name: string; score: string; isNew: boolean };
 export type BoardTeam = { team: Team; label: string; color: string; total: string; share: number };
@@ -23,10 +36,14 @@ export type BoardView = {
   leader: Team | null;
   /** True when the other team was ahead last time and this one is now. */
   overtook: boolean;
+  /** People playing now, formatted. */
+  playing: string;
+  arenas: ArenaPills;
 };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isScore = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isCount = (v: unknown, min: number): v is number => Number.isInteger(v) && (v as number) >= min;
 
 /** The body of GET /api/board, or null when it isn't one. Copies only the fields the board uses. */
 export function parseBoard(body: unknown): Board | null {
@@ -39,7 +56,28 @@ export function parseBoard(body: unknown): Board | null {
   const sent = body.teams;
   if (!TEAMS.every((t) => isScore(sent[t]))) return null;
   const teams = Object.fromEntries(TEAMS.map((t) => [t, sent[t]])) as Record<Team, number>;
-  return { top, teams };
+  if (!isCount(body.playing, 0) || !Array.isArray(body.arenas)) return null;
+  // No cap on the count: several hundred viewers is more than a dozen arenas.
+  const arenas: LiveArena[] = [];
+  for (const a of body.arenas) {
+    if (!isRecord(a) || !isCount(a.id, 1) || !isCount(a.players, 0) || !isCount(a.wave, 1)) return null;
+    arenas.push({ id: a.id, players: a.players, wave: a.wave });
+  }
+  return { top, teams, playing: body.playing, arenas };
+}
+
+/**
+ * The arena strip: one pill per open arena, by id (the busy arenas have the low ids, and the
+ * order holds still on stream), at most `slots` chips. With more arenas than slots, the last slot
+ * becomes '+N more' for the rest.
+ */
+export function arenaPills(arenas: LiveArena[], slots = PILL_SLOTS): ArenaPills {
+  const sorted = [...arenas].sort((a, b) => a.id - b.id);
+  const shown = sorted.length <= slots ? sorted : sorted.slice(0, Math.max(0, slots - 1));
+  return {
+    pills: shown.map((a) => ({ id: a.id, text: `Arena ${a.id} · ${a.players} · wave ${a.wave}` })),
+    more: sorted.length - shown.length,
+  };
 }
 
 export function formatScore(n: number): string {
@@ -78,7 +116,14 @@ export function boardView(prev: Board | null, next: Board): BoardView {
 
   const leader = leaderOf(next.teams);
   const was = prev ? leaderOf(prev.teams) : null;
-  return { rows, teams, leader, overtook: was !== null && leader !== null && leader !== was };
+  return {
+    rows,
+    teams,
+    leader,
+    overtook: was !== null && leader !== null && leader !== was,
+    playing: formatScore(next.playing),
+    arenas: arenaPills(next.arenas),
+  };
 }
 
 /** The font scale that fits a name of natural width `natural` into `available` px, never below the floor. */

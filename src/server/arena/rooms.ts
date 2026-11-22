@@ -40,6 +40,11 @@ export type ArenaStats = {
   tick: { p50: number | null; p95: number | null };
 };
 
+/** One open arena as the stream board shows it: people only, never fill bots. */
+export type LiveArena = { id: number; players: number; wave: number };
+/** What the stream board reads live (GET /api/board): `playing` is the sum of the arenas' people. */
+export type LiveArenas = { playing: number; arenas: LiveArena[] };
+
 export type Joined = { room: number; entity: number; welcome: Welcome };
 
 const realTimer: StartTimer = (fn, ms) => {
@@ -118,6 +123,17 @@ export class Rooms {
       bots: arenas.reduce((n, a) => n + a.bots, 0),
       tick: this.ticks.percentiles(this.now()),
     };
+  }
+
+  /**
+   * The open arenas for the stream board, by id, with their people (bots never count) and wave.
+   * Read per HTTP request, never in the tick. Every open arena has at least one person.
+   */
+  live(): LiveArenas {
+    const arenas: LiveArena[] = [];
+    for (const { room } of this.rooms.values()) arenas.push({ id: room.id, players: room.size, wave: room.wave });
+    arenas.sort((a, b) => a.id - b.id);
+    return { playing: arenas.reduce((n, a) => n + a.players, 0), arenas };
   }
 
   /**
