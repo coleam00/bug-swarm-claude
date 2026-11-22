@@ -638,7 +638,7 @@ test(
     await c.waitFor("Ada's own snapshot", () => c.got.some((m) => m.t === "snapshot" && m.me.al === 1));
     expect(srv.rooms.stats()).toMatchObject({ players: 1, watchers: 0, arenas: [{ id: played.arena, players: 1, watchers: 0 }] });
     expect(srv.server.pendingWebSockets).toBe(1);
-    // v10 (#89): after each welcome, the watch's and the player's, the first snapshot is a keyframe
+    // v11 (#89): after each welcome, the watch's and the player's, the first snapshot is a keyframe
     // (the player's names her); every other is a delta on the snapshot before it.
     await c.waitFor("a few more snapshots", () => c.wire.length > c.welcomes[1]! + 3);
     expect(c.welcomes).toHaveLength(2);

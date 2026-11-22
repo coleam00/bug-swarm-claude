@@ -1,4 +1,4 @@
-// What each socket sees of an arena, and how it travels (v10, #89): snapshots culled to the
+// What each socket sees of an arena, and how it travels (v11, #89): snapshots culled to the
 // recipient's view, quantized, sent as a keyframe every KEYFRAME_TICKS with integer deltas between.
 // protocol.ts WireSnapshot documents the format.
 //
@@ -33,6 +33,9 @@ import {
   WORLD_W,
 } from "./constants";
 import {
+  SHOT_DRONE,
+  SHOT_GUN,
+  SHOT_LASER,
   SNAPSHOT,
   WELCOME,
   type ServerMessage,
@@ -233,7 +236,7 @@ export function quantizeArena(state: ArenaState, wave: number, f: ArenaFrame): A
   f.shots.length = 0;
   for (let i = 0; i < ev.shotsFired.length; i++) {
     const s = ev.shotsFired[i]!;
-    f.shots.push(`[${s.id},${s.owner},${q1(s.x)},${q1(s.y)},${q3(s.angle)},${s.laser ? 1 : 0}]`);
+    f.shots.push(`[${s.id},${s.owner},${q1(s.x)},${q1(s.y)},${q3(s.angle)},${s.drone ? SHOT_DRONE : s.laser ? SHOT_LASER : SHOT_GUN}]`);
     f.sx[i] = s.x;
     f.sy[i] = s.y;
     f.originX.set(s.id, s.x);

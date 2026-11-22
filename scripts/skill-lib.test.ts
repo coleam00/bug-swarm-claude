@@ -121,18 +121,20 @@ describe("bun run skill", () => {
     expect([dasher.score, dasher.seconds]).not.toEqual([aimer.score, aimer.seconds]);
   });
 
-  test("pickups are counted a life: the aimer takes some on 16 seeds, its shields block, its lasers hit and its bombs kill; the idle takes none", () => {
-    // 16 seeds, not 8: at these drop chances a shield block is rare, and the spitter (#72) moved
-    // the seeded lives so the first 8 hold none.
-    const r = runSkill(16, 180);
+  test("pickups are counted a life: the aimer takes some on 32 seeds, its shields block, its lasers hit, its bombs and drones kill; the idle takes none", () => {
+    // 32 seeds: at these drop chances a shield block is rare (the first 24 seeds hold none since the
+    // CI drone, #84, split each kind's chance over four pickups).
+    const r = runSkill(32, 180);
     const by = (n: string) => r.policies.find((p) => p.policy === n)!;
     const aim = by("aimer").pickups.mean;
     expect(aim.taken.shield + aim.taken.laser + aim.taken.bomb).toBeGreaterThan(0);
     expect(aim.laserHits).toBeGreaterThan(0);
     expect(aim.bombKills).toBeGreaterThan(0);
+    expect(aim.taken.drone).toBeGreaterThan(0);
+    expect(aim.droneKills).toBeGreaterThan(0);
     expect(aim.blocks).toBeGreaterThan(0);
     // A block is never a hit landed: the counts come from different events.
-    expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0, bomb: 0 }, blocks: 0, laserHits: 0, bombKills: 0 });
+    expect(by("idle").pickups.mean).toEqual({ taken: { shield: 0, laser: 0, bomb: 0, drone: 0 }, blocks: 0, laserHits: 0, bombKills: 0, droneKills: 0 });
     // One life's counts replay exactly.
     expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
   });
@@ -149,15 +151,16 @@ describe("bun run skill", () => {
   });
 
   test("pickupStats: the median and mean of each count", () => {
-    const c = (shield: number, laser: number, bomb: number, blocks: number, laserHits: number, bombKills: number) => ({
-      taken: { shield, laser, bomb },
+    const c = (shield: number, laser: number, bomb: number, drone: number, blocks: number, laserHits: number, bombKills: number, droneKills: number) => ({
+      taken: { shield, laser, bomb, drone },
       blocks,
       laserHits,
       bombKills,
+      droneKills,
     });
-    expect(pickupStats([c(0, 1, 0, 0, 3, 0), c(2, 1, 1, 1, 0, 9), c(1, 4, 2, 0, 6, 3)])).toEqual({
-      median: c(1, 1, 1, 0, 3, 3),
-      mean: c(1, 2, 1, 1 / 3, 3, 4),
+    expect(pickupStats([c(0, 1, 0, 1, 0, 3, 0, 5), c(2, 1, 1, 0, 1, 0, 9, 0), c(1, 4, 2, 2, 0, 6, 3, 1)])).toEqual({
+      median: c(1, 1, 1, 1, 0, 3, 3, 1),
+      mean: c(1, 2, 1, 1, 1 / 3, 3, 4, 2),
     });
   });
 

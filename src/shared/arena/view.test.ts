@@ -12,6 +12,7 @@ import {
   PICKUP_IDS,
   REVIVE_TICKS,
   SHOT_RANGE,
+  PROTOCOL_VERSION,
   TICK_MS,
   WORLD_H,
   WORLD_W,
@@ -72,7 +73,7 @@ function expected(a: ArenaState, box: ViewBox | null, you: number, ack: number, 
         .filter((g) => inBox(box, Math.round(g.x), Math.round(g.y)))
         .map((g) => (g.phase === 0 ? [g.id, BUG_KINDS.indexOf(g.kind), Math.round(g.x), Math.round(g.y)] : [g.id, BUG_KINDS.indexOf(g.kind), Math.round(g.x), Math.round(g.y), g.phase, q2(Math.atan2(g.dy, g.dx)), g.phaseTicks])),
     ) as Snapshot["b"],
-    s: a.events.shotsFired.filter((s) => inBox(box, s.x, s.y, SHOT_RANGE)).map((s) => [s.id, s.owner, q1(s.x), q1(s.y), q3(s.angle), s.laser ? 1 : 0]),
+    s: a.events.shotsFired.filter((s) => inBox(box, s.x, s.y, SHOT_RANGE)).map((s) => [s.id, s.owner, q1(s.x), q1(s.y), q3(s.angle), s.drone ? 2 : s.laser ? 1 : 0]),
     e: a.events.shotsEnded
       .filter((e) => {
         const o = origins.get(e.id);
@@ -105,6 +106,8 @@ function busyArena() {
   for (let i = 0; i < 24; i++) placeBug(a, 700 + (i % 6) * 220, 700 + Math.floor(i / 6) * 300, kinds[i % kinds.length]);
   placePickup(a, 560, 560, "shield").ticksLeft = 50; // goes mid-run: a delta drops it
   placePickup(a, 2200, 300, "laser");
+  // A CI drone on the first player (#84): its shots go out with style 2 and its effects bit is set.
+  ps[0]!.effect[PICKUP_IDS.indexOf("drone")] = 20 * 12;
   const bots = ps.map((p, i) => ({ p, obs: createObservation(), mem: createFillMemory(), rng: createRng(100 + i), out: { mx: 0, my: 0, aim: 0, fire: false, dash: false } as PolicyInput }));
   const drive = () => {
     for (const b of bots) {
@@ -129,6 +132,7 @@ describe("encode, then decode, equals the arena culled and quantized", () => {
     const origins = new Map<number, [number, number]>();
     const box: ViewBox = { cx: 0, cy: 0, half: 0 };
     let late: Player | null = null;
+    let droneShots = 0;
     const seen = { keys: 0, gone: 0, bt: 0, nb: 0, phases: new Set<number>(), downs: 0, joins: 0, leaves: 0, floorGone: 0, culledBugs: 0, culledShots: 0 };
     for (let t = 0; t < 200; t++) {
       drive();
@@ -161,6 +165,7 @@ describe("encode, then decode, equals the arena culled and quantized", () => {
       expect(wireMine.key === 1).toBe(t % KEYFRAME_TICKS === 0);
       if (wireMine.key !== 1) expect(wireMine.base).toBe(a.tick - 1);
       if (wireMine.key === 1) seen.keys++;
+      droneShots += gotMine.s.filter((r) => r[5] === 2).length;
       seen.gone += wireMine.gb?.length ?? 0;
       seen.bt += wireMine.bt?.length ?? 0;
       seen.nb += wireMine.nb?.length ?? 0;
@@ -173,6 +178,7 @@ describe("encode, then decode, equals the arena culled and quantized", () => {
     }
     // The run covered what it claims to.
     expect(late).not.toBeNull();
+    expect(droneShots).toBeGreaterThan(0);
     expect(seen.keys).toBe(10);
     expect(seen.gone).toBeGreaterThan(0);
     expect(seen.nb).toBeGreaterThan(0);
@@ -298,7 +304,7 @@ describe("keyframes and resync", () => {
     expect(send()).not.toBeNull();
     a.tick++;
     expect(send()).not.toBeNull();
-    read({ t: WELCOME, v: 10, you: 0, arena: 1, build: "", world: { w: WORLD_W, h: WORLD_H }, tickMs: TICK_MS, tick: a.tick, roster: [] });
+    read({ t: WELCOME, v: PROTOCOL_VERSION, you: 0, arena: 1, build: "", world: { w: WORLD_W, h: WORLD_H }, tickMs: TICK_MS, tick: a.tick, roster: [] });
     a.tick++;
     expect(send()).toBeNull();
   });

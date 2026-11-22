@@ -14,7 +14,7 @@
 // inputs and come and go unannounced; they get every broadcast event (never a life's "over") and
 // one snapshot stream, encoded once per tick and sent to all of them.
 //
-// Snapshots (v10, #89, shared/arena/view.ts): the arena is quantized once a tick, then each member
+// Snapshots (v11, #89, shared/arena/view.ts): the arena is quantized once a tick, then each member
 // gets its own snapshot, culled to its view square, as a delta against what it was last sent or a
 // keyframe (its first, every KEYFRAME_TICKS, and after a send the socket dropped). Watchers see the
 // whole arena: one shared delta, and a keyframe for any watcher that is new or missed one.

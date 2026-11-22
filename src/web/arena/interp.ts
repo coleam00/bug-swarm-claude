@@ -201,7 +201,7 @@ export function newestDown(it: Interp, id: number): SnapshotDown | undefined {
 
 /**
  * How long a bug's drawn heading takes to follow its direction of travel, seconds (#89). Bug
- * positions travel in whole units since protocol v10, so one tick's step points a few degrees off
+ * positions travel in whole units since protocol v11, so one tick's step points a few degrees off
  * (a walking crawler: p50 2.1, p95 5.6 degrees, against 0.2 and 0.6 at 0.1 units). Easing over
  * about a tick roughly halves that (p50 1.1, p95 3.3) and still shows a real turn within 0.1 s;
  * easing longer lags a spitter's or dasher's sharp turns by more than it smooths.

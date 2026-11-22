@@ -39,7 +39,7 @@ The script prints the arenas, errors, the server's tick p50/p95 and memory (from
 
 Each run was 200 aimer bots for 120 s against `bun src/server/main.ts` (built `dist/`, scratch `DATA_DIR`). The bots filled 10 arenas of 20.
 
-| | before (#87, protocol v9) | after (#89, protocol v10) |
+| | before (#87, protocol v9) | after (#89, protocol v11) |
 |---|---|---|
 | errors | 0 | 0 (all four runs) |
 | arenas | 10 x 20 players | 10 x 20 players (11 in the two-tab run) |

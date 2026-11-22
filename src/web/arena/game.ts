@@ -325,7 +325,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       wave = m.w;
       if (m.m) far = m.m;
       noteAck(net, m.ack, performance.now());
-      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5] === 1);
+      for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5]);
       for (const e of m.e) endShot(shots, e[0], e[1], e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       if (watch) return setLive(true);
@@ -629,7 +629,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         x += dx * span.t;
         y += dy * span.t;
         if (dx * dx + dy * dy > 0.01) {
-          // Eased, not snapped: whole-unit positions (v10) make one tick's direction a few degrees off.
+          // Eased, not snapped: whole-unit positions (v11) make one tick's direction a few degrees off.
           heading = easeHeading(had, Math.atan2(dy, dx), dt);
           headings.set(id, heading);
         }

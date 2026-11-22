@@ -15,7 +15,7 @@
 // turns it into the player's connection on the same socket: the hello goes on the next turn, so
 // a `close()` in the same turn (React StrictMode unmounting at once) never joins, and it carries
 // the build of the watch's first welcome, so a page made stale by a redeploy still reloads.
-// Snapshots arrive culled and as deltas (v10, #89): each socket decodes them through its own
+// Snapshots arrive culled and as deltas (v11, #89): each socket decodes them through its own
 // reader (view.ts), reset by every welcome, and one that cannot be decoded yet (a lost delta,
 // before the next keyframe) is skipped. `received` counts the characters that arrived (the F
 // readout's KB/s; snapshots are ASCII, so characters are bytes).

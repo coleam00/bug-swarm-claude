@@ -26,10 +26,12 @@ export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: tr
 export const bomb: PickupDef = {
   id: "bomb",
   label: "Refactor bomb!",
-  // Each kind's pickup chance, split evenly over the 3 pickups (#78): crawler 1.5%, dasher and spitter
-  // 3% in all (half the item's starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72,
-  // drops as the dasher does). A glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.005, dasher: 0.01, spitter: 0.01, glob: 0, beetle: 0.02 },
+  // Each kind's pickup chance, split evenly over the 4 pickups (#84, #78's rule: each kind's total
+  // unchanged): crawler 1.5%, dasher and spitter 3% in all, 0.375% and 0.75% each (half the item's
+  // starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72, drops as the dasher does).
+  // A glob is a shot in flight and drops nothing. A beetle (#80) takes 8 shots and drops twice what a
+  // dasher does: 6% in all, 1.5% each.
+  drop: { crawler: 0.00375, dasher: 0.0075, spitter: 0.0075, glob: 0, beetle: 0.015 },
   floorTicks: Math.round(BOMB_FLOOR_S / DT),
   durationTicks: 0,
 };

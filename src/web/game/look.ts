@@ -8,6 +8,8 @@ export const GLOW_LIME = 1;
 export const GLOW_CYAN = 2;
 export const GLOW_SHOT = 3;
 export const GLOW_WHITE = 4;
+/** Violet: the arena's CI drone (#84), release 1's drone colour. */
+export const GLOW_DRONE = 5;
 /** Hot pink: the arena's dasher (#65). */
 export const GLOW_PINK = 6;
 /** Sky blue: the arena's test shield (#73). */
@@ -22,6 +24,12 @@ export const GLOW_GLOB = 10;
 export const GLOW_STEEL = 11;
 /** Orchid: the arena's refactor bomb (#78), release 1's bomb ring colour. */
 export const GLOW_BOMB = 12;
+/** The CI drone (release 1's look, #84): a dark body with a violet rim in its own violet glow, and violet shots. */
+export const DRONE_BODY = "#1e1b2e";
+export const DRONE_RIM = PALETTE[GLOW_DRONE];
+export const DRONE_RIM_WIDTH = 2;
+/** Saturated, so a drone's shot never reads as the gun's near-white one. */
+export const DRONE_SHOT_CORE = PALETTE[GLOW_DRONE];
 /** The refactor bomb's ring (release 1's look): a bright stroke, drawn again wide and faint for its glow. */
 export const BOMB_RING = PALETTE[GLOW_BOMB];
 export const BOMB_RING_WIDTH = 8;

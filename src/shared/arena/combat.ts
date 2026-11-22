@@ -79,8 +79,8 @@ function fireShot(state: ArenaState, p: Player): void {
   const y = p.y + Math.sin(p.aim) * BARREL;
   // The review laser (#73, pickups/laser.ts) is stamped on the shot as it leaves.
   const pierce = laserPierce(p);
-  state.shots.push({ id, owner: p.id, life: p.lifeStartTick, x, y, dx, dy, travelled: 0, pierce, laser: pierce > 1, hitA: 0, hitB: 0, hits: 0 });
-  state.events.shotsFired.push({ id, owner: p.id, x, y, angle, laser: pierce > 1 });
+  state.shots.push({ id, owner: p.id, life: p.lifeStartTick, x, y, dx, dy, travelled: 0, pierce, laser: pierce > 1, drone: false, hitA: 0, hitB: 0, hits: 0 });
+  state.events.shotsFired.push({ id, owner: p.id, x, y, angle, laser: pierce > 1, drone: false });
 }
 
 /**
@@ -126,7 +126,9 @@ function creditFor(state: ArenaState, s: Shot): Player | null {
  * the same step's path for the next bug it has not hit yet, and ends on its last allowed hit. A
  * shot that reaches SHOT_RANGE or a wall ends there (`hit` false: it did not end on a bug, so the
  * browser draws no spark), resetting its owner's streak only if it hit nothing (a laser shot that
- * hit fewer bugs than its pierce keeps the streak). Shots never touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
+ * hit fewer bugs than its pierce keeps the streak). A CI drone's shot (#84, pickups/drone.ts) never
+ * touches its owner's streak, hit or miss (a shell block included), and its kill scores the kind's
+ * points at x1 (it goes in events.droneKills too). Shots never touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
  * A bug with a shell (#80, kind.ts `shell`) hit from within it (shellBlocks) loses nothing: the shot
  * ends there (`blocked`; a laser shot too, its earlier hits in this step standing, and it is not a
  * laser hit), and the owner's streak still grows, so aiming at a shell is not punished twice.
@@ -156,7 +158,7 @@ export function stepShots(state: ArenaState): void {
       const shell = bugDef(hitBug.kind).shell;
       if (shell && shellBlocks(hitBug.dx, hitBug.dy, s.dx, s.dy, shell.cosHalf)) {
         if (owner) {
-          owner.streak++;
+          if (!s.drone) owner.streak++;
           ev.shellBlocks.push(owner.id);
         }
         s.hits++;
@@ -167,12 +169,13 @@ export function stepShots(state: ArenaState): void {
       }
       hitBug.hp--;
       if (owner) {
-        owner.streak++;
+        if (!s.drone) owner.streak++;
         if (hitBug.hp <= 0) {
-          const points = bugDef(hitBug.kind).points * mult(owner.streak);
+          const points = bugDef(hitBug.kind).points * (s.drone ? 1 : mult(owner.streak));
           owner.score += points;
           owner.kills++;
           ev.kills.push({ bug: hitBug.id, by: owner.id, x: hitBug.x, y: hitBug.y, points, kind: hitBug.kind });
+          if (s.drone) ev.droneKills.push(owner.id);
         }
       } else if (hitBug.hp <= 0) {
         ev.kills.push({ bug: hitBug.id, by: 0, x: hitBug.x, y: hitBug.y, points: 0, kind: hitBug.kind });
@@ -192,7 +195,7 @@ export function stepShots(state: ArenaState): void {
     s.y += s.dy * len;
     s.travelled += len;
     if (s.travelled >= SHOT_RANGE - 1e-9 || s.x < 0 || s.x > WORLD_W || s.y < 0 || s.y > WORLD_H) {
-      if (owner && s.hits === 0) owner.streak = 0;
+      if (owner && s.hits === 0 && !s.drone) owner.streak = 0;
       ev.shotsEnded.push({ id: s.id, hit: false, blocked: false, travelled: s.travelled });
       continue;
     }

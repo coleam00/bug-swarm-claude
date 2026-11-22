@@ -149,7 +149,7 @@ describe("ticking", () => {
     expect(sa.p.map((p) => p[0])).toEqual([ja.entity, jb.entity]);
     expect(sb.p.map((p) => p[0])).toEqual([ja.entity, jb.entity]);
     const ada = rooms.room(ja.room)!.state.players[0]!;
-    // Ada's own row is exact, with her velocity (vx 120 after one step of mx = 1); Bob sees her to 0.1, with none (v10).
+    // Ada's own row is exact, with her velocity (vx 120 after one step of mx = 1); Bob sees her to 0.1, with none (v11).
     expect(sa.p[0]!.slice(1, 5)).toEqual([Math.round(ada.x * 100) / 100, Math.round(ada.y * 100) / 100, 120, 0]);
     expect(sb.p[0]!.slice(1, 5)).toEqual([Math.round(ada.x * 10) / 10, Math.round(ada.y * 10) / 10, 0, 0]);
     expect(sa.me).toMatchObject({ x: sa.p[0]![1], vx: 120 });
@@ -432,7 +432,7 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.effect[1] = 37;
   const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[], x: 0, y: 0, vx: 0, vy: 0 };
   const fx = me.fx;
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy });
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy });
   // The effects are copied into the same array every snapshot.
   expect(me.fx).toBe(fx);
   p.lockTicks = 0;

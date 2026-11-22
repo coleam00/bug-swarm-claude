@@ -98,7 +98,7 @@ export type Welcome = {
  * One player in a snapshot: id, x, y, vx, vy, aim, alive (0/1), untouchable after a hit or a
  * revive (0/1), dashing (0/1, v3), spawn-protected (0/1, v5, #58), effects (v7, #73: bit i set
  * while the pickup PICKUP_IDS[i] is active on a player in a life, so everyone sees a shield bubble
- * or a laser). Since v10 (#89) positions to 0.1 and aim to 0.01, and vx and vy are 0 on every row
+ * or a laser). Since v11 (#89) positions to 0.1 and aim to 0.01, and vx and vy are 0 on every row
  * but your own (exact, from `me`). Fields are only ever appended, never
  * reordered.
  */
@@ -116,17 +116,23 @@ export type SnapshotPlayer = [
   effects: number,
 ];
 /**
- * One bug: id, its kind's index in BUG_KINDS, x, y (whole units since v10). v6: a bug whose phase is not 0 (its
+ * One bug: id, its kind's index in BUG_KINDS, x, y (whole units since v11). v6: a bug whose phase is not 0 (its
  * kind's first) adds a tail: phase (an index into its kind's phases), angle (its locked
  * direction, radians to 0.01) and ticksIn (ticks spent in that phase). A bug in phase 0, every
  * crawler for one, costs no more bytes than before.
  */
 export type SnapshotBug = [id: number, kind: number, x: number, y: number] | [id: number, kind: number, x: number, y: number, phase: number, angle: number, ticksIn: number];
 /**
- * A shot fired this tick: id, owner, where it left the barrel (to 0.1), its angle (to 0.001), and a review
- * laser shot (1) or not (0, v7). It flies per shotTravelAt.
+ * A shot fired this tick: id, owner, where it left the barrel (to 0.1; a CI drone's shot: the drone),
+ * its angle (to 0.001), and its style: the gun's (0), a review laser shot (1, v7) or a CI drone's (2,
+ * v10, #84). It flies per shotTravelAt.
  */
-export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number, laser: 0 | 1];
+export type SnapshotShot = [id: number, owner: number, x: number, y: number, angle: number, style: ShotStyle];
+/** A shot's style on the wire (v10): the field was 0 or 1 for laser in v7 to v9. */
+export const SHOT_GUN = 0;
+export const SHOT_LASER = 1;
+export const SHOT_DRONE = 2;
+export type ShotStyle = typeof SHOT_GUN | typeof SHOT_LASER | typeof SHOT_DRONE;
 /**
  * A shot ended this tick: id, ended on a bug (1), on a bug's shell, doing no damage (2, v8, #80), or
  * at its range or a wall (0; a review laser shot may have hit bugs on the way, v7), units flown
@@ -165,7 +171,7 @@ export type SnapshotMe = {
   /** Ticks left of each pickup's effect, by its index in PICKUP_IDS (0: not active; v7). */
   fx: number[];
   /**
-   * Your robot's position and velocity to 0.01 (v10, #89): the `p` rows carry positions to 0.1
+   * Your robot's position and velocity to 0.01 (v11, #89): the `p` rows carry positions to 0.1
    * and no velocities, and prediction reconciles against these. The decoded self row has them.
    */
   x: number;
@@ -175,7 +181,7 @@ export type SnapshotMe = {
 };
 
 /**
- * A snapshot as the browser and the bots use it, decoded from the wire by view.ts (v10, #89): the
+ * A snapshot as the browser and the bots use it, decoded from the wire by view.ts (v11, #89): the
  * same shape every version had. Positions are as quantized on the wire (players to 0.1, bugs to
  * whole units), other players' vx and vy are 0, and your own row carries `me`'s exact numbers.
  */
@@ -200,14 +206,14 @@ export type Snapshot = {
   w: number;
   me: SnapshotMe;
   /**
-   * On keyframes only (v10): every bug outside your view square, globs left out, as minimap cells
+   * On keyframes only (v11): every bug outside your view square, globs left out, as minimap cells
    * `[cx0, cy0, cx1, cy1, ...]`, each round(x / MINIMAP_CELL). Absent on deltas and when watching.
    */
   m?: number[];
 };
 
 /**
- * A snapshot as it travels (v10, #89; view.ts writes and reads it). A keyframe (`key: 1`) is whole:
+ * A snapshot as it travels (v11, #89; view.ts writes and reads it). A keyframe (`key: 1`) is whole:
  * - `you`: the recipient's entity id (0 watching);
  * - `p`: every player, `[id, x10, y10, aim100, flags, effects]` (x10 = round(x * 10), aim100 =
  *   round(aim * 100); flags: 1 alive, 2 untouchable, 4 dashing, 8 spawn-protected);
