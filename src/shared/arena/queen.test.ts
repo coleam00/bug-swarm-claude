@@ -201,9 +201,14 @@ describe("goal", () => {
   });
 
   test("a tie goes to the group nearer to her; a group is everyone up within GROUP_R", () => {
-    const { ps } = arenaWith([400, 400], [400 + GROUP_R, 400], [2000, 2000], [2000 + GROUP_R + 1, 2000]);
+    // Two pairs, each exactly GROUP_R apart (a tie at 2), the farther pair listed first.
+    const { ps } = arenaWith([2000, 2000], [2000 + GROUP_R, 2000], [400, 400], [400 + GROUP_R, 400]);
     const out = { x: 0, y: 0 };
     groupGoal(ps, 500, 500, out);
+    expect(out).toEqual({ x: 400 + GROUP_R / 2, y: 400 });
+    // One unit past GROUP_R is not a group: the nearer pair, still together, wins 2 against 1.
+    const apart = arenaWith([400, 400], [400 + GROUP_R, 400], [2000, 2000], [2000 + GROUP_R + 1, 2000]);
+    groupGoal(apart.ps, 2100, 2000, out);
     expect(out).toEqual({ x: 400 + GROUP_R / 2, y: 400 });
   });
 
@@ -362,6 +367,20 @@ describe("the reward (stepping)", () => {
       [downed.id, out[1]!],
     ]);
     expect(downed.down).toBe(true);
+  });
+
+  test("a contributor whose life ended before the kill, still out, gets nothing", () => {
+    const { a, ps } = arenaWith([200, 200], [200, 600]);
+    shield(ps);
+    const q = arrive(a);
+    const [killer, out] = ps as [Player, Player];
+    out.queenDmg = 50;
+    endLife(a, out);
+    // No respawn: its damage stays on it, so only the in-a-life rule keeps it unpaid.
+    expect([out.alive, out.queenDmg]).toEqual([false, 50]);
+    q.hp = 1;
+    killWithShot(a, killer, q);
+    expect(a.events.queenDown!.paid).toEqual([[killer.id, QUEEN_REWARD_EACH + QUEEN_REWARD_POOL]]);
   });
 
   test("a fill bot takes no reward and no share, but can be the top dealer", () => {

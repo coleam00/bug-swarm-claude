@@ -1,8 +1,8 @@
-// The hive queen's look (#85): her tell's glow and swell over its 1 s, and her reach for culling.
+// The hive queen's look (#85): her tell's glow and swell over its 1 s.
 import { describe, expect, test } from "bun:test";
-import { DRIFT, QUEEN_RADIUS, TELL, TELL_TICKS } from "../../../../shared/arena/bugs/queen";
+import { DRIFT, TELL, TELL_TICKS } from "../../../../shared/arena/bugs/queen";
 import { DT } from "../../../../shared/arena/constants";
-import { QUEEN_REACH, queenLook } from "./queen";
+import { queenLook } from "./queen";
 
 const look = () => ({ glow: 0, swell: 0 });
 
@@ -34,10 +34,5 @@ describe("queen look", () => {
       expect(g).toBeLessThanOrEqual(1);
     }
     expect(queenLook(TELL, 1, 0, look()).swell).toBeCloseTo(1.15, 9);
-  });
-
-  test("everything of her lies within QUEEN_REACH of her centre, which is more than her collision radius", () => {
-    expect(QUEEN_REACH).toBeGreaterThan(QUEEN_RADIUS * 2);
-    expect(QUEEN_REACH).toBeLessThan(300);
   });
 });

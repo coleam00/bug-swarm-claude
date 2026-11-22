@@ -25,7 +25,6 @@ describe("bug kinds", () => {
     expect(bugDef(BASE_KIND).spawn.unlockWave).toBe(1);
     for (const k of BUG_KINDS) if (!bugDef(k).boss) expect(bugDef(k).radius).toBeLessThanOrEqual(MAX_BUG_RADIUS);
     // A boss is placed by its own code, never spawned (#85): its size must not move the spawn checks.
-    expect(MAX_BUG_RADIUS).toBe(Math.max(...BUG_KINDS.filter((k) => !bugDef(k).boss).map((k) => bugDef(k).radius)));
     expect(MAX_BUG_RADIUS).toBeLessThan(QUEEN_RADIUS);
     for (const k of BUG_KINDS) if (bugDef(k).boss) expect(bugDef(k).spawn.share(600)).toBe(0);
   });

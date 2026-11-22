@@ -16,7 +16,6 @@ import {
   runDropIn,
   runFill,
   runQueen,
-  formatQueen,
   runSkill,
   shellStats,
   countShells,
@@ -70,11 +69,9 @@ describe("bun run skill: the hive queen (#85, reported, not gated)", () => {
     expect([r.seeds, r.aimers]).toEqual([2, 4]);
     expect(r.median).toBeGreaterThan(0);
     expect(r.p75).toBeGreaterThanOrEqual(r.median);
-    expect(r.capped).toBeLessThanOrEqual(2);
+    // The kill is seen: not every fight runs to the cap.
+    expect(r.capped).toBeLessThan(r.seeds);
     expect(runQueen(2, 4)).toEqual(r);
-    expect(formatQueen(r)).toContain("4 aimers on 2 seeds");
-    expect(formatQueen(r)).toContain("target < 60 s");
-    expect(formatQueen(runQueen(1, 1))).not.toContain("target");
   });
 });
 

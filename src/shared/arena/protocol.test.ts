@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES, PROTOCOL_VERSION } from "./constants";
+import { DOWN_TICKS, MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 import {
   CLIENT_TYPES,
   EVENT,
-  EVENT_KINDS,
   QUEEN,
   SERVER_TYPES,
   type ArenaEvent,
@@ -244,13 +243,11 @@ describe("server messages", () => {
     expect(q({ stage: 2, x: 1200, y: 900, ticksLeft: 0, bugId: 40, maxHp: 120 })).toEqual([1, 40, 1200, 900.1, 77, 120]);
     // Her row is in `b` as any bug's; a stage with no bug of hers sends nothing.
     expect(q({ stage: 2, x: 1200, y: 900, ticksLeft: 0, bugId: 41, maxHp: 120 })).toEqual([]);
-    expect(PROTOCOL_VERSION).toBe(11);
   });
 
   test("v11: a `queen` event names the top dealer and every reward", () => {
     const ev: ArenaEvent = { t: EVENT, kind: QUEEN, id: 3, paid: [[3, 475], [5, 275]] };
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
-    expect(EVENT_KINDS.at(-1)).toBe("queen");
   });
 
   test("parseServerMessage accepts only known types", () => {

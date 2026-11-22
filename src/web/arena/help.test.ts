@@ -18,7 +18,8 @@ describe("edge arrows", () => {
 
   test("with no range (the hive queen's arrow, #85): any distance off screen gets one, on screen none", () => {
     const o = arrow();
-    expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 2390, 1200, o, Infinity)).toBe(true);
+    // 2000 away from you, past HELP_ARROW_RANGE: a downed player there gets no arrow, she does.
+    expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 3200, 1200, o, Infinity)).toBe(true);
     expect(o).toEqual({ x: 1000 - ARROW_MARGIN, y: 300, angle: 0 });
     expect(edgeArrow(cam, 1000, 600, none, 1200, 1200, 1690, 1490, o, Infinity)).toBe(false);
   });
