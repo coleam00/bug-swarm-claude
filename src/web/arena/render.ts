@@ -67,6 +67,7 @@ import {
 } from "./hudline";
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import { shotTravel, type ClientShots } from "./shots";
+import { TING_S, tingLook, type TingLook, type Tings } from "./tings";
 import { BOT_TAG, botTagBox, type TagBox } from "./tag";
 
 /** The floor tile's side, world units (a multiple of the grid spacing). */
@@ -100,6 +101,13 @@ const MINIMAP_DOT = 3;
 const MINIMAP_BUG = "rgba(251, 146, 60, 0.85)";
 const STATS_FONT = "bold 16px system-ui, sans-serif";
 const PARTICLE_SIZE = 7;
+/** A blocked shot's ting (#80): its ring, and its word over the spot, world units above it. */
+const TING_RING = "#e0f2fe";
+const TING_WORD = "ting";
+const TING_FONT = "bold 15px system-ui, sans-serif";
+const TING_FILL = "#bae6fd";
+const TING_ABOVE = 14;
+const ting: TingLook = { ring: 0, ringAlpha: 0, wordAlpha: 0, rise: 0 };
 /** A shot: a glow this long behind its head with a bright core, world units (release 1's look). */
 const SHOT_GLOW_LENGTH = 28;
 const SHOT_GLOW_WIDTH = 14;
@@ -276,6 +284,8 @@ export type Scene = {
   you: number | null;
   particles: Particles;
   texts: Texts;
+  /** Shots a beetle's shell blocked, ringing (#80). */
+  tings: Tings;
   shake: Shake;
   /** Your numbers, or null before the first snapshot. */
   me: SnapshotMe | null;
@@ -726,6 +736,23 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalCompositeOperation = "source-over";
   }
 
+  /** The rings of shots a beetle's shell blocked (#80), in world units. */
+  function drawTingRings(tg: Tings): void {
+    if (tg.live === 0) return;
+    ctx.strokeStyle = TING_RING;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < tg.age.length; i++) {
+      if (tg.age[i]! >= TING_S) continue;
+      tingLook(tg.age[i]!, ting);
+      if (ting.ringAlpha <= 0) continue;
+      ctx.globalAlpha = ting.ringAlpha;
+      ctx.beginPath();
+      ctx.arc(tg.x[i]!, tg.y[i]!, ting.ring, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   /** Your gun's heat: an arc around your robot, open at the bottom, flashing near the lock. */
   function drawHeat(me: Robot, sm: SnapshotMe, t: number): void {
     const locked = sm.lk === 1;
@@ -973,6 +1000,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     drawShots(sc, k, ox, oy);
     ctx.setTransform(k, 0, 0, k, ox, oy);
     drawParticles(sc.particles);
+    drawTingRings(sc.tings);
 
     // Revive rings under the robots, then the robots in view, yours last.
     for (let i = 0; i < count; i++) {
@@ -1057,6 +1085,27 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         const label = textLabel(texts, i);
         ctx.strokeText(label, x, y);
         ctx.fillText(label, x, y);
+      }
+      ctx.globalAlpha = 1;
+    }
+    const tg = sc.tings;
+    if (tg.live > 0) {
+      // The "ting" over each blocked shot (#80): small and pale blue, under the score labels' size.
+      ctx.font = TING_FONT;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = TEXT_STROKE;
+      ctx.fillStyle = TING_FILL;
+      for (let i = 0; i < tg.age.length; i++) {
+        if (tg.age[i]! >= TING_S) continue;
+        tingLook(tg.age[i]!, ting);
+        ctx.globalAlpha = ting.wordAlpha;
+        const x = (tg.x[i]! - left) * cam.scale;
+        const y = (tg.y[i]! - TING_ABOVE - ting.rise - top) * cam.scale;
+        ctx.strokeText(TING_WORD, x, y);
+        ctx.fillText(TING_WORD, x, y);
       }
       ctx.globalAlpha = 1;
     }
