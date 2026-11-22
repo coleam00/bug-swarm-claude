@@ -45,19 +45,24 @@ function perPickup(): PerPickup {
 }
 
 /**
- * One life's pickups (#73): taken by id, hits its shields blocked, bugs its laser shots hit, bugs
- * its bombs killed (#78), bugs its CI drone's shots killed (#84).
+ * One life's pickups (#73): taken in all (#90) and by id, hits its shields blocked (a first life's
+ * spawn shield included, #90), bugs its laser shots hit, bugs its bombs killed (#78), bugs its CI
+ * drone's shots killed (#84).
  */
-export type PickupCounts = { taken: PerPickup; blocks: number; laserHits: number; bombKills: number; droneKills: number };
+export type PickupCounts = { total: number; taken: PerPickup; blocks: number; laserHits: number; bombKills: number; droneKills: number };
 
 function pickupCounts(): PickupCounts {
-  return { taken: perPickup(), blocks: 0, laserHits: 0, bombKills: 0, droneKills: 0 };
+  return { total: 0, taken: perPickup(), blocks: 0, laserHits: 0, bombKills: 0, droneKills: 0 };
 }
 
 /** Adds the last step's pickups for player `id` to `c`. */
 function countPickups(state: ArenaState, id: number, c: PickupCounts): void {
   const ev = state.events;
-  for (const x of ev.pickups) if (x.player === id) c.taken[x.kind]++;
+  for (const x of ev.pickups) {
+    if (x.player !== id) continue;
+    c.total++;
+    c.taken[x.kind]++;
+  }
   for (const b of ev.blocks) if (b === id) c.blocks++;
   for (const o of ev.laserHits) if (o === id) c.laserHits++;
   for (const o of ev.bombKills) if (o === id) c.bombKills++;
@@ -245,6 +250,7 @@ export function pickupStats(lives: readonly PickupCounts[]): { median: PickupCou
     const v = lives.map(pick).sort((a, b) => a - b);
     return [quantile(v, 0.5), v.reduce((s, x) => s + x, 0) / n] as const;
   };
+  [median.total, mean.total] = of((c) => c.total);
   for (const id of PICKUP_IDS) [median.taken[id], mean.taken[id]] = of((c) => c.taken[id]);
   [median.blocks, mean.blocks] = of((c) => c.blocks);
   [median.laserHits, mean.laserHits] = of((c) => c.laserHits);
@@ -325,12 +331,14 @@ export function formatSkill(r: SkillReport): string[] {
   for (const p of r.policies) {
     lines.push(`${p.policy.padEnd(8)}${BUG_KINDS.map((k) => `${k} ${p.medianSpawned[k]} / ${p.medianTouches[k]}`).join(", ")}`);
   }
-  lines.push("pickups a life, median (mean): taken by id, hits blocked by a shield, bugs hit by laser shots, bugs killed by bombs and by drones");
+  lines.push(
+    "pickups a life, median (mean): taken in all and by id, hits blocked by a shield (a first life's spawn shield included), bugs hit by laser shots, bugs killed by bombs and by drones",
+  );
   for (const p of r.policies) {
     const { median: m, mean: a } = p.pickups;
     const v = (x: number, y: number) => `${x} (${y.toFixed(1)})`;
     lines.push(
-      `${p.policy.padEnd(8)}${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}, bomb kills ${v(m.bombKills, a.bombKills)}, drone kills ${v(m.droneKills, a.droneKills)}`,
+      `${p.policy.padEnd(8)}in all ${v(m.total, a.total)}, ${PICKUP_IDS.map((id) => `${id} ${v(m.taken[id], a.taken[id])}`).join(", ")}, blocks ${v(m.blocks, a.blocks)}, laser hits ${v(m.laserHits, a.laserHits)}, bomb kills ${v(m.bombKills, a.bombKills)}, drone kills ${v(m.droneKills, a.droneKills)}`,
     );
   }
   if (SHELLED_KINDS.length > 0) {

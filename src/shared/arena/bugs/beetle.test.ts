@@ -164,9 +164,10 @@ describe("beetle spares young lives (#86)", () => {
 });
 
 describe("beetle shell", () => {
-  test(`${ITEM_HP} shots at its shell do no damage, every one blocked; the streak grows, nothing scores`, () => {
+  test(`${ITEM_HP} shots at its shell do no damage, every one blocked; the streak neither grows nor resets, nothing scores`, () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
+    p.streak = 7;
     const b = beetleAt(a, 1400, 1200, -1, 0);
     let blocks = 0;
     const ended: ShotEnded[] = [];
@@ -186,7 +187,7 @@ describe("beetle shell", () => {
     expect(blocks).toBe(ITEM_HP);
     expect(b.hp).toBe(ITEM_HP);
     expect(a.bugs).toContain(b);
-    expect([p.streak, p.score, p.kills]).toEqual([ITEM_HP, 0, 0]);
+    expect([p.streak, p.score, p.kills]).toEqual([7, 0, 0]);
   });
 
   for (const [name, fx, fy] of [
@@ -284,7 +285,8 @@ describe("beetle shell", () => {
     expect(back.kills).toBe(1);
     expect(front.kills).toBe(0);
     expect(front.score).toBe(0);
-    expect(front.streak).toBeGreaterThan(0);
+    // Every one of its hits was blocked, and a block builds no streak (#90).
+    expect(front.streak).toBe(0);
     const frontHits = ended.filter((e) => frontShots.has(e.id) && e.hit);
     expect(frontHits.length).toBeGreaterThan(0);
     expect(frontHits.every((e) => e.blocked)).toBe(true);

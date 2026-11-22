@@ -24,12 +24,12 @@ export const DRONE_SPIN = 3;
 export const drone: PickupDef = {
   id: "drone",
   label: "CI drone!",
-  // Each kind's pickup chance, split evenly over the 4 pickups (#84, #78's rule: each kind's total
-  // unchanged): crawler 1.5%, dasher and spitter 3% in all, 0.375% and 0.75% each (half the item's
-  // starting 3% and 6%, set by the late-joiner gate, #73; the spitter, #72, drops as the dasher does).
-  // A glob is a shot in flight and drops nothing. A beetle (#80) takes 8 shots and drops twice what a
-  // dasher does: 6% in all, 1.5% each.
-  drop: { crawler: 0.00375, dasher: 0.0075, spitter: 0.0075, glob: 0, beetle: 0.015 },
+  // Each kind's pickup chance, split evenly over the 4 pickups (#84, #78's rule): crawler 3.75%,
+  // dasher and spitter 7.5%, beetle 15% in all; 0.9375%, 1.875% and 3.75% each. That is #90's x2.5
+  // of the numbers #73 had halved for the late-joiner gate, set by measurement so an aimer takes 2 to
+  // 3 pickups a life (`bun run skill`). The spitter (#72) drops as the dasher does; a beetle (#80)
+  // takes 8 shots and drops twice what a dasher does. A glob is a shot in flight and drops nothing.
+  drop: { crawler: 0.009375, dasher: 0.01875, spitter: 0.01875, glob: 0, beetle: 0.0375 },
   floorTicks: Math.round(DRONE_FLOOR_S / DT),
   durationTicks: Math.round(DRONE_S / DT),
 };

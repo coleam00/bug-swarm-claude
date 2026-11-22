@@ -1,13 +1,14 @@
 // Draws an arena frame: the floor grid, the walls, the bugs, every shot as a glowing streak, the
 // sparks, kill bursts and floating scores, every robot with its trail, dash afterimage, barrel and
 // name tag, your own ring, heat arc and dash cooldown ring, the dash button (touch screens), the
-// HUD line (score and multiplier, hit pips, wave, players: hudline.ts) with a short "streak lost"
+// HUD line (score and multiplier, hit pips, wave, people playing: hudline.ts) with a short "streak lost"
 // under it, the sticks, the minimap and the F readout. While your life is over the arena keeps
 // drawing with no HUD and no dash button: App.tsx's life-over screen dims it. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
 // HELP over it, a ring fills between it and whoever is reviving it, an arrow at the screen's edge
 // points to each one out of view nearby, its minimap dot blinks, and your own HUD says DOWN with
 // the seconds left. A server fill bot (#66) has a small BOT pill left of its name, which is drawn
-// dimmer. Pickups (#73): each on the floor as a halo, a disc and its glyph, blinking in its last
+// dimmer. A name tag (and HELP) that would reach the HUD band flips under its robot (#90, tag.ts).
+// Pickups (#73): each on the floor as a halo, a disc and its glyph, blinking in its last
 // 3 s; on every robot that has one, its look (a shield bubble, a glow at a laser's barrel, a CI drone orbiting, #84); a laser
 // shot as a longer, brighter beam and a drone's in violet; your active ones as timer icons under the HUD line, each with a
 // ring draining as it runs out. It reuses release 1's sprites and pooled
@@ -75,7 +76,7 @@ import {
 import { minimapLayout, toMinimap, type MinimapLayout } from "./minimap";
 import { shotTravel, type ClientShots } from "./shots";
 import { TING_S, tingLook, type TingLook, type Tings } from "./tings";
-import { BOT_TAG, botTagBox, type TagBox } from "./tag";
+import { BOT_TAG, botTagBox, tagBaselines, type TagBox, type TagSpot } from "./tag";
 
 /** The floor tile's side, world units (a multiple of the grid spacing). */
 const TILE = 240;
@@ -86,8 +87,6 @@ const BARREL_WIDTH = 5;
 const BARREL_COLOUR = "#e2e8f0";
 const NAME_FONT = "bold 13px system-ui, sans-serif";
 const NAME_FILL = "#f8fafc";
-/** The name tag's baseline above the robot's centre, world units. */
-const NAME_ABOVE = PLAYER_RADIUS * 1.9;
 /** A fill bot's name is drawn at this opacity (#66). */
 const BOT_NAME_ALPHA = 0.55;
 /** Its BOT pill: text, fill, and the pill's height and corner from the name's baseline, world units. */
@@ -182,6 +181,8 @@ const LINE_MIDDLE = 14;
 const LOST_BELOW = 26;
 /** The F readout's top, CSS px below the line's middle. */
 const STATS_BELOW = 44;
+/** The score's half height with its stroke, CSS px at the line's scale 1: the HUD band's bottom (#90). */
+const SCORE_HALF = 15;
 const MULT_ON = "#fde047";
 const MULT_OFF = "#94a3b8";
 const LOST_FILL = "#f87171";
@@ -203,8 +204,6 @@ const COUNTDOWN_TRACK = "rgba(248, 250, 252, 0.18)";
 const HELP_FILL = "#f87171";
 const HELP_FONT = "bold 15px system-ui, sans-serif";
 const HELP_TEXT = "HELP";
-/** HELP's baseline above the robot's centre, world units: over the name tag. */
-const HELP_ABOVE = NAME_ABOVE + 16;
 const REVIVE_WIDTH = 4;
 /** The revive ring is never smaller than this, world units, so it clears the countdown ring. */
 const REVIVE_MIN_RADIUS = COUNTDOWN_RADIUS + 9;
@@ -381,6 +380,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let playersShort = "";
   const widths: HudWidths = { score: 0, mult: 0, wave: 0, waveShort: 0, players: 0, playersShort: 0 };
   const line = createHudLine();
+  /** Where the name tag and HELP go this frame (#90), reused for every robot. */
+  const spot: TagSpot = { name: 0, help: 0 };
   let lineDirty = true;
   const downTexts = new Map<number, string>();
   // The view plus a margin for halos and names, world units: set at the start of each frame.
@@ -588,9 +589,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.globalCompositeOperation = "source-over";
   }
 
-  /** A robot's name (NAME_FONT set, centred); a bot's dimmer, with its BOT pill to the left. */
-  function drawName(r: Robot): void {
-    const y = r.y - NAME_ABOVE;
+  /** A robot's name (NAME_FONT set, centred) with its baseline at `y`; a bot's dimmer, with its BOT pill to the left. */
+  function drawName(r: Robot, y: number): void {
     if (!r.bot) {
       ctx.strokeText(r.name, r.x, y);
       ctx.fillText(r.name, r.x, y);
@@ -889,6 +889,15 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fill();
   }
 
+  /**
+   * The bottom of the HUD band, CSS px (#90): the score's, or your pickup timers' while any show.
+   * Name tags and HELP stay below it (tag.ts tagBaselines). The line's scale is the last frame's.
+   */
+  function hudBandBottom(icons: number): number {
+    const below = icons > 0 ? HUD_ICONS_BELOW + HUD_ICON_SIZE / 2 + ICON_RING_WIDTH / 2 : SCORE_HALF * line.scale;
+    return hud.top + LINE_MIDDLE + below;
+  }
+
   /** Your active pickups (from `me.fx`), as many as there are, at most one per pickup. */
   function iconCount(me: SnapshotMe | null): number {
     if (!me || !me.fx) return 0;
@@ -924,7 +933,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
 
   /**
    * The HUD line: score and multiplier (pulsing when it rises), three hit pips (flashing as one
-   * goes), the wave and the players in your arena; your pickup timers under it (#73); "streak lost"
+   * goes), the wave and the people in your arena (bots never counted, #90); your pickup timers under it (#73); "streak lost"
    * flicks up under the score (under the timers while any show). While down, DOWN and the seconds
    * left with one line on how to get up, under your robot (#59).
    */
@@ -1092,7 +1101,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         drawDashRing(me, sc.dashReady);
       }
     }
-    // Name tags over every robot, as canvas text (never HTML: names are typed by viewers).
+    // Name tags over every robot, as canvas text (never HTML: names are typed by viewers), and
+    // never under the HUD band (#90): a tag that would reach it flips under its robot.
+    const band = sc.out || !sc.me ? -Infinity : (hudBandBottom(iconCount(sc.me)) * dpr - oy) / k;
     ctx.font = NAME_FONT;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
@@ -1103,7 +1114,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const r = robots[i]!;
       if (!inView(r.x, r.y)) continue;
       ctx.fillStyle = i === self ? NAME_FILL : TEAM_LOOK[r.team].color;
-      drawName(r);
+      drawName(r, tagBaselines(r.y, band, r.down, spot).name);
     }
     // HELP over every downed robot in view, yours too, pulsing.
     ctx.font = HELP_FONT;
@@ -1113,7 +1124,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const r = robots[i]!;
       if (!r.down || !inView(r.x, r.y)) continue;
       ctx.save();
-      ctx.translate(r.x, r.y - HELP_ABOVE);
+      ctx.translate(r.x, tagBaselines(r.y, band, true, spot).help);
       ctx.scale(pulse, pulse);
       ctx.strokeText(HELP_TEXT, 0, 0);
       ctx.fillText(HELP_TEXT, 0, 0);

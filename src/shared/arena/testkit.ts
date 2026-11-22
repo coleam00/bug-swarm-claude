@@ -1,6 +1,7 @@
 // Helpers for the arena's simulation tests (combat, bugs, lives, pickups): arenas with players placed by
 // hand, bugs and pickups placed by hand, and stepping with the personal spawn budget held at zero so only
-// the bugs a test places are in play. Players placed by hand start without spawn protection.
+// the bugs a test places are in play. Players placed by hand start without spawn protection or the
+// first-life shield (#90).
 // Test-only; nothing in the game imports it.
 import { newBug } from "./bugs/index";
 import { BUG_KINDS, DOWN_TICKS, HITS_PER_LIFE, PICKUP_IDS, type BugKind, type PickupId } from "./constants";
@@ -16,6 +17,7 @@ export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Pl
     p.y = y;
     p.invulnTicks = 0;
     p.protectTicks = 0;
+    p.effect.fill(0);
     p.dashCooldown = 0;
     return p;
   });

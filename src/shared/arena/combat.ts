@@ -131,7 +131,8 @@ function creditFor(state: ArenaState, s: Shot): Player | null {
  * points at x1 (it goes in events.droneKills too). Shots never touch players. A shot whose owner left, or whose life ended, flies on and scores nothing.
  * A bug with a shell (#80, kind.ts `shell`) hit from within it (shellBlocks) loses nothing: the shot
  * ends there (`blocked`; a laser shot too, its earlier hits in this step standing, and it is not a
- * laser hit), and the owner's streak still grows, so aiming at a shell is not punished twice.
+ * laser hit), and the owner's streak neither grows nor resets: aiming at a shell is not punished
+ * twice, and the multiplier can't be farmed on one (#90).
  */
 export function stepShots(state: ArenaState): void {
   const ev = state.events;
@@ -157,10 +158,8 @@ export function stepShots(state: ArenaState): void {
       if (!hitBug) break;
       const shell = bugDef(hitBug.kind).shell;
       if (shell && shellBlocks(hitBug.dx, hitBug.dy, s.dx, s.dy, shell.cosHalf)) {
-        if (owner) {
-          if (!s.drone) owner.streak++;
-          ev.shellBlocks.push(owner.id);
-        }
+        if (owner) ev.shellBlocks.push(owner.id);
+        // Counted as a hit so the shot never resets the streak; it does not grow it either (#90).
         s.hits++;
         s.pierce = 0;
         ev.shotsEnded.push({ id: s.id, hit: true, blocked: true, travelled: s.travelled + best });
