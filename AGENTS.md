@@ -12,5 +12,5 @@ Quick commands:
 - `bun run check` must pass before any pull request.
 - The game is at `/` (start screen, then the arena; `/arena` redirects there) and the stream board at `/board`.
 - `bun run stats` prints the bet's numbers (a run is one arena life). `bun run hide "<name>"` hides a name from every board and kicks it from any live arena within 5 seconds. `bun run reset -- --yes` deletes every run and player before the stream.
-- `bun run bots -- --url <base> --count <n> --seconds <s>` load-tests a running server with WebSocket bots playing the aimer (their lives save, so only against a scratch `DATA_DIR`). `bun run skill` runs the three skill gates (`direction.md`, `PRD.md`).
+- `bun run bots -- --url <base> --count <n> --seconds <s>` load-tests a running server with WebSocket bots playing the aimer (their lives save, so only against a scratch `DATA_DIR`); `--watchers <n>` adds start-screen watchers and prints the KB/s each receives (`--count 0` watches an empty server's demo arena). `bun run skill` runs the three skill gates (`direction.md`, `PRD.md`).
 - Proof made while working (screenshots, logs, probe scripts) goes in `.evidence/<issue number>/`, never outside the checkout.

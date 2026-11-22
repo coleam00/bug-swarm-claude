@@ -5,11 +5,11 @@ import { stepPlayer } from "../src/shared/arena/sim";
 import { TEAMS } from "../src/server/rules";
 import type { Snapshot } from "../src/shared/arena/protocol";
 import { createObservationTracker } from "./bots-lib";
-import { AIM_TURN, WALL_AVOID, botName, botTeam, createTally, createWander, formatSummary, parseBotsArgs, stepWander, wsUrl } from "./bots-lib";
+import { AIM_TURN, WALL_AVOID, botName, botTeam, createTally, createWander, formatSummary, parseBotsArgs, stepWander, watcherRates, wsUrl } from "./bots-lib";
 
 describe("parseBotsArgs", () => {
   test("defaults to 18 aimer bots for 60 seconds, and strips a trailing slash", () => {
-    expect(parseBotsArgs(["--url", "http://127.0.0.1:3000/"])).toEqual({ url: "http://127.0.0.1:3000", count: 18, seconds: 60, policy: "aimer" });
+    expect(parseBotsArgs(["--url", "http://127.0.0.1:3000/"])).toEqual({ url: "http://127.0.0.1:3000", count: 18, seconds: 60, policy: "aimer", watchers: 0 });
   });
 
   test("takes both flag forms and skips a bare --", () => {
@@ -18,6 +18,7 @@ describe("parseBotsArgs", () => {
       count: 5,
       seconds: 10,
       policy: "wander",
+      watchers: 0,
     });
     expect(parseBotsArgs(["--url", "http://x", "--policy=mover"]).policy).toBe("mover");
   });
@@ -94,11 +95,11 @@ test("the summary counts joins, arenas, messages per second, errors and the tick
   tally.errors.push("close 1006", "close 1006", "error name");
   // The values, not the wording: messages per second overall and per bot, errors grouped by kind.
   tally.lives.push(300, 40, 120);
-  const text = formatSummary({ url: "http://127.0.0.1:3000", count: 18, seconds: 60, policy: "aimer" }, tally, 60, { p50: 0.12, p95: 0.4 }).join(" ");
+  const text = formatSummary({ url: "http://127.0.0.1:3000", count: 18, seconds: 60, policy: "aimer", watchers: 0 }, tally, 60, { p50: 0.12, p95: 0.4 }).join(" ");
   for (const part of ["18 of 18", "360.0/s", "20.0/s", "errors: 3", "close 1006 x2", "error name x1", "0.12", "0.40", "lives ended: 3", "median score 120", "aimer"]) {
     expect(text).toContain(part);
   }
-  expect(formatSummary({ url: "u", count: 1, seconds: 1, policy: "wander" }, createTally(), 1, null).join(" ")).toContain("unavailable");
+  expect(formatSummary({ url: "u", count: 1, seconds: 1, policy: "wander", watchers: 0 }, createTally(), 1, null).join(" ")).toContain("unavailable");
 });
 
 test("a policy bot sees itself from its row and its numbers, and each bug's velocity from its last two positions", () => {
@@ -137,4 +138,24 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
   expect(t.obs.bugCount).toBe(1);
   expect(t.obs.bugs[0]!.vx).toBeCloseTo(160, 6);
   expect(t.obs.self.alive).toBe(false);
+});
+
+test("--watchers opens watch sockets; --count 0 is allowed only with watchers (an empty server's demo arena)", () => {
+  expect(parseBotsArgs(["--url", "http://x", "--count", "0", "--watchers", "10"])).toMatchObject({ count: 0, watchers: 10 });
+  expect(parseBotsArgs(["--url", "http://x", "--watchers=3"])).toMatchObject({ count: 18, watchers: 3 });
+  expect(() => parseBotsArgs(["--url", "http://x", "--count", "0"])).toThrow();
+  expect(() => parseBotsArgs(["--url", "http://x", "--watchers", "-1"])).toThrow();
+});
+
+test("the summary gives each watcher's received KB/s, mean and max", () => {
+  expect(watcherRates([])).toBeNull();
+  expect(watcherRates([
+    { bytes: 300_000, seconds: 10 },
+    { bytes: 500_000, seconds: 10 },
+  ])).toEqual({ mean: 40, max: 50 });
+  const tally = createTally();
+  tally.watchers.push({ bytes: 650_000, seconds: 10 });
+  const args = { url: "u", count: 0, seconds: 10, policy: "aimer" as const, watchers: 2 };
+  expect(formatSummary(args, tally, 10, null).at(-1)).toBe("watchers: 1 of 2 watching, 65.0 KB/s each on average, 65.0 KB/s max");
+  expect(formatSummary({ ...args, watchers: 0 }, tally, 10, null).join(" ")).not.toContain("watchers:");
 });
