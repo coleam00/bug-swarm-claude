@@ -9,6 +9,7 @@ import {
   type ArenaEvent,
   encodeHello,
   encodeInput,
+  encodeVisibility,
   encodeWatch,
   parseClientMessage,
   parseServerMessage,
@@ -49,6 +50,16 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage(s({ t: "watch" }))).toBeNull();
     expect(parseClientMessage(s({ t: "watch", v: 1.5 }))).toBeNull();
     expect(parseClientMessage(s({ t: "watch", v: "8" }))).toBeNull();
+  });
+
+  test("a visibility message (#117) parses to whether the tab is hidden; anything but a boolean drops it", () => {
+    expect(parseClientMessage(encodeVisibility(true))).toEqual({ t: "visibility", hidden: true });
+    expect(parseClientMessage(encodeVisibility(false))).toEqual({ t: "visibility", hidden: false });
+    expect(parseClientMessage(s({ t: "visibility", hidden: false, x: 1 }))).toEqual({ t: "visibility", hidden: false });
+    expect(parseClientMessage(s({ t: "visibility" }))).toBeNull();
+    expect(parseClientMessage(s({ t: "visibility", hidden: 1 }))).toBeNull();
+    expect(parseClientMessage(s({ t: "visibility", hidden: "true" }))).toBeNull();
+    expect(parseClientMessage(s({ t: "visibility", hidden: null }))).toBeNull();
   });
 
   test("a version mismatch still parses: the server decides", () => {

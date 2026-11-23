@@ -88,6 +88,13 @@ export const JOINS_PER_ADDRESS_PER_MINUTE = 30;
  * arenas without bound. One more is refused with `busy` and opens no arena.
  */
 export const MAX_PEOPLE = 600;
+/**
+ * Owner number (#117): a person out (life over) this long without playing again, or with the tab
+ * hidden, stops counting as a person: for arena capacity, fill bots, arena choice and the board.
+ */
+export const OUT_IDLE_S = 30;
+/** OUT_IDLE_S in ticks, counted from the life's end (the player's outTick), never the wall clock. */
+export const OUT_IDLE_TICKS = Math.round((OUT_IDLE_S * 1000) / TICK_MS);
 /** How often watchers of a people-less arena are moved to the busiest arena with people, ms. */
 export const WATCH_SWEEP_MS = 5000;
 /** Inputs the server queues per player; one is applied each tick, the oldest dropped past this. */
