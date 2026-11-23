@@ -131,7 +131,7 @@ export function recordRunEnded(db: Database, end: RunEnd, at: Date): void {
 
 export type TopRow = { name: string; score: number };
 
-/** One ranked player: their best score and when they first finished a run (the tie order). */
+/** One player's row before the ranking keeps one per name: their best score and when they first finished a run (the tie order). */
 export type RankEntry = { playerId: string; name: string; score: number; firstAt: string };
 
 /**
@@ -179,9 +179,10 @@ export function hiddenKeys(db: Database): Set<string> {
 }
 
 /**
- * Where a player stands. `rank` is their place among `ranked` visible players (null when hidden
- * or with no finished run); `next` is the rank just above and the points it takes to pass it;
- * `row` is their index in the top 10 rows, when they are in them.
+ * Where a player stands: where their name stands, since the ranking has one row per name.
+ * `rank` is its place among `ranked` visible names (null when hidden or with no finished run);
+ * `next` is the rank just above and the points a life of the player's must score to pass it;
+ * `row` is the name's index in the top 10 rows, when it is in them.
  */
 export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
 
