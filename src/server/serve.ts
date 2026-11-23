@@ -3,6 +3,7 @@
 // test calls it on port 0 and stops it before it ends.
 import type { Database } from "bun:sqlite";
 import { DT, WAVE_S } from "../shared/arena/constants";
+import { clientKey } from "./admin";
 import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
 import { hiddenKeys } from "./db";
 import { mountArenaRoutes } from "./arena/http";
@@ -33,6 +34,8 @@ export type ServerOptions = {
   hideSweepMs?: number;
   /** Each new arena's first tick; 0 by default (startTickFrom: BUG_SWARM_START_WAVE, a debug aid, #85). */
   arenaStartTick?: number;
+  /** The owner's admin token (admin.ts adminTokenFrom); null or absent keeps /api/admin/* off. */
+  adminToken?: string | null;
 };
 
 export type RunningServer = {
@@ -157,7 +160,13 @@ export function startServer(opts: ServerOptions): RunningServer {
   const lives = createLifeSaver(opts.db);
   const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo, startTick: opts.arenaStartTick });
   // The board reads the open arenas live from the rooms.
-  const app = createApp(opts.db, { ...opts.appOptions, live: () => rooms.live() });
+  // The admin limit keys on the proxy headers, else the peer (read lazily: `server` is made below).
+  const app = createApp(opts.db, {
+    adminToken: opts.adminToken,
+    clientKey: (c) => clientKey((name) => c.req.header(name), () => server.requestIP(c.req.raw)?.address),
+    ...opts.appOptions,
+    live: () => rooms.live(),
+  });
   // Before servePages: its catch-all answers every path it reaches.
   mountArenaRoutes(app, rooms);
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).

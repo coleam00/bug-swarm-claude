@@ -24,7 +24,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # The same exact Bun as the Dockerfile and the factory (#110).
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.5
       - name: Install
         if: hashFiles('package.json') != ''
         run: bun install
