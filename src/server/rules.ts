@@ -117,6 +117,11 @@ function lookupWords(name: string): string[] {
   return out;
 }
 
+/** The parts of a word that a capital starts: "BigDick" is "Big" and "Dick", "ImASpic" is "Im", "A" and "Spic". */
+function camelParts(word: string): string[] {
+  return word.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2").split(" ");
+}
+
 /** An exception becomes "|", not "", so cutting it out can't join two halves into a word. */
 function cutExceptions(compact: string): string {
   let cut = compact;
@@ -133,17 +138,24 @@ function cutExceptions(compact: string): string {
  * space is gone. A short word is also read glued to its neighbours (lookupWords). BLOCKED_WHOLE
  * words are also looked for in the parts of a word that a capital starts ("BigDick",
  * "ImASpic"). Reserved names are matched against the whole name, and the role and platform
- * words among them (RESERVED_WORDS) also against each whole word of it ("Mod Squad").
+ * words among them (RESERVED_WORDS) also against each whole word of it and each part of a word
+ * that a capital starts ("Mod Squad", "OfficialBob").
  */
 export function listedReason(name: string): "blocked" | "reserved" | null {
   const words = lookupWords(name);
-  const parts = words.flatMap((w) => w.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2").split(" "));
+  const parts = words.flatMap(camelParts);
   const wordReadings = words.flatMap(readings);
   if (wordReadings.some((c) => ANYWHERE.test(cutExceptions(c)))) return "blocked";
   if ([...wordReadings, ...parts.flatMap(readings)].some((c) => WHOLE.test(c))) return "blocked";
   if (readings(name).some((c) => RESERVED.test(c) || EXACT.has(c))) return "reserved";
   const roleWord = (c: string) => RESERVED_WORD.test(c) || EXACT_WORD.has(c);
-  if (nameWords(name).some((w) => readings(w.text).some(roleWord))) return "reserved";
+  // Each whole word, each part of it a capital starts, as BLOCKED_WHOLE reads them ("OfficialBob"),
+  // and each two neighbouring parts read together, so a word split in two still reads whole
+  // ("YouTubeFan", "You Tube Fan").
+  const ownWords = nameWords(name).map((w) => w.text);
+  const pieces = ownWords.flatMap(camelParts);
+  const pairs = pieces.slice(1).map((p, i) => pieces[i]! + p);
+  if ([...ownWords, ...pieces, ...pairs].some((w) => readings(w).some(roleWord))) return "reserved";
   return null;
 }
 
@@ -160,14 +172,16 @@ export function checkName(raw: string): NameCheck {
  * True for a name that reads as one of the server's own arena bots: its first word reads "bot"
  * once digit swaps, separators, spelled-out letters and a number at either end are undone (the
  * profanity check's normalisation: "Bot", "b0t x", "bot_x", "b o t", "Bot2", "1 bot", and every
- * fill bot's "bot Ada"). The arena's /ws refuses these from clients and the start screen before
+ * fill bot's "bot Ada"), or its first part when a capital starts the next ("BotAda"). The arena's /ws refuses these from clients and the start screen before
  * joining (start.ts), so a name that reads "bot" in the arena is always a server bot. Not folded
- * into checkName: fill bots keep their names and the boards still show stored ones. "Robot",
- * "Abbot", "Boot" and "bots-01" are not bot names.
+ * into checkName or the word lists, so the boards still show a person's stored "Bot". "Robot",
+ * "RoBot", "Abbot", "Boot" and "bots-01" are not bot names.
  */
 export function isBotName(name: string): boolean {
   const first = nameWords(normalizeName(name))[0];
-  return first !== undefined && readings(first.text).includes("bot");
+  if (first === undefined) return false;
+  // The word, and its first part when a capital starts the next ("BotAda", as "bot Ada").
+  return readings(first.text).includes("bot") || readings(camelParts(first.text)[0]!).includes("bot");
 }
 
 const shown = new Map<string, boolean>();

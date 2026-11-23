@@ -179,11 +179,12 @@ describe("name rules", () => {
 
   test("a role or platform word refuses a name as any whole word of it; a person's name only as the whole name (#106)", () => {
     const refused = ["Mod Squad", "Squad Mod", "The Mod", "M0d Squad", "Mod2 Squad", "m o d squad", "Official Bob", "Bob_Official", "xX_admin_Xx", "Addmin Bob", "Big Moderator",
-      "Host 2 Go", "Your Host", "Lead Streamer", "YouTube Fan", "Twitch-Kid", "Tw1tch Kid", "Al Mod", "Ghost Host"];
+      "Host 2 Go", "Your Host", "Lead Streamer", "YouTube Fan", "Twitch-Kid", "Tw1tch Kid", "Al Mod", "Ghost Host",
+      "OfficialBob", "TwitchKid", "AdminBob", "ModSquad", "HostBob", "McHost", "YouTubeFan", "You Tube Fan"];
     expect(refused.filter((n) => checkName(n).ok)).toEqual([]);
     for (const n of refused) expect(checkName(n)).toEqual({ ok: false, reason: "reserved" });
     const plays = ["Cole Smith", "Smith Cole", "Cole Porter", "Archon Fan", "Modern", "Modern Art", "Hostage", "Ghost", "Admiral", "Admins Team", "Twitcher", "YouTuber",
-      "Streamers Fan", "Moody Bob", "Hosta Lily", "You Tube Fan", "ModSquad"];
+      "Streamers Fan", "Moody Bob", "Hosta Lily", "HostaLily", "TwitchyTom", "ModernArt", "AdmiralAckbar", "ColeSmith", "Mo Dern", "Tom Odd"];
     expect(plays.filter((n) => !checkName(n).ok)).toEqual([]);
     // Every word entry is a reserved entry, and no person's or factory name is one.
     expect(RESERVED_WORDS.filter((w) => !RESERVED_NAMES.includes(w) && !RESERVED_EXACT.includes(w))).toEqual([]);
@@ -248,9 +249,9 @@ describe("teams", () => {
 
 describe("bot names", () => {
   test("a name whose first word reads 'bot' is kept for the server's bots, whatever the spelling", () => {
-    const bots = ["bot alice", "Bot  Bob", "  BOT x", "bot 7", "bot", "Bot", "B0T", "8ot", "b0t x", "bot_x", "bot-x", "b o t", "bo t", "1 bot", "Bot 4455", "Bot2", "bot99"];
+    const bots = ["bot alice", "Bot  Bob", "  BOT x", "bot 7", "bot", "Bot", "B0T", "8ot", "b0t x", "bot_x", "bot-x", "b o t", "bo t", "1 bot", "Bot 4455", "Bot2", "bot99", "BotAda", "BotX"];
     expect(bots.filter((n) => !isBotName(n))).toEqual([]);
-    const people = ["bots-01", "robot x", "abbot y", "Robo", "Robot", "Abbot", "Boot", "Bottle", "Bots", "Abbot Bot", "--", "__"];
+    const people = ["bots-01", "robot x", "abbot y", "Robo", "Robot", "Abbot", "Boot", "Bottle", "Bots", "Abbot Bot", "RoBot", "BoTanya", "--", "__"];
     expect(people.filter((n) => isBotName(n))).toEqual([]);
   });
 

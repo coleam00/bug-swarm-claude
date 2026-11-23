@@ -181,7 +181,8 @@ export function hiddenKeys(db: Database): Set<string> {
 /**
  * Where a player stands: where their name stands, since the ranking has one row per name.
  * `rank` is its place among `ranked` visible names (null when hidden or with no finished run);
- * `next` is the rank just above and the points a life of the player's must score to pass it;
+ * `next` is the rank just above and how many points above the player's own best it takes to
+ * pass it (one more than that rank's score minus their best);
  * `row` is the name's index in the top 10 rows, when it is in them.
  */
 export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
@@ -203,8 +204,8 @@ function nameRow(entries: RankEntry[], playerId: string, name: string | null): n
  * where their name stands, and `row` is the name's row even when another player holds it. `best`
  * may be fresher than the ranking (a run that finished since it was read): the name is placed by
  * the higher of it and the name's row, with the row's first-finish time, or after everyone
- * already in it when the name is not in it yet. `next.points` is what a life of this player's
- * must score to pass the rank above. `row` follows the ranking as it is, since it points into
+ * already in it when the name is not in it yet. `next.points` is how many points above this
+ * player's own best (not the name's) it takes to pass the rank above. `row` follows the ranking as it is, since it points into
  * the rows read with it.
  */
 export function rankOf(entries: RankEntry[], playerId: string, name: string | null, best: number | null, hidden: boolean): Me {

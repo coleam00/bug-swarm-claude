@@ -291,7 +291,7 @@ describe("rankOf", () => {
   ];
 
   test("another player with the name and a lower best stands where the name stands, and is not counted again", () => {
-    // `next.points` is what a life of theirs must score to pass Ada: from their own best, not the name's.
+    // `next.points` is how far above their own best (30) Ada's 100 is, plus 1: from their best, not the name's.
     expect(rankOf(byName, "p-c2", "churn", 30, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 71 }, row: 1 });
   });
 

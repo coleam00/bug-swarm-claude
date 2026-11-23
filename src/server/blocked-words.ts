@@ -106,14 +106,15 @@
 // ("Archonaut", "Nicole", "Coleman", "Hosta", "Moderna") is fine.
 //
 // RESERVED_WORDS (owner ruling on #106): the role and platform words among those two lists also
-// refuse a name when they are any whole word of it, words split as for the blocked lists and each
-// read the way its list reads it: "Mod Squad", "Official Bob", "xX_admin_Xx", "Host 2 Go" and
-// "YouTube Fan" are refused. Only a whole word: "Modern", "Hostage", "Admiral" and "Twitcher"
-// play. The names of people and of the factory (cole, colemedin, dynamous, archon) stay
-// whole-name only, so "Cole Smith" plays. A word split across spaces is not read whole
-// ("You Tube Fan" plays; "You Tube" alone is refused as the whole name).
-// Names that read as a bot are kept for the server's bots by rules.ts isBotName, not here, so
-// fill bots keep their names on the boards.
+// refuse a name when they are any whole word of it, words split as for the blocked lists (and,
+// as BLOCKED_WHOLE reads them, at a capital) and each read the way its list reads it: "Mod
+// Squad", "Official Bob", "OfficialBob", "xX_admin_Xx", "Host 2 Go" and "YouTube Fan" are
+// refused. Two neighbouring pieces are also read together, so a word split in two still reads
+// whole ("YouTubeFan", "You Tube Fan"). Only a whole word: "Modern", "Hostage", "Admiral",
+// "Twitcher" and "HostaLily" play. The names of people and of the factory (cole, colemedin,
+// dynamous, archon) stay whole-name only, so "Cole Smith" and "ColeSmith" play.
+// Names that read as a bot are kept for the server's bots by rules.ts isBotName, not here, so a
+// person's stored name such as "Bot" stays on the boards; only joining with it is refused.
 //
 // The boards (top 10 and team totals) hide a stored name these lists now refuse, at read time.
 //
