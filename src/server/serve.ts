@@ -2,13 +2,15 @@
 // WebSocket, on one Bun server. main.ts calls it with the environment; the arena's integration
 // test calls it on port 0 and stops it before it ends.
 import type { Database } from "bun:sqlite";
-import { DT, WAVE_S } from "../shared/arena/constants";
+import { DT, JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, WAVE_S } from "../shared/arena/constants";
 import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
 import { hiddenKeys } from "./db";
 import { mountArenaRoutes } from "./arena/http";
+import { createAddressGate, createOpenGate } from "./arena/gate";
 import { createLifeSaver } from "./arena/lives";
 import { Rooms } from "./arena/rooms";
 import { createArenaSockets, newSocketData, type Liveness, type SocketData } from "./arena/sockets";
+import { pickClientIp } from "./limits";
 import { isShownName, nameKey } from "./rules";
 import { servePages } from "./ui";
 
@@ -33,12 +35,25 @@ export type ServerOptions = {
   hideSweepMs?: number;
   /** Each new arena's first tick; 0 by default (startTickFrom: BUG_SWARM_START_WAVE, a debug aid, #85). */
   arenaStartTick?: number;
+  /** Trusted proxies that append to X-Forwarded-For (TRUST_PROXY_HOPS, limits.ts); 0 by default. */
+  proxyHops?: number;
+  /**
+   * True turns the per-address /ws limits off (BUG_SWARM_ALLOW_LOAD=1: `bun run bots` and the
+   * playtest only, #104). False by default, so every caller that does not opt out has the limits.
+   */
+  allowLoad?: boolean;
+  /** People who may play at once, server-wide; defaults to MAX_PEOPLE (tests shrink it). */
+  maxPeople?: number;
+  /** Where the /ws addresses and refusals are logged; defaults to nowhere (main.ts passes console.log). */
+  log?: (line: string) => void;
 };
 
 export type RunningServer = {
   url: string;
   server: ReturnType<typeof Bun.serve>;
   rooms: Rooms;
+  /** Sockets open on /ws now, welcomed, watching, or refused and not yet closed. */
+  readonly openSockets: number;
   /**
    * Stops the server for a redeploy (or a test's end): ends and saves every life in progress with
    * its score so far, sends every socket `error restarting` and closes it, stops the listener
@@ -155,7 +170,7 @@ export function hiddenNames(db: Database, now: () => number = Date.now): (name: 
 export function startServer(opts: ServerOptions): RunningServer {
   // Finished lives are saved as runs, off the tick (lives.ts).
   const lives = createLifeSaver(opts.db);
-  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo, startTick: opts.arenaStartTick });
+  const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo, startTick: opts.arenaStartTick, maxPeople: opts.maxPeople });
   // The board reads the open arenas live from the rooms.
   const app = createApp(opts.db, { ...opts.appOptions, live: () => rooms.live() });
   // Before servePages: its catch-all answers every path it reaches.
@@ -163,13 +178,22 @@ export function startServer(opts: ServerOptions): RunningServer {
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).
   servePages(app, opts.distDir);
 
-  const sockets = createArenaSockets(rooms, { liveness: opts.liveness, isHidden: hiddenNames(opts.db), sweepMs: opts.hideSweepMs });
+  // The per-address limits (#104), off only with the load-test allowance.
+  const gate = opts.allowLoad ? createOpenGate() : createAddressGate({ maxSockets: MAX_SOCKETS_PER_ADDRESS, joinsPerMinute: JOINS_PER_ADDRESS_PER_MINUTE });
+  const sockets = createArenaSockets(rooms, { liveness: opts.liveness, isHidden: hiddenNames(opts.db), sweepMs: opts.hideSweepMs, gate, log: opts.log });
+  const hops = opts.proxyHops ?? 0;
   const server = Bun.serve<SocketData>({
     port: opts.port,
     hostname: opts.hostname,
     fetch(req, srv) {
       if (new URL(req.url).pathname === "/ws") {
-        return srv.upgrade(req, { data: newSocketData() }) ? undefined : new Response("websocket expected", { status: 426 });
+        // The client's address, as the per-address limits count it (limits.ts, TRUST_PROXY_HOPS).
+        const address = pickClientIp(
+          (name) => req.headers.get(name) ?? undefined,
+          () => srv.requestIP(req)?.address ?? "unknown",
+          hops,
+        );
+        return srv.upgrade(req, { data: newSocketData(address) }) ? undefined : new Response("websocket expected", { status: 426 });
       }
       return app.fetch(req, srv);
     },
@@ -216,6 +240,9 @@ export function startServer(opts: ServerOptions): RunningServer {
     url: `http://${opts.hostname}:${server.port}`,
     server,
     rooms,
+    get openSockets() {
+      return sockets.openCount;
+    },
     stop() {
       stopping ??= stop();
       return stopping;

@@ -197,6 +197,8 @@ export function parseArgs(argv: string[]): PlaytestArgs {
  * RAILWAY_GIT_COMMIT_SHA (it beats BUILD_ID), NODE_ENV (production listens on every interface)
  * and an inherited BUG_SWARM_START_WAVE (late-join needs the real wave 6). `startWave` sets it
  * instead: the queen scenario passes QUEEN_WAVE, so each new arena opens 10 s before her wave (#96).
+ * With BUG_SWARM_ALLOW_LOAD=1 (#104): every page connects from 127.0.0.1, and the restart scenario's
+ * rejoins add sockets and joins, so the per-address /ws limits are off on this scratch server.
  */
 export function serverEnv(base: Record<string, string | undefined>, port: number, dataDir: string, buildId: string, startWave: number | null = null): Record<string, string> {
   const out: Record<string, string> = {};
@@ -206,6 +208,7 @@ export function serverEnv(base: Record<string, string | undefined>, port: number
   out.PORT = String(port);
   out.DATA_DIR = dataDir;
   out.BUILD_ID = buildId;
+  out.BUG_SWARM_ALLOW_LOAD = "1";
   return out;
 }
 

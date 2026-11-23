@@ -98,6 +98,21 @@ describe("joining", () => {
     expect(rooms.join("next", "tabs", INFO, client().send).room).toBe(2);
   });
 
+  test("full once maxPeople play across every arena, and free again after one leaves (#104)", () => {
+    const rooms = new Rooms({ startTimer: () => () => {}, fillTo: 0, maxPeople: 3 });
+    expect(new Rooms({ startTimer: () => () => {} }).full).toBe(false);
+    const a = rooms.join("a", "tabs", INFO, client().send);
+    rooms.join("b", "tabs", INFO, client().send);
+    expect(rooms.full).toBe(false);
+    rooms.join("c", "spaces", INFO, client().send);
+    expect(rooms.full).toBe(true);
+    // A watcher is not a person: it opens no arena and changes nothing.
+    rooms.watch(client().send);
+    expect(rooms.stats().arenas.length).toBe(1);
+    rooms.leave(a.room, a.entity);
+    expect(rooms.full).toBe(false);
+  });
+
   test("the welcome names you, your arena, the build, the world and everyone there", () => {
     const { rooms } = setup();
     rooms.join("Ada", "tabs", INFO, client().send);

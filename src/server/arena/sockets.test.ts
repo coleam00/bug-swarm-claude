@@ -29,3 +29,39 @@ test("a hello that arrives after restart is answered restarting and joins nothin
   sockets.close!(ws, 1012, "");
   expect(sockets.openCount).toBe(0);
 });
+
+test("a send buffer over the bound drops the socket only after slowMs straight; draining below it starts the wait again (#104)", async () => {
+  const rooms = new Rooms({ startTimer: () => () => {} });
+  let t = 0;
+  const sockets = createArenaSockets(rooms, { now: () => t, liveness: { pingMs: 5, silentMs: 1e9, slowBytes: 100, slowMs: 1000 } });
+  let buffered = 0;
+  let terminated = false;
+  const ws = {
+    data: newSocketData("203.0.113.7"),
+    send: () => 1,
+    close: () => {},
+    ping: () => {},
+    terminate: () => void (terminated = true),
+    getBufferedAmount: () => buffered,
+  } as unknown as ServerWebSocket<SocketData>;
+  sockets.open!(ws);
+  // Lets the ping timer run a few times at clock `at`.
+  const at = async (ms: number) => {
+    t = ms;
+    ws.data.lastHeard = ms;
+    await Bun.sleep(30);
+  };
+  buffered = 101;
+  await at(0);
+  await at(900);
+  buffered = 100; // drained to the bound: not slow
+  await at(950);
+  buffered = 101;
+  await at(1500);
+  expect(terminated).toBe(false); // 1500 ms over the bound in all, but only 550 ms since it drained
+  await at(1950);
+  expect(terminated).toBe(false);
+  await at(2500);
+  expect(terminated).toBe(true);
+  sockets.close!(ws, 1006, "");
+});

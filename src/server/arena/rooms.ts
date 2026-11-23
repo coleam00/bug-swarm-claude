@@ -13,10 +13,14 @@
 // watches, every WATCH_SWEEP_MS `rehome` moves the watchers of people-less arenas to the busiest
 // arena with people, with a fresh welcome, so a start screen opened on an empty server shows the
 // people once they come.
+//
+// The people cap (#104): `full` is true once `maxPeople` play across every arena. The sockets
+// check it before a join and refuse the hello with `busy`, so past the cap no arena opens.
 import {
   DEMO_BOTS,
   DEMO_WARM_TICKS,
   FILL_TARGET,
+  MAX_PEOPLE,
   MAX_PLAYERS_PER_ARENA,
   MAX_WATCHERS,
   PROTOCOL_VERSION,
@@ -52,6 +56,8 @@ export type RoomsOptions = {
   fillTo?: number;
   /** Sockets that may watch at once, server-wide (default MAX_WATCHERS). */
   maxWatchers?: number;
+  /** People who may play at once, server-wide (default MAX_PEOPLE); `full` says when they do. */
+  maxPeople?: number;
   /** Bots a watched arena with no people runs (default DEMO_BOTS; 0: none). */
   demoTo?: number;
   /** Each new arena's first tick (default 0; BUG_SWARM_START_WAVE, a debug aid, #85). */
@@ -112,6 +118,7 @@ export class Rooms {
   private readonly saveLife: (r: LifeRecord) => void;
   private readonly fillTo: number;
   private readonly maxWatchers: number;
+  private readonly maxPeople: number;
   private readonly demoTo: number;
   private readonly startTick: number;
   private readonly memory: () => { rssMb: number; heapUsedMb: number };
@@ -129,6 +136,7 @@ export class Rooms {
     this.saveLife = opts.saveLife ?? (() => {});
     this.fillTo = opts.fillTo ?? FILL_TARGET;
     this.maxWatchers = opts.maxWatchers ?? MAX_WATCHERS;
+    this.maxPeople = opts.maxPeople ?? MAX_PEOPLE;
     this.demoTo = opts.demoTo ?? DEMO_BOTS;
     this.startTick = opts.startTick ?? 0;
     this.memory = opts.memory ?? processMemory;
@@ -148,7 +156,17 @@ export class Rooms {
     };
   }
 
-  /** Puts a player in an arena; everyone already there gets a join event. */
+  /**
+   * True when `maxPeople` play across every arena: the caller refuses the join (`busy`) instead of
+   * calling `join`. Read per hello, never in the tick.
+   */
+  get full(): boolean {
+    let people = 0;
+    for (const { room } of this.rooms.values()) people += room.size;
+    return people >= this.maxPeople;
+  }
+
+  /** Puts a player in an arena; everyone already there gets a join event. Check `full` first. */
   join(name: string, team: Team, info: MemberInfo, send: Send): Joined {
     const room = this.pick();
     const player = room.add(name, team, info, send);

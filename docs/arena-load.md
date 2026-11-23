@@ -4,14 +4,14 @@ What one server holds with the full game in play, measured. The budgets are in `
 
 ## How to run it
 
-1. Build and start a production server on a scratch data directory (the bots' lives are saved like anyone's):
+1. Build and start a production server on a scratch data directory (the bots' lives are saved like anyone's), with the load allowance: every bot connects from this machine's one address, and without `BUG_SWARM_ALLOW_LOAD=1` the server refuses each one past the 12th with `limit` (#104; the run then fails and says so). Never set it on Railway.
 
    ```sh
    bun run build
-   DATA_DIR=/tmp/bugswarm-load PORT=3918 bun src/server/main.ts
+   DATA_DIR=/tmp/bugswarm-load PORT=3918 BUG_SWARM_ALLOW_LOAD=1 bun src/server/main.ts
    ```
 
-   On Windows PowerShell: `$env:DATA_DIR = "C:\temp\bugswarm-load"; $env:PORT = "3918"; bun src/server/main.ts`.
+   On Windows PowerShell: `$env:DATA_DIR = "C:\temp\bugswarm-load"; $env:PORT = "3918"; $env:BUG_SWARM_ALLOW_LOAD = "1"; bun src/server/main.ts`.
 2. In another shell:
 
    ```sh
