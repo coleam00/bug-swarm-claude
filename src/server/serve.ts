@@ -2,7 +2,7 @@
 // WebSocket, on one Bun server. main.ts calls it with the environment; the arena's integration
 // test calls it on port 0 and stops it before it ends.
 import type { Database } from "bun:sqlite";
-import { DT, JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, WAVE_S } from "../shared/arena/constants";
+import { DT, JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, MAX_WATCHERS_PER_ADDRESS, WAVE_S } from "../shared/arena/constants";
 import { adminTokenFrom, clientKey } from "./admin";
 import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
 import { hiddenKeys } from "./db";
@@ -233,7 +233,7 @@ export function startServer(opts: ServerOptions): RunningServer {
   servePages(app, opts.distDir);
 
   // The per-address limits (#104), off only with the load-test allowance.
-  const gate = opts.allowLoad ? createOpenGate() : createAddressGate({ maxSockets: MAX_SOCKETS_PER_ADDRESS, joinsPerMinute: JOINS_PER_ADDRESS_PER_MINUTE });
+  const gate = opts.allowLoad ? createOpenGate() : createAddressGate({ maxSockets: MAX_SOCKETS_PER_ADDRESS, maxWatchers: MAX_WATCHERS_PER_ADDRESS, joinsPerMinute: JOINS_PER_ADDRESS_PER_MINUTE });
   const sockets = createArenaSockets(rooms, { liveness: opts.liveness, isHidden: hiddenNames(opts.db), sweepMs: opts.hideSweepMs, gate, log: opts.log });
   const hops = opts.proxyHops ?? 0;
   const server = Bun.serve<SocketData>({

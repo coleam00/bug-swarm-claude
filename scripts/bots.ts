@@ -6,27 +6,30 @@
 // second, lives ended and their median score, errors (error messages, failed connects, unexpected
 // closes) and the server's tick p50/p95 and memory from /api/arena/stats, closes every socket.
 // `--watchers <n>` (#79) then opens n start-screen watch sockets, which send nothing, and prints
-// the KB/s each receives (mean and max); `--count 0 --watchers <n>` measures an empty server's demo
-// arena. Every bot life is saved like a person's: point it only at a server with a scratch
-// DATA_DIR. Not part of `bun run check`: it needs a running server. bots-lib.ts is tested.
+// the KB/s each receives over the second half (mean, p95 and max), gated like a bot's (#119), also
+// with `--count 0 --watchers <n>`, which measures an empty server's demo arena. Every bot life is
+// saved like a person's: point it only at a server with a scratch DATA_DIR. Not part of `bun run check`: it needs a running server. bots-lib.ts is tested.
 //
 // The budget gate (#89): each bot decodes its snapshots as a browser does (view.ts; one it cannot
 // decode after its first keyframe is a `desync` error) and counts the payload bytes it receives
 // after its welcome (WebSocket framing, 2 to 4 B a frame, is not counted; 1 KB = 1000 B). Its KB/s
 // is taken over the second half of the run, when the bugs have ramped up to the arena's cap. The
 // run prints a `budget:` line per gate and exits 1 on any miss: an error, a bot that never joined,
-// stats unreachable, tick p95 not under 10 ms, or any bot over 40 KB/s (bots-lib.ts budgetVerdict).
+// stats unreachable, tick p95 not under 10 ms, any bot over 40 KB/s, or with --watchers a watcher
+// never welcomed or over 40 KB/s (bots-lib.ts budgetVerdict).
 // Bots see only what their view holds, as a player does, so what they observe is no longer
 // `bun run skill`'s perfect information (the skill gates run on the simulation and are unaffected).
 // Every bot connects from this machine's one address, so the server must run with
 // BUG_SWARM_ALLOW_LOAD=1 (#104, load testing only): without it every socket past
-// MAX_SOCKETS_PER_ADDRESS gets `error limit`, which stays an error (the gate fails) and prints a hint once.
+// MAX_SOCKETS_PER_ADDRESS gets `error limit`, and every watcher past MAX_WATCHERS_PER_ADDRESS `error full`;
+// each stays an error (the gate fails) and prints a hint once (bots-lib.ts refusalHint).
 import { PROTOCOL_VERSION, TICK_MS } from "../src/shared/arena/constants";
 import { POLICIES, createMemory, type PolicyInput, type PolicyMemory } from "../src/shared/arena/policies";
 import { createRng } from "../src/shared/arena/rng";
-import { ERROR, ERROR_LIMIT, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
+import { ERROR, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import type { ArenaStats } from "../src/server/arena/rooms";
+import type { ErrorCode } from "../src/shared/arena/protocol";
 import {
   USAGE,
   botName,
@@ -34,6 +37,7 @@ import {
   createObservationTracker,
   createTally,
   createWander,
+  budgetInput,
   budgetVerdict,
   countBytes,
   exitCode,
@@ -42,6 +46,7 @@ import {
   rateStats,
   secondHalfKbps,
   parseBotsArgs,
+  refusalHint,
   randomPlayerId,
   stepWander,
   wsUrl,
@@ -86,12 +91,13 @@ const started = performance.now();
 /** The second half of the run starts here; bandwidth is measured from it. */
 const midAt = started + (args.seconds * 1000) / 2;
 
-let hinted = false;
-/** Says once why bots are refused with `limit`: the server runs with its per-address limits on. */
-function limitHint(): void {
-  if (hinted) return;
-  hinted = true;
-  console.error("bots: refused by the per-address limit: start the server with BUG_SWARM_ALLOW_LOAD=1 (load testing only)");
+const hinted = new Set<string>();
+/** Says once per code why sockets are refused (`limit`, `full`): the per-address limits are on (refusalHint). */
+function refusalHintOnce(code: ErrorCode): void {
+  const hint = refusalHint(code);
+  if (hint === null || hinted.has(code)) return;
+  hinted.add(code);
+  console.error(hint);
 }
 
 function open(i: number): void {
@@ -147,7 +153,7 @@ function open(i: number): void {
       tally.lives.push(m.score ?? 0);
     } else if (m.t === ERROR) {
       tally.errors.push(`error ${m.code}`);
-      if (m.code === ERROR_LIMIT) limitHint();
+      refusalHintOnce(m.code);
     }
   });
   ws.addEventListener("close", (e) => {
@@ -156,13 +162,14 @@ function open(i: number): void {
   });
 }
 
-/** The watch sockets: each counts the bytes it receives from its first welcome. */
-const watchers: { ws: WebSocket; closing: boolean; closed: Promise<void>; bytes: number; since: number | null }[] = [];
+/** The watch sockets: each counts the bytes it receives after its first welcome, in halves as a bot does. */
+const watchers: { ws: WebSocket; closing: boolean; closed: Promise<void>; bytes: BotBytes }[] = [];
 
 function openWatcher(): void {
   const ws = new WebSocket(url);
   let resolveClosed: () => void = () => {};
-  const w = { ws, closing: false, closed: new Promise<void>((r) => (resolveClosed = r)), bytes: 0, since: null as number | null };
+  const bytes: BotBytes = { first: 0, second: 0, welcomedAt: null };
+  const w = { ws, closing: false, closed: new Promise<void>((r) => (resolveClosed = r)), bytes };
   watchers.push(w);
   let opened = false;
   ws.addEventListener("open", () => {
@@ -174,15 +181,16 @@ function openWatcher(): void {
     const raw = String(e.data);
     const wire = parseServerMessage(raw);
     const m = wire && read(wire);
-    if (m?.t === WELCOME && w.since === null) {
-      w.since = performance.now();
+    if (m?.t === WELCOME && w.bytes.welcomedAt === null) {
+      w.bytes.welcomedAt = performance.now();
+      tally.watching++;
       console.log(`watcher ${watchers.indexOf(w) + 1} watching arena ${m.arena}`);
       return;
     }
-    if (w.since !== null) w.bytes += utf8Bytes(raw);
+    countBytes(w.bytes, utf8Bytes(raw), performance.now(), midAt);
     if (m?.t === ERROR) {
       tally.errors.push(`watcher error ${m.code}`);
-      if (m.code === ERROR_LIMIT) limitHint();
+      refusalHintOnce(m.code);
     }
   });
   ws.addEventListener("close", (e) => {
@@ -240,7 +248,10 @@ for (const bot of bots) {
   const f = firstHalfKbps(bot.bytes, midAt);
   if (f !== null) tally.kbpsFirst.push(f);
 }
-for (const w of watchers) if (w.since !== null) tally.watchers.push({ bytes: w.bytes, seconds: (ended - w.since) / 1000 });
+for (const w of watchers) {
+  const r = secondHalfKbps(w.bytes, midAt, ended);
+  if (r !== null) tally.watcherKbps.push(r);
+}
 for (const bot of bots) {
   bot.closing = true;
   bot.ws.close();
@@ -252,5 +263,5 @@ for (const w of watchers) {
 await Promise.race([Promise.all([...bots.map((b) => b.closed), ...watchers.map((w) => w.closed)]), Bun.sleep(5000)]);
 
 for (const line of formatSummary(args, tally, seconds, tick)) console.log(line);
-const misses = budgetVerdict({ errors: tally.errors.length, joins: tally.joins, count: args.count, tick, kbps: rateStats(tally.kbps) });
+const misses = budgetVerdict(budgetInput(args, tally, tick));
 process.exit(exitCode(misses));

@@ -2,9 +2,9 @@
 // policy bot sees (from snapshots), and the summary. No network here, so `bun test` covers it;
 // `bots.ts` opens the sockets.
 import { bugDef } from "../src/shared/arena/bugs/registry";
-import { BUG_KINDS, DT, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
+import { BUG_KINDS, DT, MAX_SOCKETS_PER_ADDRESS, MAX_WATCHERS, MAX_WATCHERS_PER_ADDRESS, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import { createObservation, setObservedBug, setObservedPickup, type Observation } from "../src/shared/arena/policies";
-import type { Snapshot } from "../src/shared/arena/protocol";
+import { ERROR_FULL, ERROR_LIMIT, type ErrorCode, type Snapshot } from "../src/shared/arena/protocol";
 import { nextRandom, type Rng } from "../src/shared/arena/rng";
 import { TEAMS, type Team } from "../src/server/rules";
 
@@ -16,7 +16,7 @@ export type BotPolicy = (typeof BOT_POLICIES)[number];
 /** Bots aim and fire with the aimer unless told otherwise (#55). */
 export const DEFAULT_BOT_POLICY: BotPolicy = "aimer";
 
-/** `watchers`: start-screen watch sockets opened after the bots join (#79), to measure what each costs. */
+/** `watchers`: start-screen watch sockets opened after the bots join (#79), to measure and gate (#119) what each costs. */
 export type BotsArgs = { url: string; count: number; seconds: number; policy: BotPolicy; watchers: number };
 
 const INT_FLAGS = {
@@ -187,6 +187,21 @@ export function createObservationTracker(): ObservationTracker {
   };
 }
 
+/**
+ * What to tell the operator, once, when the server refuses a bot or a watcher with `code`, or null.
+ * Every socket comes from this machine's one address, so the per-address limits (#104, #119) refuse
+ * them unless the server runs with BUG_SWARM_ALLOW_LOAD=1: `limit` past MAX_SOCKETS_PER_ADDRESS
+ * sockets, `full` past MAX_WATCHERS_PER_ADDRESS watchers (refused watchers close at once, so the
+ * socket limit is never reached). `full` is also the server-wide MAX_WATCHERS.
+ */
+export function refusalHint(code: ErrorCode): string | null {
+  if (code === ERROR_LIMIT) return `bots: refused by the per-address limit (${MAX_SOCKETS_PER_ADDRESS} sockets): start the server with BUG_SWARM_ALLOW_LOAD=1 (load testing only)`;
+  if (code === ERROR_FULL) {
+    return `bots: watchers refused with \`full\`: past the per-address watcher limit (${MAX_WATCHERS_PER_ADDRESS}), start the server with BUG_SWARM_ALLOW_LOAD=1 (load testing only); with it on, the server already has ${MAX_WATCHERS} watching`;
+  }
+  return null;
+}
+
 /** The stream-scale budgets `bun run bots` holds a run to (#89, architecture.md "Load"). */
 export const TICK_P95_BUDGET_MS = 10;
 export const KBPS_PER_PLAYER_BUDGET = 40;
@@ -235,15 +250,36 @@ export function rateStats(rates: readonly number[]): Rates | null {
   return { mean: v.reduce((a, b) => a + b, 0) / v.length, p95: v[Math.min(v.length - 1, Math.ceil(v.length * 0.95) - 1)]!, max: v[v.length - 1]!, count: v.length };
 }
 
+/** What budgetVerdict judges: the run's errors, joins, tick and bandwidth, the players' and (#119) the watchers'. */
+export type BudgetInput = {
+  errors: number;
+  joins: number;
+  count: number;
+  tick: TickStats;
+  kbps: Rates | null;
+  /** Watchers asked for (--watchers), and how many were welcomed. */
+  watchers: number;
+  watching: number;
+  /** Each watcher's KB/s over the second half (secondHalfKbps), as for the bots. */
+  watcherKbps: Rates | null;
+};
+
 /**
  * Which budgets a run missed, as lines to print (empty: it passed). Errors and a stats endpoint
- * that never answered always count; with players (`count` above 0) every bot must have joined,
- * the tick p95 must be under TICK_P95_BUDGET_MS and no bot may receive over KBPS_PER_PLAYER_BUDGET.
+ * that never answered always count. With watchers (#119), even with no players, every watcher must
+ * have been welcomed and none may receive over KBPS_PER_PLAYER_BUDGET. With players (`count` above
+ * 0) every bot must have joined, the tick p95 must be under TICK_P95_BUDGET_MS and no bot may
+ * receive over KBPS_PER_PLAYER_BUDGET.
  */
-export function budgetVerdict(v: { errors: number; joins: number; count: number; tick: TickStats; kbps: Rates | null }): string[] {
+export function budgetVerdict(v: BudgetInput): string[] {
   const misses: string[] = [];
   if (v.errors > 0) misses.push(`${v.errors} error(s)`);
   if (!v.tick) misses.push("server stats unavailable");
+  if (v.watchers > 0) {
+    if (v.watching < v.watchers) misses.push(`only ${v.watching} of ${v.watchers} watchers watching`);
+    if (!v.watcherKbps) misses.push("no per-watcher bandwidth measured");
+    else if (v.watcherKbps.max > KBPS_PER_PLAYER_BUDGET) misses.push(`a watcher received ${v.watcherKbps.max.toFixed(1)} KB/s, over ${KBPS_PER_PLAYER_BUDGET} KB/s`);
+  }
   if (v.count === 0) return misses;
   if (v.joins < v.count) misses.push(`only ${v.joins} of ${v.count} bots joined`);
   const p95 = v.tick?.p95;
@@ -264,8 +300,10 @@ export type Tally = {
   errors: string[];
   /** The score of every life the server ended (its "over" events). */
   lives: number[];
-  /** Each watcher's bandwidth: UTF-8 bytes received, over the seconds since its welcome. */
-  watchers: { bytes: number; seconds: number }[];
+  /** Watchers welcomed. */
+  watching: number;
+  /** Each watcher's KB/s over the second half of the run (secondHalfKbps), gated like a bot's (#119). */
+  watcherKbps: number[];
   /** Each bot's KB/s over the second half of the run (secondHalfKbps), the gated one. */
   kbps: number[];
   /** Each bot's KB/s over the first half (firstHalfKbps), printed only: bugs are still ramping up. */
@@ -277,14 +315,7 @@ export type Tally = {
 };
 
 export function createTally(): Tally {
-  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watchers: [], kbps: [], kbpsFirst: [], memory: null, serverArenas: null };
-}
-
-/** Watchers' received KB/s (1 KB = 1000 bytes): mean and max, or null with none measured. */
-export function watcherRates(watchers: readonly { bytes: number; seconds: number }[]): { mean: number; max: number } | null {
-  const rates = watchers.filter((w) => w.seconds > 0).map((w) => w.bytes / 1000 / w.seconds);
-  if (rates.length === 0) return null;
-  return { mean: rates.reduce((a, b) => a + b, 0) / rates.length, max: Math.max(...rates) };
+  return { joins: 0, arenas: new Set(), messages: 0, errors: [], lives: [], watching: 0, watcherKbps: [], kbps: [], kbpsFirst: [], memory: null, serverArenas: null };
 }
 
 function median(values: number[]): number | null {
@@ -297,6 +328,30 @@ function median(values: number[]): number | null {
 export type TickStats = { p50: number | null; p95: number | null } | null;
 
 const ms = (v: number | null | undefined) => (v === null || v === undefined ? "-" : `${v.toFixed(2)} ms`);
+
+/**
+ * The per-watcher budget line's verdict, saying why on a miss: watchers refused (the bandwidth of
+ * those that watched is then within budget or not, but the run did not hold them all) or a rate over.
+ */
+function watcherBudget(args: BotsArgs, tally: Tally, r: Rates | null): string {
+  if (tally.watching < args.watchers) return `MISS (only ${tally.watching} of ${args.watchers} watching: the rest were refused, see the errors)`;
+  if (!r) return "MISS (no bandwidth measured)";
+  return r.max <= KBPS_PER_PLAYER_BUDGET ? "pass" : `MISS (max ${r.max.toFixed(1)} KB/s)`;
+}
+
+/** What budgetVerdict judges a run by, from its tally. */
+export function budgetInput(args: BotsArgs, tally: Tally, tick: TickStats): BudgetInput {
+  return {
+    errors: tally.errors.length,
+    joins: tally.joins,
+    count: args.count,
+    tick,
+    kbps: rateStats(tally.kbps),
+    watchers: args.watchers,
+    watching: tally.watching,
+    watcherKbps: rateStats(tally.watcherKbps),
+  };
+}
 
 /** The lines `bun run bots` prints at the end. */
 export function formatSummary(args: BotsArgs, tally: Tally, seconds: number, tick: TickStats): string[] {
@@ -323,15 +378,19 @@ export function formatSummary(args: BotsArgs, tally: Tally, seconds: number, tic
     const first = rateStats(tally.kbpsFirst);
     if (first) lines.push(`per player (first half, not gated: bugs still ramping up): mean ${first.mean.toFixed(1)} KB/s, max ${first.max.toFixed(1)} KB/s`);
   }
+  const watcherKbps = rateStats(tally.watcherKbps);
   if (args.watchers > 0) {
-    const r = watcherRates(tally.watchers);
-    lines.push(`watchers: ${tally.watchers.length} of ${args.watchers} watching, ${r ? `${r.mean.toFixed(1)} KB/s each on average, ${r.max.toFixed(1)} KB/s max` : "no bandwidth measured"}`);
+    const r = watcherKbps;
+    lines.push(
+      `watchers: ${tally.watching} of ${args.watchers} watching, ${r ? `second half, payload: mean ${r.mean.toFixed(1)} KB/s, p95 ${r.p95.toFixed(1)} KB/s, max ${r.max.toFixed(1)} KB/s` : "no bandwidth measured"}`,
+    );
   }
-  const misses = budgetVerdict({ errors: tally.errors.length, joins: tally.joins, count: args.count, tick, kbps });
+  const misses = budgetVerdict(budgetInput(args, tally, tick));
   if (args.count > 0) {
     lines.push(`budget: tick p95 under ${TICK_P95_BUDGET_MS} ms: ${tick?.p95 !== null && tick?.p95 !== undefined && tick.p95 < TICK_P95_BUDGET_MS ? "pass" : "MISS"}`);
     lines.push(`budget: at most ${KBPS_PER_PLAYER_BUDGET} KB/s per player: ${kbps && kbps.max <= KBPS_PER_PLAYER_BUDGET ? "pass" : "MISS"}`);
   }
+  if (args.watchers > 0) lines.push(`budget: at most ${KBPS_PER_PLAYER_BUDGET} KB/s per watcher: ${watcherBudget(args, tally, watcherKbps)}`);
   lines.push(`budget: 0 errors: ${tally.errors.length === 0 ? "pass" : "MISS"}`);
   lines.push(misses.length === 0 ? "verdict: pass" : `verdict: MISS (${misses.join("; ")})`);
   return lines;
