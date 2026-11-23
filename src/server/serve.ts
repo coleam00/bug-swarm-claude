@@ -3,8 +3,10 @@
 // test calls it on port 0 and stops it before it ends.
 import type { Database } from "bun:sqlite";
 import { DT, WAVE_S } from "../shared/arena/constants";
+import { adminTokenFrom, clientKey } from "./admin";
 import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
 import { hiddenKeys } from "./db";
+import { dataDirFrom, listenConfig } from "./listen";
 import { mountArenaRoutes } from "./arena/http";
 import { createLifeSaver } from "./arena/lives";
 import { Rooms } from "./arena/rooms";
@@ -33,6 +35,8 @@ export type ServerOptions = {
   hideSweepMs?: number;
   /** Each new arena's first tick; 0 by default (startTickFrom: BUG_SWARM_START_WAVE, a debug aid, #85). */
   arenaStartTick?: number;
+  /** The owner's admin token (admin.ts adminTokenFrom); null or absent keeps /api/admin/* off. */
+  adminToken?: string | null;
 };
 
 export type RunningServer = {
@@ -130,6 +134,33 @@ export function buildIdFrom(env: Record<string, string | undefined>, startedAt: 
 }
 
 /**
+ * Everything main.ts takes from the environment, as one tested decision: the server's options
+ * (all but the database), where the database lives, and the lines to log. In production a missing
+ * DATA_DIR is an error and nothing starts (#110). ADMIN_TOKEN reaches the server here; the lines
+ * never hold it. main.ts only applies this.
+ */
+export function startupFrom(
+  env: Record<string, string | undefined>,
+  startedAt: number,
+): { error: string } | { dataDir: string; options: Omit<ServerOptions, "db">; lines: string[] } {
+  const dir = dataDirFrom(env);
+  if ("error" in dir) return dir;
+  const { port, hostname } = listenConfig(env);
+  const buildId = buildIdFrom(env, startedAt);
+  // BUG_SWARM_START_WAVE=<n> (a debug aid for evidence, off by default): new arenas open 10 s before wave n.
+  const arenaStartTick = startTickFrom(env);
+  // ADMIN_TOKEN (optional) turns on the owner's /api/admin/* routes (admin.ts).
+  const admin = adminTokenFrom(env);
+  const lines = [`App on http://${hostname}:${port} (build ${buildId}, data in ${dir.dataDir}, ${admin.line})`];
+  if (arenaStartTick > 0) lines.push(`Arenas open at tick ${arenaStartTick} (BUG_SWARM_START_WAVE=${env.BUG_SWARM_START_WAVE}): debug only`);
+  return {
+    dataDir: dir.dataDir,
+    options: { port, hostname, distDir: "dist", buildId, arenaStartTick, adminToken: admin.token },
+    lines,
+  };
+}
+
+/**
  * Is `name` hidden from the boards, as the ranking decides it: its key in the hidden names
  * (`bun run hide`), or refused by the word lists now. The hidden names are read at most once per
  * TOP_CACHE_MS, so a hide reaches a live arena within that plus one sweep (3 s at most). A failed
@@ -157,7 +188,13 @@ export function startServer(opts: ServerOptions): RunningServer {
   const lives = createLifeSaver(opts.db);
   const rooms = new Rooms({ buildId: opts.buildId, saveLife: lives.save, fillTo: opts.arenaFill, maxWatchers: opts.arenaWatchers, demoTo: opts.arenaDemo, startTick: opts.arenaStartTick });
   // The board reads the open arenas live from the rooms.
-  const app = createApp(opts.db, { ...opts.appOptions, live: () => rooms.live() });
+  // The admin limit keys on the proxy headers, else the peer (read lazily: `server` is made below).
+  const app = createApp(opts.db, {
+    adminToken: opts.adminToken,
+    clientKey: (c) => clientKey((name) => c.req.header(name), () => server.requestIP(c.req.raw)?.address),
+    ...opts.appOptions,
+    live: () => rooms.live(),
+  });
   // Before servePages: its catch-all answers every path it reaches.
   mountArenaRoutes(app, rooms);
   // The stream board, the arena page, the game's page and the built files, in that order (ui.ts).
