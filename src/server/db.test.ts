@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { hideCommand, resetCommand, statsCommand } from "../../scripts/admin-lib";
 import {
@@ -313,5 +313,33 @@ describe("rankOf", () => {
     const lower = topFor(byName, "p-c2", "churn", 30, rankOf(byName, "p-c2", "churn", 30, false));
     expect(lower.top).toEqual([{ name: "Ada", score: 100 }, { name: "Churn", score: 80 }, { name: "Bob", score: 50 }]);
     expect(lower.me.row).toBeNull();
+  });
+});
+
+describe("openDb", () => {
+  // Bun on Windows throws EEXIST from a recursive mkdir of an existing folder given as a
+  // relative path that starts with `..` (#113), so a scratch DATA_DIR such as `../scratch`
+  // failed to open. The folder is made inside the checkout and reached as
+  // `../<checkout>/<folder>`: the temp dir can sit on another drive (CI's Windows runner),
+  // where no relative path reaches it.
+  test("opens a relative path with .. to an existing folder, twice", () => {
+    const cwd = process.cwd();
+    const base = mkdtempSync(join(cwd, ".db-dotdot-"));
+    try {
+      mkdirSync(join(base, "sub"));
+      const rel = join("..", basename(cwd), relative(cwd, base), "sub", "app.db");
+      // Guard: a path that stops starting with `..` would stop testing the bug.
+      expect(rel.startsWith("..")).toBe(true);
+      for (let i = 0; i < 2; i++) {
+        const opened = openDb(rel);
+        try {
+          expect(opened.query("SELECT count(*) AS n FROM events").get()).toEqual({ n: 0 });
+        } finally {
+          opened.close();
+        }
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

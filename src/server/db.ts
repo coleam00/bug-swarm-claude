@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { TEAMS, isShownName, isTeam, nameKey, type Team } from "./rules";
 
 // Every event the app records, named once. The server writes them and `bun run stats` reads them,
@@ -31,8 +31,11 @@ const EVENT_COLUMNS: [name: string, type: string][] = [
 
 // One SQLite file holds the app's data. Tables are created here.
 export function openDb(path: string): Database {
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-  const db = new Database(path, { create: true });
+  // Resolve first: Bun on Windows throws EEXIST from a recursive mkdir of an existing folder
+  // given as a relative path with `..` (#113).
+  const file = path === ":memory:" ? path : resolve(path);
+  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
+  const db = new Database(file, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   // `bun run hide` writes from a second process while the server runs: wait, don't fail.
   db.exec("PRAGMA busy_timeout = 5000;");
