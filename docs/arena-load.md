@@ -18,14 +18,15 @@ What one server holds with the full game in play, measured. The budgets are in `
    bun run bots -- --url http://127.0.0.1:3918 --count 200 --seconds 120 --policy aimer
    ```
 
-   Add `--watchers 2` to also measure what a start-screen watcher receives.
+   Add `--watchers 2` to also measure what a start-screen watcher receives, or `--watchers 300` for a stream's worth of start screens (#119, below).
 
 The script prints the arenas, errors, the server's tick p50/p95 and memory (from `GET /api/arena/stats`), per-player KB/s, a `budget:` line per gate and a verdict. It exits 1 on any miss:
 - an error (an error message, a failed connect, an unexpected close, or a snapshot a bot could not decode after its first keyframe: `desync`);
 - fewer joins than `--count`;
 - the stats endpoint unreachable;
 - tick p95 not under 10 ms;
-- any one bot over 40 KB/s.
+- any one bot over 40 KB/s;
+- with `--watchers`, fewer watchers welcomed than asked for, or any one watcher over 40 KB/s over the second half (#119; also with `--count 0`).
 
 **How the bandwidth gate reads.** Each bot counts the payload bytes of every message it receives after its welcome (1 KB = 1000 B). WebSocket framing is not counted: 2 to 4 bytes a frame, about 80 B/s at 20 snapshots a second. A bot's rate is taken over the **second half** of the run. The first half under-reads, because each arena's bugs are still ramping up toward the 150 cap. In the final run below, the first half averaged 11.5 KB/s per bot against 23.3 in the second; the script prints the first half too, ungated. The gate is on the **maximum** over all bots, not the mean.
 
@@ -59,6 +60,19 @@ Run 2 and the post-merge run added `--watchers 2`. The post-merge run is on main
 - 44 keyframes averaging 2877 B. Per keyframe: bug rows 1750 B, players 450, `me` 149, minimap far bugs `m` 100.
 
 The aimer bots cluster, so each one sees all 20 robots and most of its arena's bugs. That makes this close to the worst case for culling: it is integer position deltas that get under budget, not culling. `src/shared/arena/view.test.ts` holds a delta under 2000 B with 150 bugs of every kind and 20 players all in view, and a keyframe under 4500 B.
+
+## 300 watchers (#119)
+
+Start screens watch live play on one shared stream per arena (#89): one delta string a tick for every watcher, a keyframe only for one that is new or dropped a send. #119 raised the server-wide cap from 40 to 320 and measured it, same machine, production build, scratch `DATA_DIR`, a fresh server per run:
+
+| run | tick p50 / p95 | players, max KB/s | watchers, KB/s (second half) | errors | verdict |
+|---|---|---|---|---|---|
+| `--count 200 --watchers 300 --seconds 180` | 0.81 / 3.70 ms | 28.3 | 23.7 | 0 | pass |
+| `--count 18 --watchers 300 --seconds 160` (one arena, all 300 watching it) | 3.89 / 5.70 ms | 27.1 | 26.2 | 0 | pass |
+| `--count 18 --watchers 300 --seconds 120` (the screenshot run) | 3.96 / 5.79 ms | 26.8 | 25.5 | 0 | pass |
+| `--count 0 --watchers 300 --seconds 120`, 4 aimers joining 20 s in | 3.02 / 4.37 ms | 8.5 | 7.3 | 0 | pass |
+
+The 200-player run's tick figures pool all 10 arenas, so they dilute the watched one: quote the one-arena run, where 300 sends cost about 3.3 ms a tick (about 11 us each). About 400 watchers in one arena would near the 10 ms budget. In the last run every watcher was moved from the demo arena to the people arena by one rehome sweep and the demo closed.
 
 ## Two players in browsers while the 200 bots run
 
