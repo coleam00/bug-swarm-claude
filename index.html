@@ -73,10 +73,11 @@
       .start-alert { margin: 0; color: #fda4af; font-size: 20px; font-weight: 600; }
       /* The arena's canvas, full screen. It takes every touch itself (the twin sticks). */
       .arena { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-      /* "Connecting..." / "Reconnecting...": shown only while the socket is down; the arena rejoins on its own. */
+      /* "Connecting..." / "Reconnecting...", or the server's limits (#104): shown only while the socket is down; the
+         arena rejoins on its own. The longer limit messages wrap on a narrow phone instead of running off it. */
       .status { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); margin: 0; padding: 8px 16px; border-radius: 8px;
         background: rgba(5, 7, 13, 0.85); border: 1px solid rgba(34, 211, 238, 0.4); font: bold 16px system-ui, sans-serif;
-        pointer-events: none; white-space: nowrap; }
+        pointer-events: none; width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; text-align: center; }
       /* The first-life hint (hint.ts): fades in, holds, fades out over HINT_MS (5 s), at the bottom.
          Touches pass through it, so the sticks under it still work. */
       .hint { position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 16px); transform: translateX(-50%); pointer-events: none;
