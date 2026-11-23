@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { hideCommand, resetCommand, statsCommand } from "../../scripts/admin-lib";
 import {
@@ -11,6 +11,7 @@ import {
   openDb,
   rankOf,
   ranking,
+  topFor,
   recordRunEnded,
   recordRunStarted,
   resetData,
@@ -257,8 +258,28 @@ test("a tie is decided by the first finish with points, so a fresh rank and the 
   run("p-x", "2026-11-28T15:00:02.000Z", { score: 50 }); // ties Ada, after her
   const fresh = ranking(db);
   expect(fresh.map((e) => e.playerId)).toEqual(["p-a", "p-x"]);
-  expect(rankOf(cached, "p-x", 50, false).rank).toBe(2);
-  expect(rankOf(fresh, "p-x", 50, false).rank).toBe(2);
+  expect(rankOf(cached, "p-x", "P-X", 50, false).rank).toBe(2);
+  expect(rankOf(fresh, "p-x", "P-X", 50, false).rank).toBe(2);
+});
+
+test("ten lives under one name, in any case and by different players, take one row: the name's best life", () => {
+  const spellings = ["Churn", "churn", "CHURN"];
+  const life = (id: string, name: string, score: number, second: number) => {
+    const at = new Date(Date.UTC(2026, 10, 28, 15, 0, second));
+    upsertPlayer(db, id, name, TEAMS[0], at);
+    recordRunStarted(db, `run-${id}`, id, at, TEAMS[0]);
+    recordRunEnded(db, { runId: `run-${id}`, playerId: id, score, squashes: 0, seconds: 60, touch: false, upgrades: [], team: TEAMS[0] }, at);
+  };
+  for (let i = 0; i < 10; i++) life(`p-churn-${i}`, spellings[i % 3]!, 1000 + i * 10, i);
+  life("p-ada", "Ada", 1050, 20);
+  life("p-lin", "Linus", 500, 21);
+  life("p-gra", "Grace", 2000, 22);
+  expect(topTen(db)).toEqual([
+    { name: "Grace", score: 2000 },
+    { name: "Churn", score: 1090 }, // p-churn-9, the best life, in its stored spelling
+    { name: "Ada", score: 1050 },
+    { name: "Linus", score: 500 },
+  ]);
 });
 
 describe("rankOf", () => {
@@ -266,21 +287,82 @@ describe("rankOf", () => {
   const entries = [entry("p-a", 100, "2026-11-28T15:00:01Z"), entry("p-b", 50, "2026-11-28T15:00:02Z"), entry("p-c", 50, "2026-11-28T15:00:03Z")];
 
   test("a player not in the ranking yet is placed after everyone tied with them, and counted", () => {
-    expect(rankOf(entries, "p-new", 50, false)).toEqual({ rank: 4, ranked: 4, next: { rank: 3, points: 1 }, row: null });
-    expect(rankOf(entries, "p-new", 101, false)).toEqual({ rank: 1, ranked: 4, next: null, row: null });
+    expect(rankOf(entries, "p-new", null, 50, false)).toEqual({ rank: 4, ranked: 4, next: { rank: 3, points: 1 }, row: null });
+    expect(rankOf(entries, "p-new", null, 101, false)).toEqual({ rank: 1, ranked: 4, next: null, row: null });
   });
 
   test("a fresh best above the stale cached one ranks by the fresh score; `row` stays the cached one", () => {
-    expect(rankOf(entries, "p-c", 60, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 2 });
+    expect(rankOf(entries, "p-c", "p-c", 60, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 2 });
   });
 
   test("a best of 0 is not ranked (#114)", () => {
-    expect(rankOf(entries, "p-x", 0, false)).toEqual({ rank: null, ranked: entries.length, next: null, row: null });
+    expect(rankOf(entries, "p-x", "p-x", 0, false)).toEqual({ rank: null, ranked: entries.length, next: null, row: null });
   });
 
   test("past the top 10 there is no row", () => {
     const many = Array.from({ length: 12 }, (_, i) => entry(`p-${String(i).padStart(2, "0")}`, 100 - i, "2026-11-28T15:00:00Z"));
-    expect(rankOf(many, "p-10", 90, false)).toEqual({ rank: 11, ranked: 12, next: { rank: 10, points: 2 }, row: null });
-    expect(rankOf(many, "p-09", 91, false).row).toBe(9);
+    expect(rankOf(many, "p-10", "p-10", 90, false)).toEqual({ rank: 11, ranked: 12, next: { rank: 10, points: 2 }, row: null });
+    expect(rankOf(many, "p-09", "p-09", 91, false).row).toBe(9);
+  });
+
+  // One row per name (#106): the ranking holds a name once, at its best life.
+  const named = (playerId: string, name: string, score: number, firstAt: string): RankEntry => ({ playerId, name, score, firstAt });
+  const byName = [
+    named("p-a", "Ada", 100, "2026-11-28T15:00:01Z"),
+    named("p-c1", "Churn", 80, "2026-11-28T15:00:02Z"),
+    named("p-b", "Bob", 50, "2026-11-28T15:00:03Z"),
+  ];
+
+  test("the holder of the name's row is ranked on it", () => {
+    expect(rankOf(byName, "p-c1", "Churn", 80, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 21 }, row: 1 });
+  });
+
+  test("another player with the name and a best that doesn't beat its row has no rank or row, only who holds it (owner ruling)", () => {
+    const held = { rank: null, ranked: 3, next: null, row: null, held: { name: "Churn", rank: 2, score: 80 } };
+    expect(rankOf(byName, "p-c2", "churn", 30, false)).toEqual(held);
+    expect(rankOf(byName, "p-c2", "churn", 80, false)).toEqual(held); // a tie stays with the holder, who finished first
+    expect(rankOf(byName, "p-c2", "churn", null, false)).toEqual(held);
+    expect(rankOf(byName, "p-c2", "churn", 30, true)).toEqual({ rank: null, ranked: 3, next: null, row: null });
+  });
+
+  test("another player with the name whose fresh best beats the snapshot ranks by the fresh best", () => {
+    expect(rankOf(byName, "p-c2", "CHURN", 120, false)).toEqual({ rank: 1, ranked: 3, next: null, row: 1 });
+  });
+
+  test("topFor keeps one row per name: a fresh best replaces the name's row, a lower one leaves the rows as read (#105, #106)", () => {
+    const placed = topFor(byName, "p-c2", "CHURN", 120, rankOf(byName, "p-c2", "CHURN", 120, false));
+    expect(placed.top).toEqual([{ name: "CHURN", score: 120 }, { name: "Ada", score: 100 }, { name: "Bob", score: 50 }]);
+    expect(placed.me.row).toBe(0);
+    const lower = topFor(byName, "p-c2", "churn", 30, rankOf(byName, "p-c2", "churn", 30, false));
+    expect(lower.top).toEqual([{ name: "Ada", score: 100 }, { name: "Churn", score: 80 }, { name: "Bob", score: 50 }]);
+    expect(lower.me.row).toBeNull();
+  });
+});
+
+describe("openDb", () => {
+  // Bun on Windows throws EEXIST from a recursive mkdir of an existing folder given as a
+  // relative path that starts with `..` (#113), so a scratch DATA_DIR such as `../scratch`
+  // failed to open. The folder is made inside the checkout and reached as
+  // `../<checkout>/<folder>`: the temp dir can sit on another drive (CI's Windows runner),
+  // where no relative path reaches it.
+  test("opens a relative path with .. to an existing folder, twice", () => {
+    const cwd = process.cwd();
+    const base = mkdtempSync(join(cwd, ".db-dotdot-"));
+    try {
+      mkdirSync(join(base, "sub"));
+      const rel = join("..", basename(cwd), relative(cwd, base), "sub", "app.db");
+      // Guard: a path that stops starting with `..` would stop testing the bug.
+      expect(rel.startsWith("..")).toBe(true);
+      for (let i = 0; i < 2; i++) {
+        const opened = openDb(rel);
+        try {
+          expect(opened.query("SELECT count(*) AS n FROM events").get()).toEqual({ n: 0 });
+        } finally {
+          opened.close();
+        }
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

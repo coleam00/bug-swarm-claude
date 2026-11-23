@@ -55,7 +55,10 @@ test("fetchTop with a player id asks for their rank; a malformed rank is dropped
   const none = { rank: null, ranked: 9, next: null, row: null };
   respond = () => json(200, { top, me: none });
   expect(await fetchTop("player-0001")).toEqual({ top, me: none });
-  for (const bad of [undefined, null, "2", { ...me, rank: "2" }, { ...me, next: { rank: 1 } }, { ...me, row: -1 }, { ...me, ranked: undefined }]) {
+  const held = { ...none, held: { name: "Churn", rank: 1, score: 1900 } };
+  respond = () => json(200, { top, me: held });
+  expect(await fetchTop("player-0001")).toEqual({ top, me: held });
+  for (const bad of [undefined, null, "2", { ...me, rank: "2" }, { ...none, held: { name: "Churn", rank: 1 } }, { ...none, held: null }, { ...me, next: { rank: 1 } }, { ...me, row: -1 }, { ...me, ranked: undefined }]) {
     respond = () => json(200, { top, me: bad });
     expect(await fetchTop("player-0001")).toEqual({ top, me: null });
   }

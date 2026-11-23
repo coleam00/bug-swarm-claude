@@ -17,7 +17,14 @@ async function call(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /** Where the player stands, as the server ranks them (src/server/db.ts rankOf). */
-export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
+export type Me = {
+  rank: number | null;
+  ranked: number;
+  next: { rank: number; points: number } | null;
+  row: number | null;
+  /** Only when another player's life holds the name's row: that row's name, rank and score. */
+  held?: { name: string; rank: number; score: number };
+};
 
 /**
  * The top 10, and with a player id where that player stands (`me`). A malformed `me` is
@@ -43,13 +50,21 @@ const count = (v: unknown): v is number => typeof v === "number" && Number.isInt
 
 function parseMe(v: unknown): Me | null {
   if (typeof v !== "object" || v === null) return null;
-  const { rank, ranked, next, row } = v as Record<string, unknown>;
+  const { rank, ranked, next, row, held } = v as Record<string, unknown>;
   if (!(rank === null || count(rank)) || !count(ranked) || !(row === null || count(row))) return null;
-  if (next === null) return { rank, ranked, next: null, row };
-  if (typeof next !== "object") return null;
-  const n = next as Record<string, unknown>;
-  if (!count(n.rank) || !count(n.points)) return null;
-  return { rank, ranked, next: { rank: n.rank, points: n.points }, row };
+  let me: Me;
+  if (next === null) me = { rank, ranked, next: null, row };
+  else {
+    if (typeof next !== "object") return null;
+    const n = next as Record<string, unknown>;
+    if (!count(n.rank) || !count(n.points)) return null;
+    me = { rank, ranked, next: { rank: n.rank, points: n.points }, row };
+  }
+  if (held === undefined) return me;
+  if (typeof held !== "object" || held === null) return null;
+  const h = held as Record<string, unknown>;
+  if (typeof h.name !== "string" || !count(h.rank) || !count(h.score)) return null;
+  return { ...me, held: { name: h.name, rank: h.rank, score: h.score } };
 }
 
 /** Each team's total, as the server counts it. */

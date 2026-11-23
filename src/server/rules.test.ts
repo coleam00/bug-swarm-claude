@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FILL_BOT_NAMES } from "./arena/fill";
-import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
+import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES, RESERVED_WORDS } from "./blocked-words";
 import {
   TEAMS,
   checkName,
@@ -164,7 +164,31 @@ describe("name rules", () => {
     for (const n of ["colemedin", "Cole Medin", "cole_medin", "c0le-medin", "Dynamous", "ARCHON", "admin", "Addmin", "moderator", "admin99", "Cole Medin 2", "admin1", "Archon2", "Moderator2", "Dynamous 1", "1 Admin", "2 Archon", "007Archon", "1Moderator", "1dynamous", "69 Cole Medin"]) {
       expect(checkName(n)).toEqual(reserved);
     }
-    for (const n of ["Archonaut", "admins team", "Cole", "Medina", "Moderato", "Admiral"]) expect(checkName(n).ok).toBe(true);
+    // The host and the platforms (#106), in the spellings the profanity check reads through.
+    for (const n of ["cole", "Cole", "C0le", "c o le", "host", "Host 2", "H0st", "streamer", "Stream_er", "mod", "M0d", "MOD", "moderator", "admin", "official", "Official", "0fficial", "youtube", "YouTube", "You Tube", "you-tube", "twitch", "Tw1tch", "TWITCH 7"]) {
+      expect(checkName(n)).toEqual(reserved);
+    }
+    for (const n of ["Archonaut", "admins team", "Medina", "Moderato", "Admiral", "Nicole", "Coleman", "Cole Porter", "Hosta", "Hostess", "Ghost", "Moderna", "Mode", "Twitcher", "YouTuber", "Streamers Fan", "Robot", "Abbot"]) {
+      expect(checkName(n).ok).toBe(true);
+    }
+    // The host and platform words take no repeated-letter rule, so real names that reach one only that way pass.
+    for (const n of ["Mood", "M00d", "Modd", "Colle", "Coole", "Hoost", "Twittch", "Officiall"]) {
+      expect(checkName(n).ok).toBe(true);
+    }
+  });
+
+  test("a role or platform word refuses a name as any whole word of it; a person's name only as the whole name (#106)", () => {
+    const refused = ["Mod Squad", "Squad Mod", "The Mod", "M0d Squad", "Mod2 Squad", "m o d squad", "Official Bob", "Bob_Official", "xX_admin_Xx", "Addmin Bob", "Big Moderator",
+      "Host 2 Go", "Your Host", "Lead Streamer", "YouTube Fan", "Twitch-Kid", "Tw1tch Kid", "Al Mod", "Ghost Host",
+      "OfficialBob", "TwitchKid", "AdminBob", "ModSquad", "HostBob", "McHost", "YouTubeFan", "You Tube Fan"];
+    expect(refused.filter((n) => checkName(n).ok)).toEqual([]);
+    for (const n of refused) expect(checkName(n)).toEqual({ ok: false, reason: "reserved" });
+    const plays = ["Cole Smith", "Smith Cole", "Cole Porter", "Archon Fan", "Modern", "Modern Art", "Hostage", "Ghost", "Admiral", "Admins Team", "Twitcher", "YouTuber",
+      "Streamers Fan", "Moody Bob", "Hosta Lily", "HostaLily", "TwitchyTom", "ModernArt", "AdmiralAckbar", "ColeSmith", "Mo Dern", "Tom Odd"];
+    expect(plays.filter((n) => !checkName(n).ok)).toEqual([]);
+    // Every word entry is a reserved entry, and no person's or factory name is one.
+    expect(RESERVED_WORDS.filter((w) => !RESERVED_NAMES.includes(w) && !RESERVED_EXACT.includes(w))).toEqual([]);
+    expect(RESERVED_WORDS.filter((w) => ["cole", "colemedin", "dynamous", "archon"].includes(w))).toEqual([]);
   });
 
   test("the boards show a stored name only if the lists allow it, whatever its length", () => {
@@ -176,7 +200,7 @@ describe("name rules", () => {
   });
 
   test("the lists: lowercase a to z, no duplicates, a few hundred blocked words, nothing redundant", () => {
-    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES]) {
+    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES, RESERVED_EXACT, RESERVED_WORDS]) {
       expect(list.filter((w) => !/^[a-z]+$/.test(w))).toEqual([]);
       expect(new Set(list).size).toBe(list.length);
     }
@@ -224,9 +248,11 @@ describe("teams", () => {
 });
 
 describe("bot names", () => {
-  test("names starting with 'bot ' are reserved for the server's bots, in any case and spacing", () => {
-    for (const name of ["bot alice", "Bot  Bob", "  BOT x", "bot 7"]) expect(isBotName(name)).toBe(true);
-    for (const name of ["bots-01", "robot x", "bot", "abbot y", "bot_x", "bot-x", "Robo"]) expect(isBotName(name)).toBe(false);
+  test("a name whose first word reads 'bot' is kept for the server's bots, whatever the spelling", () => {
+    const bots = ["bot alice", "Bot  Bob", "  BOT x", "bot 7", "bot", "Bot", "B0T", "8ot", "b0t x", "bot_x", "bot-x", "b o t", "bo t", "1 bot", "Bot 4455", "Bot2", "bot99", "BotAda", "BotX"];
+    expect(bots.filter((n) => !isBotName(n))).toEqual([]);
+    const people = ["bots-01", "robot x", "abbot y", "Robo", "Robot", "Abbot", "Boot", "Bottle", "Bots", "Abbot Bot", "RoBot", "BoTanya", "--", "__"];
+    expect(people.filter((n) => isBotName(n))).toEqual([]);
   });
 
   test("the server's fill-bot names are all bot names, and all different", () => {

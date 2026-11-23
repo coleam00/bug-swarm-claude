@@ -83,7 +83,7 @@ export function resetCommand(argv: string[], dataDir: string): CommandResult {
   try {
     const { runs, players } = resetData(db);
     // A running server needs no restart: its top 10 cache lasts 1 s, and a life in progress is
-    // saved as a new run (with its player) when it ends.
+    // saved as a new run (with its player) when it ends, if it counts (#114: not a 0-point life under 5 s).
     return { code: 0, out: [resetLine(runs, players)], err: [] };
   } finally {
     db.close();

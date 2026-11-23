@@ -19,11 +19,16 @@
 // reader (view.ts), reset by every welcome, and one that cannot be decoded yet (a lost delta,
 // before the next keyframe) is skipped. `received` counts the characters that arrived (the F
 // readout's KB/s; snapshots are ASCII, so characters are bytes).
+// A server refusing a player for its limits (#104: `limit`, too many connections from the
+// player's address; `busy`, MAX_PEOPLE playing) shows a short message (`refusalStatus`) that stays
+// up through the close and the retries, until a welcome; the backoff is the "try again".
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
   ERROR,
   ERROR_BUILD,
+  ERROR_BUSY,
   ERROR_FULL,
+  ERROR_LIMIT,
   ERROR_NAME,
   ERROR_RESTARTING,
   ERROR_TEAM,
@@ -58,6 +63,16 @@ export function isFinalError(code: ErrorCode): boolean {
   return code === ERROR_NAME || code === ERROR_TEAM || code === ERROR_VERSION;
 }
 
+/**
+ * What a player sees while the server refuses them for its limits (#104), or null for any other
+ * code. Neither is final: the connection keeps retrying with backoff.
+ */
+export function refusalStatus(code: ErrorCode): string | null {
+  if (code === ERROR_LIMIT) return "Too many connections from your network. Trying again...";
+  if (code === ERROR_BUSY) return "Arenas are full. Trying again in a moment...";
+  return null;
+}
+
 /** The /ws URL for a page at `location`: wss on https. */
 export function socketUrl(loc: { protocol: string; host: string }): string {
   return `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/ws`;
@@ -78,7 +93,10 @@ export type Connection = {
 /** What a player's connection tells the arena. */
 export type PlayHandlers = {
   message: (m: ServerMessage) => void;
-  /** "Connecting...", "Reconnecting...", "Updating...", "Reload to update", or null when playing. */
+  /**
+   * "Connecting...", "Reconnecting...", "Updating...", "Reload to update", a refusal for the
+   * server's limits (refusalStatus), or null when playing.
+   */
   status: (text: string | null) => void;
   /** A name or team the server refused. */
   refused: (code: ErrorCode) => void;
@@ -134,6 +152,8 @@ function connect(mode: Mode, url?: string): WatchConnection {
   let firstBuild: string | null = null;
   /** The hello play() is about to send on the open socket. */
   let pending: ReturnType<typeof setTimeout> | null = null;
+  /** The message for the server's last limit refusal (refusalStatus), shown until a welcome. */
+  let refusal: string | null = null;
 
   const sayHello = (socket: WebSocket) => {
     const h = mode.hello;
@@ -157,7 +177,7 @@ function connect(mode: Mode, url?: string): WatchConnection {
     if (ws !== socket) return;
     ws = null;
     if (final) return;
-    if (mode.play) mode.play.status("Reconnecting...");
+    if (mode.play) mode.play.status(refusal ?? "Reconnecting...");
     else mode.watch?.dropped();
     rejoin = setTimeout(open, reconnectDelay(attempt++));
   };
@@ -206,6 +226,7 @@ function connect(mode: Mode, url?: string): WatchConnection {
         if (m.you === 0) return;
         firstBuild ??= m.build;
         attempt = 0;
+        refusal = null;
         on.status(null);
       } else if (m.t === ERROR && m.code === ERROR_FULL) {
         // The reply to the watch this socket sent before play(): the server closes it, and the
@@ -218,6 +239,10 @@ function connect(mode: Mode, url?: string): WatchConnection {
         // A rejoin to a server that no longer speaks this page's protocol: a redeploy. (On the very
         // first connect it stays final below, so a stale cache can't loop on reloads.)
         return outdated(on, socket, "");
+      } else if (m.t === ERROR && refusalStatus(m.code) !== null) {
+        // The server's limits: say so, and keep saying it through the close and the retries.
+        refusal = refusalStatus(m.code);
+        on.status(refusal);
       } else if (m.t === ERROR && isFinalError(m.code)) {
         final = true;
         if (m.code === ERROR_VERSION) on.status("Reload to update");

@@ -23,7 +23,7 @@ export function nameMessage(reason: NameRefusal): string {
   return "Pick a different name";
 }
 
-/** Why a name starting with "bot " can't play: the arena keeps them for its bots (rules.ts isBotName). */
+/** Why a name whose first word reads "bot" ("Bot", "b0t x", "bot_x") can't play: the arena keeps them for its bots (rules.ts isBotName). */
 export const BOT_NAME_MESSAGE = `Names starting with the word "bot" are kept for the arena's bots`;
 
 /**

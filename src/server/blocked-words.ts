@@ -2,9 +2,11 @@
 // extends these lists by hand. Written by hand for this game, not copied from a published list.
 //
 // How a name is matched (src/server/rules.ts, listedReason):
-// - Split into words on space, "-" and "_". Every list but RESERVED_NAMES is matched inside one
-//   word at a time, never across the space between two: "Anna Ziegler" holds "nazi" and "Matt
-//   Watson" holds "twat" only once the space is gone. A run of one- and two-letter words is a
+// - Split into words on space, "-" and "_". Every list but the reserved lists (RESERVED_NAMES
+//   and RESERVED_EXACT, below, matched against the whole name, and their RESERVED_WORDS also
+//   against each whole word) is matched inside one word at a
+//   time, never across the space between two: "Anna Ziegler" holds "nazi" and "Matt Watson"
+//   holds "twat" only once the space is gone. A run of one- and two-letter words is a
 //   word spelled out, so it is joined back first: "F-U_C K", "n a z i" and "fu ck" are one word.
 //   Such a short word is also read glued to the word before it, the word after it and both, so
 //   an uneven split ("f uck", "ni gger", "who re", "shi t") is one word too. A split into two
@@ -13,9 +15,10 @@
 //   for a blocked word glued to the letters of an exception kept for a common name (below).
 // - Each word normalised: lowercased, the digit swaps 0->o, 1->i, 3->e, 4->a, 5->s, 7->t, 8->b
 //   undone. "5h17" is "shit".
-// - Repeated letters: each run of a letter in an entry matches that many OR MORE of it in the
-//   name, so "fuck" catches "fuuuck" and "pussy" catches "pussssy". The name itself is never
-//   collapsed, which is what keeps "boob" from blocking "Bob" and "coon" from blocking "Connor".
+// - Repeated letters: each run of a letter in an entry (in every list but RESERVED_EXACT, below)
+//   matches that many OR MORE of it in the name, so "fuck" catches "fuuuck" and "pussy" catches
+//   "pussssy". The name itself is never collapsed, which is what keeps "boob" from blocking
+//   "Bob" and "coon" from blocking "Connor".
 //   So a doubled letter in an entry means "at least two": write the shortest spelling you want
 //   caught ("fagot" catches "faggot" too; "faggot" would let "fagot" through). The same rule
 //   runs into real names with a doubled letter: "polack" matches "Pollack", "boner" "Bonner".
@@ -92,10 +95,26 @@
 // two-letter names beside a word: "F Aguilar" and "Rafa G" (fag), "T Watson" (twat), "Anna L"
 // and "Anna Al" (anal), "Ji Smith" (jism), "Andy Ke" (dyke).
 //
-// RESERVED_NAMES: refused for players, who see the start screen's "Pick a different name"
-// (src/web/start.ts). Matched against the whole normalised name with the same repeated-letter
-// rule ("Cole Medin", "c0le_medin" and "Addmin" are refused); a name that only contains one
-// ("Archonaut") is fine.
+// RESERVED_NAMES and RESERVED_EXACT: refused for players, who see the start screen's "Pick a different name"
+// (src/web/start.ts). The factory (colemedin, dynamous, archon), the host and the people running
+// the stream (cole, host, streamer, mod, moderator, admin, official) and the platforms it streams
+// on (youtube, twitch), so nobody poses as them on a public stream (#106). Matched against the
+// whole normalised name. RESERVED_NAMES also takes the repeated-letter rule ("Cole Medin",
+// "c0le_medin" and "Addmin" are refused). RESERVED_EXACT does not: its short words would catch
+// real names that way ("Mood", "Colle", "Hoost"), so only digit swaps, separators and a number at
+// either end are undone ("C0le", "You Tube", "Host 2" are refused). A name that only contains one
+// ("Archonaut", "Nicole", "Coleman", "Hosta", "Moderna") is fine.
+//
+// RESERVED_WORDS (owner ruling on #106): the role and platform words among those two lists also
+// refuse a name when they are any whole word of it, words split as for the blocked lists (and,
+// as BLOCKED_WHOLE reads them, at a capital) and each read the way its list reads it: "Mod
+// Squad", "Official Bob", "OfficialBob", "xX_admin_Xx", "Host 2 Go" and "YouTube Fan" are
+// refused. Two neighbouring pieces are also read together, so a word split in two still reads
+// whole ("YouTubeFan", "You Tube Fan"). Only a whole word: "Modern", "Hostage", "Admiral",
+// "Twitcher" and "HostaLily" play. The names of people and of the factory (cole, colemedin,
+// dynamous, archon) stay whole-name only, so "Cole Smith" and "ColeSmith" play.
+// Names that read as a bot are kept for the server's bots by rules.ts isBotName, not here, so a
+// person's stored name such as "Bot" stays on the boards; only joining with it is refused.
 //
 // The boards (top 10 and team totals) hide a stored name these lists now refuse, at read time.
 //
@@ -532,3 +551,12 @@ export const EXCEPTIONS: readonly string[] = [
 ];
 
 export const RESERVED_NAMES: readonly string[] = ["colemedin", "dynamous", "archon", "admin", "moderator"];
+
+/** Reserved like RESERVED_NAMES, but without the repeated-letter rule (#106): the host and the platforms. */
+export const RESERVED_EXACT: readonly string[] = ["cole", "host", "streamer", "mod", "official", "youtube", "twitch"];
+
+/**
+ * The entries of RESERVED_NAMES and RESERVED_EXACT that also refuse a name as any whole word of it
+ * (#106): the roles and the platforms, never a person's or the factory's name.
+ */
+export const RESERVED_WORDS: readonly string[] = ["host", "streamer", "mod", "moderator", "admin", "official", "youtube", "twitch"];

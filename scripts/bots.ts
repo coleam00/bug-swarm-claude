@@ -18,10 +18,13 @@
 // stats unreachable, tick p95 not under 10 ms, or any bot over 40 KB/s (bots-lib.ts budgetVerdict).
 // Bots see only what their view holds, as a player does, so what they observe is no longer
 // `bun run skill`'s perfect information (the skill gates run on the simulation and are unaffected).
+// Every bot connects from this machine's one address, so the server must run with
+// BUG_SWARM_ALLOW_LOAD=1 (#104, load testing only): without it every socket past
+// MAX_SOCKETS_PER_ADDRESS gets `error limit`, which stays an error (the gate fails) and prints a hint once.
 import { PROTOCOL_VERSION, TICK_MS } from "../src/shared/arena/constants";
 import { POLICIES, createMemory, type PolicyInput, type PolicyMemory } from "../src/shared/arena/policies";
 import { createRng } from "../src/shared/arena/rng";
-import { ERROR, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
+import { ERROR, ERROR_LIMIT, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import type { ArenaStats } from "../src/server/arena/rooms";
 import {
@@ -83,6 +86,14 @@ const started = performance.now();
 /** The second half of the run starts here; bandwidth is measured from it. */
 const midAt = started + (args.seconds * 1000) / 2;
 
+let hinted = false;
+/** Says once why bots are refused with `limit`: the server runs with its per-address limits on. */
+function limitHint(): void {
+  if (hinted) return;
+  hinted = true;
+  console.error("bots: refused by the per-address limit: start the server with BUG_SWARM_ALLOW_LOAD=1 (load testing only)");
+}
+
 function open(i: number): void {
   const ws = new WebSocket(url);
   let resolveClosed: () => void = () => {};
@@ -136,6 +147,7 @@ function open(i: number): void {
       tally.lives.push(m.score ?? 0);
     } else if (m.t === ERROR) {
       tally.errors.push(`error ${m.code}`);
+      if (m.code === ERROR_LIMIT) limitHint();
     }
   });
   ws.addEventListener("close", (e) => {
@@ -168,7 +180,10 @@ function openWatcher(): void {
       return;
     }
     if (w.since !== null) w.bytes += utf8Bytes(raw);
-    if (m?.t === ERROR) tally.errors.push(`watcher error ${m.code}`);
+    if (m?.t === ERROR) {
+      tally.errors.push(`watcher error ${m.code}`);
+      if (m.code === ERROR_LIMIT) limitHint();
+    }
   });
   ws.addEventListener("close", (e) => {
     if (!w.closing) tally.errors.push(opened ? `watcher close ${e.code}` : "watcher connect failed");

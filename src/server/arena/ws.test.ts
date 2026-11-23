@@ -166,6 +166,9 @@ test(
 test(
   "the 21st player lands in a second arena, and the stats say so",
   async () => {
+    // 21 sockets from one address: over MAX_SOCKETS_PER_ADDRESS, so this server has the load allowance (#104).
+    await srv.stop();
+    srv = serve({ allowLoad: true });
     const joined = [];
     for (let i = 0; i < MAX_PLAYERS_PER_ARENA + 1; i++) joined.push(await enter(`p${String(i).padStart(2, "0")}`));
     expect(joined.slice(0, MAX_PLAYERS_PER_ARENA).every((j) => j.welcome.arena === 1)).toBe(true);
@@ -404,6 +407,9 @@ test(
 test(
   "300 joins that leave at once add no runs, no players, no top 10 rows and no team points (#114)",
   async () => {
+    // One address makes all 300 joins, over the per-address join limit (#104): load mode.
+    await srv.stop();
+    srv = serve({ allowLoad: true });
     for (let i = 0; i < 300; i++) {
       const c = await connect();
       c.send(encodeHello(PROTOCOL_VERSION, `Churn${i}`, i % 2 ? "spaces" : "tabs", (0x1140000 + i).toString(16).padStart(32, "0"), false));

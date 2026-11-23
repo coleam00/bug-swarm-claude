@@ -76,7 +76,7 @@ export function wsUrl(base: string): string {
 
 /**
  * Bot `i` (from 1) is `bots-01`, `bots-02`, ... `bots-1000`: names that pass the name rules and
- * are not the server's reserved `bot ` prefix (rules.test.ts checks both).
+ * do not read as a bot name, whose first word reads "bot" (rules.test.ts checks both).
  */
 export function botName(i: number): string {
   return `bots-${String(i).padStart(2, "0")}`;

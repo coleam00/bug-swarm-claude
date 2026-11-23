@@ -103,9 +103,9 @@ describe("parseArgs", () => {
 });
 
 describe("serverEnv", () => {
-  test("pins the port, scratch data and build; drops what would change the build, the interface or the wave", () => {
+  test("pins the port, scratch data and build, and the load allowance; drops what would change the build, the interface or the wave", () => {
     const env = serverEnv({ PATH: "/bin", RAILWAY_GIT_COMMIT_SHA: "abc", NODE_ENV: "production", BUG_SWARM_START_WAVE: "5", BUILD_ID: "old", PORT: "3000", UNSET: undefined }, 4567, "/tmp/d", "playtest-1");
-    expect(env).toEqual({ PATH: "/bin", PORT: "4567", DATA_DIR: "/tmp/d", BUILD_ID: "playtest-1" });
+    expect(env).toEqual({ PATH: "/bin", PORT: "4567", DATA_DIR: "/tmp/d", BUILD_ID: "playtest-1", BUG_SWARM_ALLOW_LOAD: "1" });
   });
 
   test("the queen scenario sets BUG_SWARM_START_WAVE to her wave, over an inherited one (#96)", () => {
