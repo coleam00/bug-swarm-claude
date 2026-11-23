@@ -45,10 +45,10 @@ export type RunningServer = {
   rooms: Rooms;
   /**
    * Stops the server for a redeploy (or a test's end): ends every life in progress and saves each
-   * that counts (lives.ts countsAsLife: not a 0-point life under 5 s) with its score so far, sends every socket `error restarting` and closes it, stops the listener
-   * (waiting at most LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the
-   * number of lives it ended; rejects if the listener stop does. Calling it again returns the same
-   * promise.
+   * that counts (lives.ts countsAsLife: not a 0-point life under 5 s) with its score so far, sends
+   * every socket `error restarting` and closes it, stops the listener (waiting at most
+   * LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the number of lives it
+   * ended; rejects if the listener stop does. Calling it again returns the same promise.
    */
   stop(): Promise<number>;
 };

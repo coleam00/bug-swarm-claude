@@ -173,8 +173,9 @@ export function hiddenKeys(db: Database): Set<string> {
 
 /**
  * Where a player stands. `rank` is their place among `ranked` visible players (null when hidden,
- * with no finished run, or with a best of 0, which is not ranked: #114); `next` is the rank just above and the points it takes to pass it;
- * `row` is their index in the top 10 rows, when they are in them.
+ * with no finished run, or with a best of 0, which is not ranked: #114); `next` is the rank just
+ * above and the points it takes to pass it; `row` is their index in the top 10 rows, when they
+ * are in them.
  */
 export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
 
