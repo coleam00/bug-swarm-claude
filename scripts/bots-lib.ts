@@ -16,7 +16,7 @@ export type BotPolicy = (typeof BOT_POLICIES)[number];
 /** Bots aim and fire with the aimer unless told otherwise (#55). */
 export const DEFAULT_BOT_POLICY: BotPolicy = "aimer";
 
-/** `watchers`: start-screen watch sockets opened after the bots join (#79), to measure what each costs. */
+/** `watchers`: start-screen watch sockets opened after the bots join (#79), to measure and gate (#119) what each costs. */
 export type BotsArgs = { url: string; count: number; seconds: number; policy: BotPolicy; watchers: number };
 
 const INT_FLAGS = {

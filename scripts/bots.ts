@@ -7,8 +7,8 @@
 // closes) and the server's tick p50/p95 and memory from /api/arena/stats, closes every socket.
 // `--watchers <n>` (#79) then opens n start-screen watch sockets, which send nothing, and prints
 // the KB/s each receives over the second half (mean, p95 and max), gated like a bot's (#119), also
-// with `--count 0 --watchers <n>`, which measures an empty server's demo arena. Every bot life is saved like a person's: point it only at a server with a scratch
-// DATA_DIR. Not part of `bun run check`: it needs a running server. bots-lib.ts is tested.
+// with `--count 0 --watchers <n>`, which measures an empty server's demo arena. Every bot life is
+// saved like a person's: point it only at a server with a scratch DATA_DIR. Not part of `bun run check`: it needs a running server. bots-lib.ts is tested.
 //
 // The budget gate (#89): each bot decodes its snapshots as a browser does (view.ts; one it cannot
 // decode after its first keyframe is a `desync` error) and counts the payload bytes it receives

@@ -64,7 +64,7 @@ export const DEMO_WARM_TICKS = Math.round((DEMO_WARM_S * 1000) / TICK_MS);
 /**
  * The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79).
  * #119: 300 start screens at once, with room for a few more. Measured: 300 watchers in one arena
- * add about 3.3 ms to its tick (p95 5.7 to 6.3 ms; one send of the shared frame each, about 11 us), so
+ * add about 3.3 ms to its tick (p95 5.7 to 6.3 ms, against 1.94 ms with 40; one send of the shared frame each, about 11 us), so
  * about 400 would approach the 10 ms tick budget.
  */
 export const MAX_WATCHERS = 320;

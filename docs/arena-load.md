@@ -72,7 +72,7 @@ Start screens watch live play on one shared stream per arena (#89): one delta st
 | `--count 18 --watchers 300 --seconds 120` (the screenshot run) | 3.96 / 5.79 ms | 26.8 | 25.5 | 0 | pass |
 | `--count 0 --watchers 300 --seconds 120`, 4 aimers joining 20 s in | 3.02 / 4.37 ms | 8.5 | 7.3 | 0 | pass |
 
-The 200-player run's tick figures pool all 10 arenas, so they dilute the watched one: quote the one-arena run, where 300 sends cost about 3.3 ms a tick (about 11 us each). About 400 watchers in one arena would near the 10 ms budget. In the last run every watcher was moved from the demo arena to the people arena by one rehome sweep and the demo closed.
+The 200-player run's tick figures pool all 10 arenas, so they dilute the watched one: quote the one-arena run. Planning measured p95 1.94 ms with 40 watchers in the same setup, so 300 sends cost about 3.3 ms a tick (about 11 us each; that baseline was not rerun). About 400 watchers in one arena would near the 10 ms budget. In the last run every watcher was moved from the demo arena to the people arena by one rehome sweep and the demo closed.
 
 ## Two players in browsers while the 200 bots run
 

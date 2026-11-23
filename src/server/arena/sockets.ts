@@ -19,8 +19,9 @@
 // Over the watcher cap it gets `error full` and is closed: MAX_WATCHERS server-wide, and (#119)
 // the address gate's watcher cap, MAX_WATCHERS_PER_ADDRESS from one client address, checked first
 // so one address never takes a server-wide slot it may not use. `full`, not `limit`: the start
-// screen shows the drawn backdrop and Play still opens a fresh socket (net.ts). A hello on a watching socket stops the
-// watch and joins as a player on the same socket, checked exactly like a first hello.
+// screen shows the drawn backdrop and Play still opens a fresh socket (net.ts). A hello on a
+// watching socket stops the watch (giving its address slot back) and joins as a player on the same
+// socket, checked exactly like a first hello.
 // A frame Bun drops (send returns 0) is reported back to the room, which makes that socket's next
 // snapshot a keyframe (view.ts); -1 (queued under backpressure) is delivered late, not lost.
 // Stream safety (#104): each socket carries its client's address (serve.ts, TRUST_PROXY_HOPS), and

@@ -1,9 +1,9 @@
 // The per-address limits on /ws (#104): at most `maxSockets` sockets open at once from one client
 // address, at most `maxWatchers` of them watching at once (#119, the start screen), and at most
-// `joinsPerMinute` joins (welcomed hellos) from it in any 60 s window. Only
-// what it allows is counted, so a client retrying a refusal never locks itself out. An address
-// with no open socket, no watcher, no join in the window and no refusal logged in the window is forgotten: at
-// most once a minute, `open` sweeps the map, so addresses that come once and leave don't pile up.
+// `joinsPerMinute` joins (welcomed hellos) from it in any 60 s window. Only what it allows is
+// counted, so a client retrying a refusal never locks itself out. An address with no open socket,
+// no watcher, no join in the window and no refusal logged in the window is forgotten: at most once
+// a minute, `open` sweeps the map, so addresses that come once and leave don't pile up.
 // The clock is injected, so tests step it by hand. `createOpenGate` (BUG_SWARM_ALLOW_LOAD=1, load
 // testing only) allows everything and keeps nothing.
 
@@ -27,7 +27,7 @@ export type AddressGate = {
   sockets(addr: string): number;
   /** Watchers from `addr` counted now. */
   watchers(addr: string): number;
-  /** Addresses remembered now (open sockets, recent joins or a recent refusal log). */
+  /** Addresses remembered now (open sockets, watchers, recent joins or a recent refusal log). */
   readonly size: number;
 };
 
