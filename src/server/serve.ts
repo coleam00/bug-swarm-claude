@@ -71,7 +71,7 @@ export type ShutdownDeps = {
 };
 
 /**
- * The SIGTERM / SIGINT handler's work (main.ts wires the signals, and the IPC shutdown message): stops the server (lives ended and saved,
+ * The SIGTERM / SIGINT handler's work (main.ts wires the signals, and the IPC shutdown message): stops the server (lives ended, see lives.ts countsAsLife;
  * sockets told to reconnect), closes the database and exits 0. If that has not finished within
  * `budgetMs` it exits 1 anyway. A second signal while it runs does nothing.
  */

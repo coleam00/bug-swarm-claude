@@ -62,7 +62,6 @@ function score(s: RunningServer, welcome: Welcome, points: number): void {
 }
 
 /** The browser's connection, as game.ts opens it, recording what it is told. */
-
 function joinArena(url: string) {
   const welcomes: Welcome[] = [];
   const statuses: (string | null)[] = [];

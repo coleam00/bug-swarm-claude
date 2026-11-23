@@ -248,8 +248,8 @@ export class Rooms {
 
   /**
    * The server is stopping: takes every player out of every arena, which ends each life in progress
-   * and saves it with its score so far when it counts (Room.remove, lives.ts countsAsLife), then stops every timer and forgets the arenas
-   * and the watchers. Returns how many lives it ended. Sends nothing to the sockets.
+   * with its score so far (Room.remove; lives.ts countsAsLife decides what is saved), then stops
+   * every timer and forgets the arenas and the watchers. Returns how many lives it ended. Sends nothing to the sockets.
    */
   endAll(): number {
     let ended = 0;

@@ -2,7 +2,7 @@
 // that steps it and sends every member a snapshot. No timers and no clock of its own: rooms.ts
 // drives `advance` from its timer, so tests step it by hand. A player going down, a revive, a
 // pickup taken and a shield blocking a hit (#73) are broadcast to everyone. A life that ends (bled out while down, or its player leaving) is handed
-// to `onLifeEnd` as a LifeRecord; the server saves it off the tick (lives.ts).
+// to `onLifeEnd` as a LifeRecord; what is saved, off the tick, is decided in lives.ts (countsAsLife).
 //
 // Fill bots (#66): with `fillTo` above 0, an arena with people in it is topped up with server
 // bots until people plus bots reach it, and a bot is marked to leave for each person past it. A
@@ -446,7 +446,10 @@ export class Room {
     }
   }
 
-  /** Hands a finished life on to be saved, and tells its player (if still connected) it is over. */
+  /**
+   * Hands a finished life on (lives.ts countsAsLife decides whether it is saved), and tells its
+   * player (if still connected) it is over.
+   */
   private lifeEnded(m: Member, life: LifeEnd, nowMs: number): void {
     const seconds = (life.ticks * TICK_MS) / 1000; // ticks * DT would leave float noise
     this.onLifeEnd({

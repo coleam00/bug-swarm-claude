@@ -437,8 +437,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       message: onMessage,
       status: on.status,
       refused: on.refused,
-      // A redeploy with a new build: load it and go straight back in (the life before was saved by
-      // the server).
+      // A redeploy with a new build: load it and go straight back in (the life before was ended by
+      // the server; see lives.ts countsAsLife).
       newBuild: () => {
         markUpdateReload();
         location.reload();
