@@ -285,12 +285,13 @@ test(
     deaf.pause();
     // Both keep sending inputs (so the silent drop can't be what ends them) and flood pings, whose
     // pongs fill a send buffer nobody drains. Not a fixed byte count: loopback buffers differ by OS.
+    // About 2.5 MB/s of pongs: Linux's loopback buffers absorb several MB before Bun's grows.
     const start = Date.now();
     let seq = 1;
     while (!deaf.ended() && Date.now() - start < 10_000) {
       for (const c of [deaf, reader]) {
         c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
-        c.pings(40);
+        c.pings(400);
       }
       seq++;
       await Bun.sleep(20);

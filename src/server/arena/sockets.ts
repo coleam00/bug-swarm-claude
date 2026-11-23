@@ -22,9 +22,8 @@
 // snapshot a keyframe (view.ts); -1 (queued under backpressure) is delivered late, not lost.
 // Stream safety (#104): each socket carries its client's address (serve.ts, TRUST_PROXY_HOPS), and
 // the address gate (gate.ts) caps the sockets open and the joins per minute from one address. A
-// socket over the cap gets `error limit` and a close as it opens, is terminated REFUSED_GRACE_MS
-// later if it is still open (a client that never reads never finishes the close handshake), and
-// anything it sends is ignored. A hello is refused with `busy` while MAX_PEOPLE play (Rooms.full),
+// socket over the cap gets `error limit` and a close as it opens (Bun runs the close handler inside
+// that close, so it leaves at once, reading or not: measured on Windows and Linux). A hello is refused with `busy` while MAX_PEOPLE play (Rooms.full),
 // checked before the join limit so a page retrying `busy` spends none of its address's joins, then
 // with `limit` past the joins per minute. A socket whose send buffer stays over `slowBytes` for
 // `slowMs` (a client that stopped reading) is terminated by the same ping timer, so nothing runs
@@ -67,11 +66,9 @@ export const CLOSE_REFUSED = 1008;
 export const CLOSE_RESTARTING = 1012;
 /** How often joined sockets are checked for a name hidden since they joined, ms. */
 export const HIDE_SWEEP_MS = 2000;
-/** A socket refused as it opens (`limit`) and still open this long after is terminated, ms. */
-export const REFUSED_GRACE_MS = 1000;
 /** A send buffer over this many bytes means the client is not reading. Real snapshots are 5-27 KB/s. */
 export const SLOW_BUFFER_BYTES = 256 * 1024;
-/** A socket whose send buffer stays over SLOW_BUFFER_BYTES this long is dropped, ms: within SLOW_DROP_MS + PING_MS (15 s) of when it stopped reading. */
+/** A socket whose send buffer stays over SLOW_BUFFER_BYTES this long is dropped, ms: within SLOW_DROP_MS + PING_MS (15 s) of its buffer crossing the bound (the OS's own socket buffers fill first). */
 export const SLOW_DROP_MS = 10_000;
 /** Bun's per-socket backpressure limit: past it, frames are dropped (send returns 0) instead of queued. */
 export const MAX_SEND_BUFFER_BYTES = 1024 * 1024;
@@ -96,10 +93,6 @@ export type SocketData = {
   address: string;
   /** True once the address gate counted this socket; its close gives the slot back. */
   counted: boolean;
-  /** True once the socket was refused as it opened: nothing it sends is read. */
-  refused: boolean;
-  /** Terminates a refused socket that has not closed (REFUSED_GRACE_MS). */
-  refuseTimer: ReturnType<typeof setTimeout> | null;
   /** Since when its send buffer has been over the slow bound, ms, or null. */
   slowSince: number | null;
 };
@@ -117,8 +110,6 @@ export function newSocketData(address = ""): SocketData {
     watcher: null,
     address,
     counted: false,
-    refused: false,
-    refuseTimer: null,
     slowSince: null,
   };
 }
@@ -270,15 +261,8 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       if (restarting) return sendRestarting(ws);
       const address = ws.data.address;
       if (!gate.open(address)) {
-        ws.data.refused = true;
         logRefusal(ws, "sockets open");
-        refuse(ws, ERROR_LIMIT);
-        // A client that never reads never finishes the close handshake.
-        ws.data.refuseTimer = setTimeout(() => {
-          ws.data.refuseTimer = null;
-          if (all.has(ws)) ws.terminate();
-        }, REFUSED_GRACE_MS);
-        return;
+        return refuse(ws, ERROR_LIMIT);
       }
       ws.data.counted = true;
       if (logged < LOGGED_SOCKETS) log(`ws ${++logged}/${LOGGED_SOCKETS} after boot: client ${address}`);
@@ -303,7 +287,6 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       ws.data.lastHeard = now();
     },
     message(ws, raw) {
-      if (ws.data.refused) return;
       ws.data.lastHeard = now();
       const m = parseClientMessage(raw as string | Uint8Array);
       if (!m) return;
@@ -330,8 +313,6 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       ws.data.helloTimer = null;
       if (ws.data.liveTimer) clearInterval(ws.data.liveTimer);
       ws.data.liveTimer = null;
-      if (ws.data.refuseTimer) clearTimeout(ws.data.refuseTimer);
-      ws.data.refuseTimer = null;
       // Every way a socket ends (a refusal, restart, terminate, the client) comes through here once.
       if (ws.data.counted) gate.close(ws.data.address);
       ws.data.counted = false;
