@@ -65,7 +65,8 @@ export async function adminCommand(argv: string[], env: Record<string, string | 
   if (base.protocol !== "https:" && !(base.protocol === "http:" && LOCAL_HOSTS.has(base.hostname))) {
     return fail(`admin: refusing to send the token over plain http to ${base.host} (use https://)`);
   }
-  const origin = base.toString().replace(/\/+$/, "");
+  // Only the service's address: any link to it works, the board's included (https://<service>/board).
+  const origin = base.origin;
 
   const token = env.ADMIN_TOKEN?.trim() ?? "";
   if (!token) return fail("admin: set ADMIN_TOKEN in your environment (the same value as on the service)");

@@ -190,7 +190,7 @@ test("clientKey: X-Real-IP, else the rightmost X-Forwarded-For entry, else the p
   ).toBe("unknown");
 });
 
-test("the real server: the token turns the routes on, keyed by the peer address", async () => {
+test("the real server: startServer's adminToken turns the routes on", async () => {
   const srv = startServer({ port: 0, hostname: "127.0.0.1", db, distDir: dist, buildId: "admin", adminToken: TOKEN, arenaFill: 0 });
   try {
     const url = `${srv.url}${ADMIN_PREFIX}/stats`;

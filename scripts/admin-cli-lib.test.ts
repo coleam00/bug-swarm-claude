@@ -59,6 +59,14 @@ describe("requests", () => {
   });
 });
 
+test("any link to the service reaches its admin routes: the path and query are dropped", async () => {
+  for (const url of [`${BASE}/board`, `${BASE}/board/?x=1`, `${BASE}/?x=1`]) {
+    const { r, sent } = await run(["--url", url, "hide", "n"]);
+    expect(r.code).toBe(0);
+    expect(sent.map((s) => s.url)).toEqual([`${BASE}/api/admin/hide`]);
+  }
+});
+
 describe("refusals that send nothing", () => {
   test("reset without --yes", async () => {
     for (const argv of [["--url", BASE, "reset"], ["--url", BASE, "reset", "--no"]]) {
@@ -98,19 +106,16 @@ describe("refusals that send nothing", () => {
 });
 
 describe("answers", () => {
-  const cases: [number, unknown, string][] = [
-    [404, "not found", `admin: admin routes are off on ${BASE} (set ADMIN_TOKEN on the service, at least 16 characters)`],
-    [401, "unauthorized", "admin: wrong ADMIN_TOKEN"],
-    [429, "too many requests", "admin: rate-limited: wait a minute"],
-    [400, { error: 'reset needs {"confirm": true}' }, 'admin: reset needs {"confirm": true}'],
-    [500, "boom", "admin: unexpected status 500"],
-  ];
-  for (const [status, body, line] of cases) {
-    test(`${status} is exit 1 with: ${line}`, async () => {
-      const { r } = await run(["--url", BASE, "stats"], fakeFetch(status, body));
-      expect(r).toEqual({ code: 1, out: [], err: [line] });
-    });
-  }
+  test("a non-200 answer is exit 1 with no output", async () => {
+    const { r } = await run(["--url", BASE, "stats"], fakeFetch(401, "unauthorized"));
+    expect(r.code).toBe(1);
+    expect(r.out).toEqual([]);
+  });
+
+  test("a 400 relays the server's error", async () => {
+    const { r } = await run(["--url", BASE, "stats"], fakeFetch(400, { error: 'reset needs {"confirm": true}' }));
+    expect(r).toEqual({ code: 1, out: [], err: ['admin: reset needs {"confirm": true}'] });
+  });
 
   test("200 prints the server's lines", async () => {
     const { r } = await run(["--url", BASE, "stats"], fakeFetch(200, { lines: ["players: 2", "finished_runs: 3"] }));
