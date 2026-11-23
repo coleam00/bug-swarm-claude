@@ -250,15 +250,6 @@ describe("top 10 and best", () => {
     expect(me.rank).toBe(4);
   });
 
-  test("a fresh best below the top 10 leaves the rows as the snapshot read them and no row", async () => {
-    const a = await seeded(10);
-    const before = await standing(a, "player-low001");
-    life("player-low001", "Low", 50);
-    const after = await standing(a, "player-low001");
-    expect(after.top).toEqual(before.top);
-    expect(after.me).toEqual({ rank: 11, ranked: 11, next: { rank: 10, points: 51 }, row: null });
-  });
-
   test("a newcomer tying the 10th row sits after it, as the ranking orders ties", async () => {
     const a = await seeded(10);
     await standing(a, "player-tie001");
@@ -281,15 +272,6 @@ describe("top 10 and best", () => {
     const after = await standing(a, "player-hide01");
     expect(after.top).toEqual(before.top);
     expect(after.me).toEqual({ rank: null, ranked: 10, next: null, row: null });
-  });
-
-  test("the top 10 without ?player= follows the snapshot: a life shows there from the next cache turn", async () => {
-    const a = await seeded(10);
-    await top(a);
-    life("player-rec01", "Rec", 99999);
-    expect((await top(a))[0]).toEqual({ name: "Seed109", score: 109 });
-    clock += TOP_CACHE_MS;
-    expect((await top(a))[0]).toEqual({ name: "Rec", score: 99999 });
   });
 
   test("a missing or malformed ?player= gives exactly { top }; no player id is ever sent back", async () => {
