@@ -5,7 +5,7 @@ import { BOT_TAG_GAP, BOT_TAG_PAD, HELP_ABOVE, HELP_ASCENT, HELP_UNDER_NAME, NAM
 describe("bot name tag", () => {
   test("every fill bot is tagged; people, and the bots script's players, are not", () => {
     for (const n of FILL_BOT_NAMES) expect(isBot(n)).toBe(true);
-    for (const n of ["Ada", "bots-01", "robot", "Bot_x"]) expect(isBot(n)).toBe(false);
+    for (const n of ["Ada", "bots-01", "robot", "Abbot"]) expect(isBot(n)).toBe(false);
   });
 
   test("the pill sits just left of the centred name, its text padded on both sides", () => {

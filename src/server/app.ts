@@ -83,7 +83,8 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     // As the ranking's filters compare: lower(name) against the stored keys, and the word lists.
     const isHidden = p !== null && (hidden.has(p.name.toLowerCase()) || !isShownName(p.name));
     const best = playerBest(db, id);
-    return c.json(topFor(entries, id, p?.name ?? "", best, rankOf(entries, id, best, isHidden)));
+    const name = p?.name ?? null;
+    return c.json(topFor(entries, id, name ?? "", best, rankOf(entries, id, name, best, isHidden)));
   });
   app.get("/api/teams", (c) => c.json({ teams: cachedTeams() }));
   // The stream board: the top 10 and the team totals in one read, from the same two caches,

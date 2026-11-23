@@ -1,6 +1,7 @@
 // Fill bots (#66), the pure part: their names, their team, and how many an arena should gain or
-// lose. room.ts does the rest. Every name carries the `bot ` prefix that `/ws` refuses from
-// clients (rules.ts isBotName), so in the arena a `bot ` name is always a server bot.
+// lose. room.ts does the rest. Every name starts with the word "bot", and `/ws` refuses any name
+// whose first word reads "bot" from clients (rules.ts isBotName), so in the arena such a name is
+// always a server bot.
 import { TEAMS, type Team } from "../rules";
 
 /** The fill bots' names, used in order: the first one not already in the arena. */
