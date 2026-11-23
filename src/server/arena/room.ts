@@ -26,7 +26,8 @@
 // and they are not out of a life for OUT_IDLE_S or more (measured in ticks from the life's end).
 // Fill bots, arena choice and the board go by `people`; the simulation's 20-player limit and the
 // server's people cap still go by members. A person joining a physically full arena takes a bot's
-// slot, else the slot of the member out longest who no longer counts: that member is moved "away",
+// slot, else the slot of the member out longest who no longer counts, and fill bots the arena needs
+// take such slots the same way (driveBots): that member is moved "away",
 // out of the simulation, and their socket gets the watcher stream (and every broadcast) behind its
 // life-over screen. Their play press comes back through Rooms (Rooms.input) as a fresh join.
 import {
@@ -435,7 +436,15 @@ export class Room {
     const target = this.target();
     if (target > 0) {
       for (const b of this.bots.values()) if (b.leaving && !b.player.alive) this.removeBot(b.player.id);
-      const add = Math.min(fillDelta(this.people, this.bots.size, target), MAX_PLAYERS_PER_ARENA - this.state.players.length);
+      const want = fillDelta(this.people, this.bots.size, target);
+      // Slots held by members who no longer count (#117) are freed for the bots their arena needs,
+      // out longest first: they come back through their play press, as after a person's join.
+      while (want > MAX_PLAYERS_PER_ARENA - this.state.players.length) {
+        const out = this.evictable();
+        if (!out) break;
+        this.moveAway(out);
+      }
+      const add = Math.min(want, MAX_PLAYERS_PER_ARENA - this.state.players.length);
       for (let i = 0; i < add; i++) this.addBot();
       this.markLeaving();
     }

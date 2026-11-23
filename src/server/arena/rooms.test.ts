@@ -943,6 +943,60 @@ describe("active people (#117): out for OUT_IDLE_S or hidden stops counting", ()
     expect(rooms.join("Next", "tabs", INFO, client().send).room).toBe(2);
   });
 
+  test("an arena that peaked at 20 with 19 now out for OUT_IDLE_S still tops its last player up with fill bots; a moved-away member's press gets them back into it", () => {
+    const { rooms, tick } = setup(undefined, FILL_TARGET);
+    const cs = Array.from({ length: MAX_PLAYERS_PER_ARENA }, () => client());
+    const js = cs.map((c, i) => rooms.join(`p${i}`, "tabs", INFO, c.send));
+    const room = rooms.room(1)!;
+    keep(rooms, 1, js[0]!.entity);
+    for (const j of js.slice(1)) out(rooms, 1, j.entity);
+    tick(OUT_IDLE_TICKS);
+    // The out members' slots go to bots: the last player is no longer alone.
+    tick();
+    expect([room.people, room.botCount, room.awayCount, room.state.players.length]).toEqual([1, FILL_TARGET - 1, FILL_TARGET - 1, MAX_PLAYERS_PER_ARENA]);
+    const gone = js.find((j) => room.isAway(j.entity))!;
+    const back = rooms.input(1, gone.entity, press(1))!;
+    expect(back.room).toBe(1);
+    expect(room.people).toBe(2);
+    expect(room.state.players.length).toBeLessThanOrEqual(MAX_PLAYERS_PER_ARENA);
+  });
+
+  test("a moved-away member keeps their arena open after everyone else leaves, and their press gets them back into it", () => {
+    const { rooms, tick } = setup();
+    const js = Array.from({ length: MAX_PLAYERS_PER_ARENA }, (_, i) => rooms.join(`p${i}`, "tabs", INFO, client().send));
+    for (const j of js.slice(1)) keep(rooms, 1, j.entity);
+    out(rooms, 1, js[0]!.entity);
+    tick(OUT_IDLE_TICKS);
+    const n = rooms.join("New", "tabs", INFO, client().send);
+    expect(rooms.room(1)!.isAway(js[0]!.entity)).toBe(true);
+    for (const j of [...js.slice(1), n]) rooms.leave(1, j.entity);
+    expect(rooms.room(1)).toBeDefined();
+    const back = rooms.input(1, js[0]!.entity, press(1))!;
+    expect(back.room).toBe(1);
+    rooms.leave(back.room, back.entity);
+    expect(rooms.room(1)).toBeUndefined();
+  });
+
+  test("a moved-away member goes back to their own arena when it has room, even with a busier arena open", () => {
+    const { rooms, tick } = setup();
+    const js = Array.from({ length: MAX_PLAYERS_PER_ARENA }, (_, i) => rooms.join(`p${i}`, "tabs", INFO, client().send));
+    for (const j of js.slice(1)) keep(rooms, 1, j.entity);
+    out(rooms, 1, js[0]!.entity);
+    tick(OUT_IDLE_TICKS);
+    const n = rooms.join("New", "tabs", INFO, client().send);
+    keep(rooms, 1, n.entity);
+    expect(rooms.room(1)!.isAway(js[0]!.entity)).toBe(true);
+    // Arena 1 is full of people: 10 more open arena 2. Then 15 leave arena 1, which keeps 5.
+    for (let i = 0; i < 10; i++) {
+      const j = rooms.join(`q${i}`, "spaces", INFO, client().send);
+      expect(j.room).toBe(2);
+      keep(rooms, 2, j.entity);
+    }
+    for (const j of js.slice(1, 16)) rooms.leave(1, j.entity);
+    expect([rooms.room(1)!.people, rooms.room(2)!.people]).toEqual([5, 10]);
+    expect(rooms.input(1, js[0]!.entity, press(1))!.room).toBe(1);
+  });
+
   test("an away socket closing leaves nothing behind, and the arena closes once nobody is left in it", () => {
     const { rooms, timers, tick } = setup();
     const js = Array.from({ length: MAX_PLAYERS_PER_ARENA }, (_, i) => rooms.join(`p${i}`, "tabs", INFO, client().send));

@@ -29,7 +29,8 @@ export function botTagBox(nameW: number, tagW: number, out: TagBox): TagBox {
 
 /**
  * The people among `robots`, bots never counted (#90): the HUD's "N playing" (and the phone's
- * person glyph) counts as /board does (Room.size), people in your arena, you included.
+ * person glyph) counts every person on your arena's roster, you included. Unlike /board (Room.people,
+ * #117) it also counts people who are out for 30 s or have the tab hidden.
  */
 export function countPeople(robots: Iterable<{ bot: boolean }>): number {
   let n = 0;
