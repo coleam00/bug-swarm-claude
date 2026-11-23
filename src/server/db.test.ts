@@ -10,6 +10,7 @@ import {
   hideName,
   openDb,
   rankOf,
+  ranking,
   recordRunEnded,
   recordRunStarted,
   resetData,
@@ -242,6 +243,16 @@ test("bun run stats, hide and reset run their scripts", () => {
   expect(pkg.scripts.reset).toBe("bun scripts/reset.ts");
 });
 
+test("the ranking leaves out a player whose best is 0, and keeps one with points (#114)", () => {
+  run("p-zero", "2026-11-28T15:00:00.000Z", { score: 0 });
+  run("p-five", "2026-11-28T15:00:01.000Z", { score: 5 });
+  expect(ranking(db).map((e) => [e.playerId, e.score])).toEqual([["p-five", 5]]);
+  expect(topTen(db)).toEqual([{ name: "P-FIVE", score: 5 }]);
+  // A later 0 does not change the tie order of a player who has points: their first finish stays.
+  run("p-five", "2026-11-28T15:00:02.000Z", { score: 0 });
+  expect(ranking(db)[0]!.firstAt).toBe("2026-11-28T15:00:01.000Z");
+});
+
 describe("rankOf", () => {
   const entry = (playerId: string, score: number, firstAt: string): RankEntry => ({ playerId, name: playerId, score, firstAt });
   const entries = [entry("p-a", 100, "2026-11-28T15:00:01Z"), entry("p-b", 50, "2026-11-28T15:00:02Z"), entry("p-c", 50, "2026-11-28T15:00:03Z")];
@@ -253,6 +264,10 @@ describe("rankOf", () => {
 
   test("a fresh best above the stale cached one ranks by the fresh score; `row` stays the cached one", () => {
     expect(rankOf(entries, "p-c", 60, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 2 });
+  });
+
+  test("a best of 0 is not ranked (#114)", () => {
+    expect(rankOf(entries, "p-x", 0, false)).toEqual({ rank: null, ranked: entries.length, next: null, row: null });
   });
 
   test("past the top 10 there is no row", () => {

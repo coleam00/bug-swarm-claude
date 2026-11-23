@@ -10,7 +10,7 @@
 // life-over screen over the arena, which keeps playing behind it; its "Play again" calls
 // `respawn()`, which sends the respawn press once RESTART_DELAY_MS has passed. `stop()` undoes
 // everything `startArena` did: the frame loop, every listener, the probe and the socket, so a
-// remount never leaves a second socket (each one's leaving would save a life).
+// remount never leaves a second socket (each one's leaving would end a life).
 // Pickups (#73): the floor comes in each snapshot's `f` and is drawn with the bugs; a `pickup`
 // event floats the pickup's label over whoever took it (and a refactor bomb's ring goes out from
 // them, #78), and a `block` event pops their shield.

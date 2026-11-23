@@ -102,12 +102,12 @@ describe("top 10 and best", () => {
     expect(await top(a)).toEqual([{ name: "First", score: 30 }]);
     const runId = startRun(a, "player-0002", "Second");
     clock += 500;
-    endRun(runId, 0, 0, 0);
+    endRun(runId, 5, 0, 0);
     expect(await top(a)).toEqual([{ name: "First", score: 30 }]);
     clock += 500;
     expect(await top(a)).toEqual([
       { name: "First", score: 30 },
-      { name: "Second", score: 0 },
+      { name: "Second", score: 5 },
     ]);
   });
 
@@ -187,6 +187,18 @@ describe("top 10 and best", () => {
     const none = { rank: null, ranked: 1, next: null, row: null };
     expect((await standing(a, "player-0002")).me).toEqual(none);
     expect((await standing(a, "player-9999")).me).toEqual(none);
+  });
+
+  test("a player whose best is 0 is not ranked: no 0-point row in anyone's top 10, their own included (#114)", async () => {
+    const a = app();
+    await play(a, "player-0001", "Ada", 100);
+    await play(a, "player-0002", "Zero", 0);
+    // Fresh (inside the cached second) and after the cache expires: the same answer.
+    for (const wait of [0, TOP_CACHE_MS]) {
+      clock += wait;
+      expect(await top(a)).toEqual([{ name: "Ada", score: 100 }]);
+      expect(await standing(a, "player-0002")).toEqual({ top: [{ name: "Ada", score: 100 }], me: { rank: null, ranked: 1, next: null, row: null } });
+    }
   });
 
   test("a run that just finished ranks at once, and that player's own row is in their top 10 at once", async () => {
@@ -290,7 +302,7 @@ describe("top 10 and best", () => {
       for (let i = 0; i < 500; i++) {
         const id = `player-${String(i).padStart(4, "0")}`;
         upsertPlayer(db, id, `Player ${i}`, TABS, new Date(clock)); // not "P155", which reads "piss"
-        recordRunEnded(db, { runId: `run-${i}`, playerId: id, score: i, squashes: 0, seconds: 0, touch: false, upgrades: [], team: TABS }, new Date(clock + i));
+        recordRunEnded(db, { runId: `run-${i}`, playerId: id, score: i + 1, squashes: 0, seconds: 0, touch: false, upgrades: [], team: TABS }, new Date(clock + i));
       }
     })();
     expect((await standing(a, "player-0000")).me).toMatchObject({ rank: 500, ranked: 500, next: { rank: 499, points: 2 } });

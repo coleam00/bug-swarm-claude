@@ -135,7 +135,8 @@ export type TopRow = { name: string; score: number };
 export type RankEntry = { playerId: string; name: string; score: number; firstAt: string };
 
 /**
- * Every player with a finished run, by best score, non-hidden names only, highest first. Ties go
+ * Every player with a finished run and a best above 0, by best score, non-hidden names only,
+ * highest first: the top 10 never shows a 0-point row (#114). Ties go
  * to the player who finished a run first, then to the lower player id, so the order is total.
  * The top 10 is its first ten rows and a player's rank is their place in it. Stored names the
  * word lists now refuse (isShownName) are left out too: those rows stay stored, they are only
@@ -149,6 +150,7 @@ export function ranking(db: Database): RankEntry[] {
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY p.id
+       HAVING MAX(e.score) > 0
        ORDER BY score DESC, firstAt ASC, p.id ASC`,
     )
     .all(RUN_ENDED) as RankEntry[];
@@ -170,8 +172,8 @@ export function hiddenKeys(db: Database): Set<string> {
 }
 
 /**
- * Where a player stands. `rank` is their place among `ranked` visible players (null when hidden
- * or with no finished run); `next` is the rank just above and the points it takes to pass it;
+ * Where a player stands. `rank` is their place among `ranked` visible players (null when hidden,
+ * with no finished run, or with a best of 0, which is not ranked: #114); `next` is the rank just above and the points it takes to pass it;
  * `row` is their index in the top 10 rows, when they are in them.
  */
 export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
@@ -185,7 +187,7 @@ export type Me = { rank: number | null; ranked: number; next: { rank: number; po
 export function rankOf(entries: RankEntry[], playerId: string, best: number | null, hidden: boolean): Me {
   const at = entries.findIndex((e) => e.playerId === playerId);
   const row = !hidden && at >= 0 && at < 10 ? at : null;
-  if (hidden || best === null) return { rank: null, ranked: entries.length, next: null, row: null };
+  if (hidden || best === null || best <= 0) return { rank: null, ranked: entries.length, next: null, row: null };
   const mine = at >= 0 ? entries[at]! : null;
   // The ranking's order: score down, then first finish, then id. Not in the ranking yet: their
   // first finish is after the ranking was read, so after everyone in it.

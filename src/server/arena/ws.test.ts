@@ -9,7 +9,7 @@ import { DEMO_WARM_TICKS, HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROT
 import { placeBug, placePickup } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, encodeWatch, parseServerMessage, type ServerMessage, type Snapshot, type Welcome, type WireSnapshot } from "../../shared/arena/protocol";
 import { createSnapshotReader } from "../../shared/arena/view";
-import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
+import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals, topTen } from "../db";
 import { TOP_CACHE_MS } from "../app";
 import { startServer, type RunningServer, type ServerOptions } from "../serve";
 import { HIDE_SWEEP_MS as REAL_HIDE_SWEEP_MS } from "./sockets";
@@ -382,23 +382,44 @@ test(
 );
 
 test(
-  "a life ended by leaving is saved as a run with the hello's player id, team and touch flag",
+  "a short life with points ended by leaving is saved as a run with the hello's player id, team and touch flag",
   async () => {
     const key = "f".repeat(32);
     const c = await connect();
     c.send(encodeHello(PROTOCOL_VERSION, "Toucher", "spaces", key, true));
     await c.waitFor("a snapshot", () => c.got.some((m) => m.t === "snapshot"));
+    // Well under 5 s old, but with points: it is a life (#114).
+    srv.rooms.room(1)!.state.players.find((p) => p.name === "Toucher")!.score = 5;
     await c.close();
     await c.waitFor("the life saved", () => playerBest(db, key) !== null);
+    expect(playerBest(db, key)).toBe(5);
     expect(findPlayer(db, key)).toEqual({ name: "Toucher", team: "spaces" });
     expect(computeStats(db)).toMatchObject({ players: 1, finishedRuns: 1, touchShare: 100 });
-    expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
+    expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 5 });
+    expect(topTen(db)).toEqual([{ name: "Toucher", score: 5 }]);
   },
   TIMEOUT,
 );
 
 test(
-  "stopping the server (a redeploy) saves every life in progress with its score and tells every client it is restarting",
+  "300 joins that leave at once add no runs, no players, no top 10 rows and no team points (#114)",
+  async () => {
+    for (let i = 0; i < 300; i++) {
+      const c = await connect();
+      c.send(encodeHello(PROTOCOL_VERSION, `Churn${i}`, i % 2 ? "spaces" : "tabs", (0x1140000 + i).toString(16).padStart(32, "0"), false));
+      await c.waitFor("the welcome", () => c.got.some((m) => m.t === "welcome"));
+      await c.close();
+    }
+    await srv.stop(); // writes anything still queued
+    expect(computeStats(db)).toEqual({ players: 0, finishedRuns: 0, medianRunsPerPlayer: 0, touchShare: 0 });
+    expect(topTen(db)).toEqual([]);
+    expect(teamTotals(db)).toEqual({ tabs: 0, spaces: 0 });
+  },
+  60_000,
+);
+
+test(
+  "stopping the server (a redeploy) saves every life in progress that counts, with its score, and tells every client it is restarting",
   async () => {
     const [ka, kb] = ["a".repeat(32), "b".repeat(32)];
     const a = await connect();
@@ -414,9 +435,10 @@ test(
       expect(await c.closed).toBe(1012);
       expect(c.got.at(-1)).toEqual({ t: "error", code: "restarting" });
     }
-    // Saved before stop resolved: the caller closes the database next.
-    expect([playerBest(db, ka), playerBest(db, kb)]).toEqual([85, 0]);
-    expect(computeStats(db)).toMatchObject({ players: 2, finishedRuns: 2 });
+    // Saved before stop resolved: the caller closes the database next. Bob's life ended with 0
+    // points in its first seconds, so it is not a life and is not saved (#114).
+    expect([playerBest(db, ka), playerBest(db, kb)]).toEqual([85, null]);
+    expect(computeStats(db)).toMatchObject({ players: 1, finishedRuns: 1 });
     expect(srv.rooms.stats().arenas).toEqual([]);
     // A second stop (the afterEach) is the same stop.
     expect(await srv.stop()).toBe(2);

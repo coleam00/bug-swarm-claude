@@ -23,7 +23,7 @@ function fakes(stop: () => Promise<number>) {
 test("a signal stops the server (saving its lives), closes the database, then exits 0", async () => {
   const { calls, timers, deps } = fakes(async () => 3);
   await gracefulShutdown(deps)("SIGTERM");
-  expect(calls).toEqual(["stop", "closeDb", "shutdown (SIGTERM): 3 lives saved", "exit 0"]);
+  expect(calls).toEqual(["stop", "closeDb", "shutdown (SIGTERM): 3 lives ended", "exit 0"]);
   expect(timers.map((t) => t.ms)).toEqual([4500]);
 });
 
@@ -40,7 +40,7 @@ test("a second signal while stopping does nothing", async () => {
   const { calls, timers, deps } = fakes(async () => 1);
   const shutdown = gracefulShutdown(deps);
   await Promise.all([shutdown("SIGTERM"), shutdown("SIGINT")]);
-  expect(calls).toEqual(["stop", "closeDb", "shutdown (SIGTERM): 1 life saved", "exit 0"]);
+  expect(calls).toEqual(["stop", "closeDb", "shutdown (SIGTERM): 1 life ended", "exit 0"]);
   expect(timers.length).toBe(1);
 });
 
