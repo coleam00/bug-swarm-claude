@@ -715,13 +715,24 @@ test(
     const seen = p0.c.wire.length;
     await p0.c.waitFor("a watcher snapshot", () => p0.c.wire.length > seen + 2);
     // Arena 1 is full of people: the play press lands p00 in a new arena, welcomed on this socket.
-    p0.c.send(encodeInput({ seq: 1, mx: 0, my: 0, aim: 0, fire: false, dash: true }));
+    // The page had sent inputs up to 50; the press is 51, and 52 and 53 were already on their way
+    // before the welcome reached it (a real network's latency).
+    const idle = (seq: number, dash = false) => encodeInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash });
+    p0.c.send(idle(50));
+    p0.c.send(idle(51, true));
+    p0.c.send(idle(52));
+    p0.c.send(idle(53, true));
     const again = await p0.c.waitFor("a second welcome", () => p0.c.got.filter((m): m is Welcome => m.t === "welcome")[1]);
     expect(again.arena).toBe(2);
     expect(p0.c.got.some((m) => m.t === "error")).toBe(false);
     expect(srv.rooms.room(2)!.size).toBe(1);
-    // It plays there: its inputs reach its new robot.
-    await p0.c.waitFor("p00 alive in arena 2", () => p0.c.got.some((m) => m.t === "snapshot" && m.me.al === 1 && m.p.some((r) => r[0] === again.you)));
+    // It plays there: the page counts its inputs from 1 again after the welcome, and they reach its
+    // new robot (the stale 52 and 53 never did: they would have made 1 and up look old).
+    const since = p0.c.got.length;
+    const acked = p0.c.waitFor("an input acknowledged in arena 2", () =>
+      p0.c.got.slice(since).some((m) => m.t === "snapshot" && m.ack >= 1 && m.ack < 50 && m.me.al === 1 && m.p.some((r) => r[0] === again.you)),
+    );
+    await Promise.all([acked, walkRight(p0.c, acked)]);
     // Closing the socket leaves arena 2 (no ghost member there) and nothing in arena 1.
     await p0.c.close();
     await late.c.waitFor("arena 2 closed", () => srv.rooms.room(2) === undefined);
