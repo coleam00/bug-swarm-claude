@@ -3,15 +3,17 @@
 // in-process. `stats.ts`, `hide.ts` and `reset.ts` print the lines and exit with the code.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { hideLine, resetLine, statsLines } from "../src/server/admin";
 import { computeStats, hideName, openDb, resetData, type Stats } from "../src/server/db";
 
 export type CommandResult = { code: 0 | 1; out: string[]; err: string[] };
 
 const STATS_USAGE = "usage: bun run stats [-- --since <ISO time> --until <ISO time>]";
 
-class ArgError extends Error {}
+export class ArgError extends Error {}
 
-function parseStatsArgs(argv: string[]): { since?: string; until?: string } {
+/** `--since` and `--until` as UTC ISO strings; throws ArgError on anything else. `bun run admin stats` reuses it. */
+export function parseStatsArgs(argv: string[]): { since?: string; until?: string } {
   const out: { since?: string; until?: string } = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -47,16 +49,7 @@ export function statsCommand(argv: string[], dataDir: string): CommandResult {
       db.close();
     }
   }
-  return {
-    code: 0,
-    out: [
-      `players: ${stats.players}`,
-      `finished_runs: ${stats.finishedRuns}`,
-      `median_runs_per_player: ${stats.medianRunsPerPlayer.toFixed(1)}`,
-      `touch_share: ${stats.touchShare}%`,
-    ],
-    err: [],
-  };
+  return { code: 0, out: statsLines(stats), err: [] };
 }
 
 /** `bun run hide "<name>"`: hides the name as of `now`. Refuses, creating nothing, when there is no database. */
@@ -70,11 +63,7 @@ export function hideCommand(argv: string[], dataDir: string, now: Date): Command
   const db = openDb(path);
   try {
     const { key, players } = hideName(db, name, now);
-    const line =
-      players === 0
-        ? `hidden: ${key} (no saved player has this name yet; anyone playing as it now is kicked within 5 s; check the spelling if you expected a saved player)`
-        : `hidden: ${key} (${players} player${players === 1 ? "" : "s"})`;
-    return { code: 0, out: [line], err: [] };
+    return { code: 0, out: [hideLine(key, players)], err: [] };
   } finally {
     db.close();
   }
@@ -95,17 +84,13 @@ export function resetCommand(argv: string[], dataDir: string): CommandResult {
     const { runs, players } = resetData(db);
     // A running server needs no restart: its top 10 cache lasts 1 s, and a life in progress is
     // saved as a new run (with its player) when it ends.
-    return {
-      code: 0,
-      out: [`reset: deleted ${runs} run${runs === 1 ? "" : "s"} and ${players} player${players === 1 ? "" : "s"} (hidden names kept)`],
-      err: [],
-    };
+    return { code: 0, out: [resetLine(runs, players)], err: [] };
   } finally {
     db.close();
   }
 }
 
-/** What the three scripts do with a result: errors to stderr, output to stdout, then exit with the code. */
+/** What the scripts (stats, hide, reset, admin) do with a result: errors to stderr, output to stdout, then exit with the code. */
 export function finish(r: CommandResult): never {
   for (const line of r.err) console.error(line);
   for (const line of r.out) console.log(line);

@@ -12,7 +12,8 @@
     "bots": "bun scripts/bots.ts",
     "skill": "bun scripts/skill.ts",
     "playtest": "bun scripts/playtest.ts",
-    "reset": "bun scripts/reset.ts"
+    "reset": "bun scripts/reset.ts",
+    "admin": "bun scripts/admin.ts"
   },
   "dependencies": {
     "hono": "^4.6.0",

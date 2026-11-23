@@ -1,7 +1,7 @@
 // The shutdown a SIGTERM or SIGINT runs (main.ts), with fakes for the server, database, timer and exit.
 import { expect, test } from "bun:test";
 import { DT, WAVE_S } from "../shared/arena/constants";
-import { SHUTDOWN_MESSAGE, START_LEAD_S, buildIdFrom, gracefulShutdown, onShutdownMessage, startTickFrom, type ShutdownDeps } from "./serve";
+import { SHUTDOWN_MESSAGE, START_LEAD_S, buildIdFrom, gracefulShutdown, onShutdownMessage, startTickFrom, startupFrom, type ShutdownDeps } from "./serve";
 
 function fakes(stop: () => Promise<number>) {
   const calls: string[] = [];
@@ -73,4 +73,24 @@ test("BUG_SWARM_START_WAVE is off unless it is a whole wave of at least 2; then 
   expect(startTickFrom({})).toBe(0);
   expect(startTickFrom({ BUG_SWARM_START_WAVE: "5" })).toBe(Math.round((4 * WAVE_S - START_LEAD_S) / DT));
   expect(startTickFrom({ BUG_SWARM_START_WAVE: "2" }) * DT).toBeCloseTo(WAVE_S - START_LEAD_S, 9);
+});
+
+test("startupFrom: production without DATA_DIR starts nothing", () => {
+  for (const DATA_DIR of [undefined, "", "  "]) {
+    const s = startupFrom({ NODE_ENV: "production", DATA_DIR, ADMIN_TOKEN: "a-token-of-at-least-16" }, 1);
+    expect(s).toEqual({ error: expect.stringContaining("DATA_DIR is not set") });
+  }
+});
+
+test("startupFrom: ADMIN_TOKEN reaches the server's options, never the log lines", () => {
+  const token = "a-token-of-at-least-16";
+  const s = startupFrom({ NODE_ENV: "production", DATA_DIR: "/data", PORT: "8080", ADMIN_TOKEN: token, BUILD_ID: "b1" }, 1);
+  if ("error" in s) throw new Error(s.error);
+  expect(s.dataDir).toBe("/data");
+  expect(s.options).toEqual({ port: 8080, hostname: "0.0.0.0", distDir: "dist", buildId: "b1", arenaStartTick: 0, adminToken: token });
+  for (const line of s.lines) expect(line).not.toContain(token);
+  const off = startupFrom({}, 1);
+  if ("error" in off) throw new Error(off.error);
+  expect(off.dataDir).toBe("data");
+  expect(off.options.adminToken).toBeNull();
 });
