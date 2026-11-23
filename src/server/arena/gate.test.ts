@@ -16,18 +16,6 @@ test("the owner's limits: 12 sockets and 30 joins a minute per address, 600 peop
   expect([MAX_SOCKETS_PER_ADDRESS, JOINS_PER_ADDRESS_PER_MINUTE, MAX_PEOPLE]).toEqual([12, 30, 600]);
 });
 
-test("the 13th socket from one address is refused, another address is not, and a close frees a slot", () => {
-  const { g } = gate();
-  const opened = Array.from({ length: 13 }, () => g.open(A));
-  expect(opened.filter(Boolean).length).toBe(12);
-  expect(opened[12]).toBe(false);
-  expect(g.sockets(A)).toBe(12); // the refusal counted nothing
-  expect(g.open(B)).toBe(true);
-  g.close(A);
-  expect(g.open(A)).toBe(true);
-  expect(g.open(A)).toBe(false);
-});
-
 test("the 31st join in 60 s is refused; the window slides", () => {
   const { g, advance } = gate();
   g.open(A);

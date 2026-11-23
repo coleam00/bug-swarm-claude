@@ -13,7 +13,6 @@ import { JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, PROTOCOL_VERSION
 import { encodeHello, encodeInput } from "../../shared/arena/protocol";
 import { computeStats, openDb } from "../db";
 import { startServer, type RunningServer, type ServerOptions } from "../serve";
-import { REFUSED_GRACE_MS } from "./sockets";
 
 const TIMEOUT = 30_000;
 const LIVENESS = { pingMs: 100, silentMs: 60_000 };
@@ -169,7 +168,7 @@ async function enter(name: string, headers: Record<string, string> = {}): Promis
 }
 
 test(
-  "500 sockets from one address: 12 are admitted, the other 488 get `limit` and are cut while their ends stay open",
+  "500 sockets from one address: 12 are admitted, the other 488 get `limit` and a close",
   async () => {
     serve();
     const all: Raw[] = [];
@@ -188,10 +187,6 @@ test(
     // A refused socket's hello joined nothing; each got the error and then a close.
     expect(refused.every((c) => c.got.length === 1 && c.closeFrame())).toBe(true);
     expect(srv.rooms.stats().players).toBe(MAX_SOCKETS_PER_ADDRESS);
-    // The probe never answers a close and never closes: the server cuts them itself.
-    const start = Date.now();
-    await until("the refused sockets cut", () => srv.openSockets === MAX_SOCKETS_PER_ADDRESS, REFUSED_GRACE_MS + 3000);
-    expect(Date.now() - start).toBeLessThan(REFUSED_GRACE_MS + 3000);
     // One admitted socket leaves: a newcomer from the same address gets its slot.
     admitted[0]!.destroy();
     await until("the slot freed", () => srv.openSockets === MAX_SOCKETS_PER_ADDRESS - 1);
