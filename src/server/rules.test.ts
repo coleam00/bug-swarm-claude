@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FILL_BOT_NAMES } from "./arena/fill";
-import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES } from "./blocked-words";
+import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES, RESERVED_WORDS } from "./blocked-words";
 import {
   TEAMS,
   checkName,
@@ -177,6 +177,19 @@ describe("name rules", () => {
     }
   });
 
+  test("a role or platform word refuses a name as any whole word of it; a person's name only as the whole name (#106)", () => {
+    const refused = ["Mod Squad", "Squad Mod", "The Mod", "M0d Squad", "Mod2 Squad", "m o d squad", "Official Bob", "Bob_Official", "xX_admin_Xx", "Addmin Bob", "Big Moderator",
+      "Host 2 Go", "Your Host", "Lead Streamer", "YouTube Fan", "Twitch-Kid", "Tw1tch Kid", "Al Mod", "Ghost Host"];
+    expect(refused.filter((n) => checkName(n).ok)).toEqual([]);
+    for (const n of refused) expect(checkName(n)).toEqual({ ok: false, reason: "reserved" });
+    const plays = ["Cole Smith", "Smith Cole", "Cole Porter", "Archon Fan", "Modern", "Modern Art", "Hostage", "Ghost", "Admiral", "Admins Team", "Twitcher", "YouTuber",
+      "Streamers Fan", "Moody Bob", "Hosta Lily", "You Tube Fan", "ModSquad"];
+    expect(plays.filter((n) => !checkName(n).ok)).toEqual([]);
+    // Every word entry is a reserved entry, and no person's or factory name is one.
+    expect(RESERVED_WORDS.filter((w) => !RESERVED_NAMES.includes(w) && !RESERVED_EXACT.includes(w))).toEqual([]);
+    expect(RESERVED_WORDS.filter((w) => ["cole", "colemedin", "dynamous", "archon"].includes(w))).toEqual([]);
+  });
+
   test("the boards show a stored name only if the lists allow it, whatever its length", () => {
     expect(isShownName("Alice")).toBe(true);
     expect(isShownName("A")).toBe(true); // too short to pick now, but the lists don't refuse it
@@ -186,7 +199,7 @@ describe("name rules", () => {
   });
 
   test("the lists: lowercase a to z, no duplicates, a few hundred blocked words, nothing redundant", () => {
-    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES, RESERVED_EXACT]) {
+    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES, RESERVED_EXACT, RESERVED_WORDS]) {
       expect(list.filter((w) => !/^[a-z]+$/.test(w))).toEqual([]);
       expect(new Set(list).size).toBe(list.length);
     }

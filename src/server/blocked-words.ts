@@ -3,7 +3,8 @@
 //
 // How a name is matched (src/server/rules.ts, listedReason):
 // - Split into words on space, "-" and "_". Every list but the reserved lists (RESERVED_NAMES
-//   and RESERVED_EXACT, below, matched against the whole name) is matched inside one word at a
+//   and RESERVED_EXACT, below, matched against the whole name, and their RESERVED_WORDS also
+//   against each whole word) is matched inside one word at a
 //   time, never across the space between two: "Anna Ziegler" holds "nazi" and "Matt Watson"
 //   holds "twat" only once the space is gone. A run of one- and two-letter words is a
 //   word spelled out, so it is joined back first: "F-U_C K", "n a z i" and "fu ck" are one word.
@@ -103,6 +104,14 @@
 // real names that way ("Mood", "Colle", "Hoost"), so only digit swaps, separators and a number at
 // either end are undone ("C0le", "You Tube", "Host 2" are refused). A name that only contains one
 // ("Archonaut", "Nicole", "Coleman", "Hosta", "Moderna") is fine.
+//
+// RESERVED_WORDS (owner ruling on #106): the role and platform words among those two lists also
+// refuse a name when they are any whole word of it, words split as for the blocked lists and each
+// read the way its list reads it: "Mod Squad", "Official Bob", "xX_admin_Xx", "Host 2 Go" and
+// "YouTube Fan" are refused. Only a whole word: "Modern", "Hostage", "Admiral" and "Twitcher"
+// play. The names of people and of the factory (cole, colemedin, dynamous, archon) stay
+// whole-name only, so "Cole Smith" plays. A word split across spaces is not read whole
+// ("You Tube Fan" plays; "You Tube" alone is refused as the whole name).
 // Names that read as a bot are kept for the server's bots by rules.ts isBotName, not here, so
 // fill bots keep their names on the boards.
 //
@@ -544,3 +553,9 @@ export const RESERVED_NAMES: readonly string[] = ["colemedin", "dynamous", "arch
 
 /** Reserved like RESERVED_NAMES, but without the repeated-letter rule (#106): the host and the platforms. */
 export const RESERVED_EXACT: readonly string[] = ["cole", "host", "streamer", "mod", "official", "youtube", "twitch"];
+
+/**
+ * The entries of RESERVED_NAMES and RESERVED_EXACT that also refuse a name as any whole word of it
+ * (#106): the roles and the platforms, never a person's or the factory's name.
+ */
+export const RESERVED_WORDS: readonly string[] = ["host", "streamer", "mod", "moderator", "admin", "official", "youtube", "twitch"];

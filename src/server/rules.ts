@@ -1,6 +1,6 @@
 // Name rules and teams. Pure: no bun:sqlite, node:* or Bun globals, because the browser imports
 // this file too (name entry checks names before the server sees them).
-import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES } from "./blocked-words";
+import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES, RESERVED_WORDS } from "./blocked-words";
 
 // Teams.
 /**
@@ -68,6 +68,9 @@ const ANYWHERE = new RegExp(alternation(BLOCKED_ANYWHERE));
 const WHOLE = new RegExp(`^(?:${alternation(BLOCKED_WHOLE)})s*$`);
 const RESERVED = new RegExp(`^(?:${alternation(RESERVED_NAMES)})$`);
 const EXACT = new Set(RESERVED_EXACT);
+// RESERVED_WORDS, each read with its own list's rule, as a whole word of the name.
+const RESERVED_WORD = new RegExp(`^(?:${alternation(RESERVED_NAMES.filter((w) => RESERVED_WORDS.includes(w)))})$`);
+const EXACT_WORD = new Set(RESERVED_EXACT.filter((w) => RESERVED_WORDS.includes(w)));
 // Longest first, so a long exception is cut before a shorter one inside it.
 const EXCEPTIONS_LONGEST_FIRST = [...EXCEPTIONS].sort((a, b) => b.length - a.length);
 
@@ -129,7 +132,8 @@ function cutExceptions(compact: string): string {
  * two longer words: "Anna Ziegler" holds "nazi" and "Matt Watson" holds "twat" only once the
  * space is gone. A short word is also read glued to its neighbours (lookupWords). BLOCKED_WHOLE
  * words are also looked for in the parts of a word that a capital starts ("BigDick",
- * "ImASpic"). Reserved names are matched against the whole name.
+ * "ImASpic"). Reserved names are matched against the whole name, and the role and platform
+ * words among them (RESERVED_WORDS) also against each whole word of it ("Mod Squad").
  */
 export function listedReason(name: string): "blocked" | "reserved" | null {
   const words = lookupWords(name);
@@ -138,6 +142,8 @@ export function listedReason(name: string): "blocked" | "reserved" | null {
   if (wordReadings.some((c) => ANYWHERE.test(cutExceptions(c)))) return "blocked";
   if ([...wordReadings, ...parts.flatMap(readings)].some((c) => WHOLE.test(c))) return "blocked";
   if (readings(name).some((c) => RESERVED.test(c) || EXACT.has(c))) return "reserved";
+  const roleWord = (c: string) => RESERVED_WORD.test(c) || EXACT_WORD.has(c);
+  if (nameWords(name).some((w) => readings(w.text).some(roleWord))) return "reserved";
   return null;
 }
 
