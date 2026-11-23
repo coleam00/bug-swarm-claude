@@ -282,6 +282,8 @@ test(
     const deaf = await enter("Deaf", { "X-Real-IP": "203.0.113.20" });
     const reader = await enter("Reads", { "X-Real-IP": "203.0.113.21" });
     expect(welcomed(deaf) && welcomed(reader)).toBe(true);
+    // A point, so its life counts and is saved when the drop ends it (#114).
+    srv.rooms.room(1)!.state.players.find((p) => p.name === "Deaf")!.score = 1;
     deaf.pause();
     // Both keep sending inputs (so the silent drop can't be what ends them) and flood pings, whose
     // pongs fill a send buffer nobody drains. Not a fixed byte count: loopback buffers differ by OS.
@@ -299,7 +301,8 @@ test(
     expect(deaf.ended()).toBe(true);
     expect(reader.ended()).toBe(false);
     expect(srv.rooms.stats().players).toBe(1);
-    // Its life ended with the drop and was saved, as any disconnect's is.
+    // Its life ended with the drop and was saved, as any disconnect's is that counts (it has a
+    // point, so #114's 0-point rule does not apply).
     await until("the life saved", () => computeStats(db).finishedRuns === 1, 5000);
   },
   TIMEOUT,

@@ -205,7 +205,7 @@ function connect(mode: Mode, url?: string): WatchConnection {
     const read = createSnapshotReader();
     lastHeard = performance.now();
     socket.addEventListener("open", () => {
-      // Closed before it opened: never say hello (a hello joins, and leaving saves a life).
+      // Closed before it opened: never say hello (a hello joins, and leaving ends a life).
       if (ws !== socket) return;
       sayHello(socket);
     });

@@ -59,11 +59,11 @@ export type RunningServer = {
   /** Sockets open on /ws now, welcomed, watching, or refused and not yet closed. */
   readonly openSockets: number;
   /**
-   * Stops the server for a redeploy (or a test's end): ends and saves every life in progress with
-   * its score so far, sends every socket `error restarting` and closes it, stops the listener
-   * (waiting at most LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the
-   * number of lives it ended; rejects if the listener stop does. Calling it again returns the same
-   * promise.
+   * Stops the server for a redeploy (or a test's end): ends every life in progress and saves each
+   * that counts (lives.ts countsAsLife: not a 0-point life under 5 s) with its score so far, sends
+   * every socket `error restarting` and closes it, stops the listener (waiting at most
+   * LISTENER_STOP_WAIT_MS for it), and writes every queued life. Resolves to the number of lives it
+   * ended; rejects if the listener stop does. Calling it again returns the same promise.
    */
   stop(): Promise<number>;
 };
@@ -86,7 +86,7 @@ export type ShutdownDeps = {
 };
 
 /**
- * The SIGTERM / SIGINT handler's work (main.ts wires the signals, and the IPC shutdown message): stops the server (lives saved,
+ * The SIGTERM / SIGINT handler's work (main.ts wires the signals, and the IPC shutdown message): stops the server (lives ended, see lives.ts countsAsLife;
  * sockets told to reconnect), closes the database and exits 0. If that has not finished within
  * `budgetMs` it exits 1 anyway. A second signal while it runs does nothing.
  */
@@ -101,9 +101,10 @@ export function gracefulShutdown(deps: ShutdownDeps): (signal: string) => Promis
       deps.exit(1);
     }, deps.budgetMs ?? SHUTDOWN_BUDGET_MS);
     try {
-      const saved = await deps.stop();
+      const ended = await deps.stop();
       deps.closeDb();
-      deps.log(`shutdown (${signal}): ${saved} ${saved === 1 ? "life" : "lives"} saved`);
+      // Ended, not saved: a 0-point life under 5 s ends but is never saved (#114).
+      deps.log(`shutdown (${signal}): ${ended} ${ended === 1 ? "life" : "lives"} ended`);
       deps.exit(0);
     } catch (err) {
       deps.log(`shutdown (${signal}): failed: ${String(err)}`);
@@ -255,8 +256,8 @@ export function startServer(opts: ServerOptions): RunningServer {
 
   let stopping: Promise<number> | null = null;
   const stop = async (): Promise<number> => {
-    // While the arenas still exist: every life in progress ends and is queued, then written at
-    // once, so the lives are on disk even if a later step hangs.
+    // While the arenas still exist: every life in progress ends, and those that count (#114: not a
+    // 0-point life under 5 s) are queued, then written at once, so they are on disk even if a later step hangs.
     const ended = rooms.endAll();
     lives.flush();
     sockets.restart();

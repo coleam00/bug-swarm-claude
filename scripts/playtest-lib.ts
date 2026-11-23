@@ -1234,7 +1234,7 @@ export function checkScenarioLateJoin(logs: PageLog[]): CheckResult {
 /**
  * What the harness saw of the restart: the old server's PID and how it stopped (`graceful`: it
  * exited on its own after the IPC shutdown, with `code`, `ms` after it was asked), the new one's
- * PID, and the old server's shutdown log line (its lives saved), if it printed one.
+ * PID, and the old server's shutdown log line (the lives it ended), if it printed one.
  */
 export type RestartReport = { pid0: number; pid1: number; code: number | null; ms: number; graceful: boolean; logLine: string | null };
 

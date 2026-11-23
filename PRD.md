@@ -9,7 +9,7 @@ Release 1 played well alone, but the robot fired by itself, so there was little 
 ## The bet
 
 - **Hypothesis:** If viewers drop into shared arenas where they aim, dodge, revive each other and race for their team, at least 150 viewers will play during the stream and the median player will play at least 3 lives, because skill, other people and the team race make "one more life" compelling.
-- **Command:** `bun run stats -- --since <ISO> --until <ISO>` prints the same four lines as release 1, where a **run is one life** in the arena (spawn to out): `players`, `finished_runs`, `median_runs_per_player`, `touch_share` (share of lives played with touch controls). Bot lives never count.
+- **Command:** `bun run stats -- --since <ISO> --until <ISO>` prints the same four lines as release 1, where a **run is one life** in the arena (spawn to out; a life that ended with 0 points within its first 5 s, a refresh or a dropped connection, is not one, owner ruling #114): `players`, `finished_runs`, `median_runs_per_player`, `touch_share` (share of lives played with touch controls). Bot lives never count.
 - **Threshold:** `players` ≥ 150 and `median_runs_per_player` ≥ 3.0 during the stream window (Sat 11/28 9:00 to 11:00 AM CT).
 - **Skill is measured:** `bun run skill` plays seeded arenas with scripted policies and must show an aiming player out-scoring a player who only moves and fires straight ahead by at least 2x (median), aiming late joiners living at least 0.8x as long as early joiners (the mover's ratio is reported, not gated), and an idle newcomer surviving at least 10 s.
 
@@ -34,7 +34,7 @@ Release 1 played well alone, but the robot fired by itself, so there was little 
 - Each arena holds at most 20 players (people and bots). One server process handles at least 200 connected players across arenas with a server tick under 10 ms at p95, measured by `bun run bots`.
 - Clients render at 60 fps with a full arena on a mid-range laptop and phone (desktop Chrome with device emulation counts).
 - 20 Hz server ticks; clients predict their own movement and interpolate everything else about 100 ms behind, so controls feel immediate on a 100 ms connection.
-- Redeploy-safe: on shutdown every life in progress is ended and saved; clients reconnect with backoff and reload when the server's build id changes.
+- Redeploy-safe: on shutdown every life in progress is ended and saved (except a 0-point life under 5 s, which is not a life); clients reconnect with backoff and reload when the server's build id changes.
 - Every name shown passes the name rules, and `bun run hide "<name>"` removes it from every board and every live arena within 5 seconds.
 - No account, no purchases, no ads, no audio.
 
@@ -47,7 +47,7 @@ Release 1 played well alone, but the robot fired by itself, so there was little 
 - [ ] Downed players can be revived by anyone; lives end after 10 s down; one tap respawns.
 - [ ] Scores are server-side; the top 10, best, team totals, `/board` and `bun run stats` count human arena lives only.
 - [ ] `bun run bots -- --url <base> --count 200 --seconds 120` runs 200 WebSocket bots across arenas with 0 errors and a tick p95 under 10 ms.
-- [ ] Killing the server mid-arena saves every life in progress; on restart clients reconnect without a manual reload, and a new build id reloads them.
+- [ ] Killing the server mid-arena saves every life in progress (a 0-point life under 5 s is not a life, #114); on restart clients reconnect without a manual reload, and a new build id reloads them.
 - [ ] A multi-player playtest drives several real browser players at once (move, aim, fire, revive) and checks that their screens agree.
 
 ## How the work is filed

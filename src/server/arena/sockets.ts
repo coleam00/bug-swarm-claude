@@ -10,9 +10,9 @@
 // idle timeout can't do this: the tick's snapshots keep it alive.
 // A hidden name (`bun run hide`, or a stored name the word lists now refuse) is refused at hello,
 // and every HIDE_SWEEP_MS the joined sockets are checked against it, off the tick: a name hidden
-// mid-life gets the same `error name` and close, and leaving saves its life as a disconnect does.
+// mid-life gets the same `error name` and close, and leaving ends its life as a disconnect does.
 // When the server stops (a redeploy), `restart` sends every socket `error restarting` and closes it
-// (the lives were already ended and saved, Rooms.endAll); from then on any socket is refused the same
+// (the lives were already ended, Rooms.endAll; see lives.ts countsAsLife); from then on any socket is refused the same
 // way, so a quick reconnect can't join an arena on a server that is going away.
 // A socket may `watch` instead of saying hello (#79, the start screen): it gets a welcome with
 // `you: 0` and the arena's events and snapshots, takes no player slot, and its inputs are dropped.
