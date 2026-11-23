@@ -1,6 +1,6 @@
 // The per-address gate with a hand-stepped clock (ws.test.ts covers it over real sockets).
 import { expect, test } from "bun:test";
-import { JOINS_PER_ADDRESS_PER_MINUTE, MAX_PEOPLE, MAX_SOCKETS_PER_ADDRESS } from "../../shared/arena/constants";
+import { JOINS_PER_ADDRESS_PER_MINUTE, MAX_PEOPLE, MAX_SOCKETS_PER_ADDRESS, MAX_WATCHERS_PER_ADDRESS } from "../../shared/arena/constants";
 import { GATE_WINDOW_MS, createAddressGate, createOpenGate } from "./gate";
 
 const A = "203.0.113.7";
@@ -8,12 +8,42 @@ const B = "198.51.100.4";
 
 function gate() {
   let t = 1_000_000;
-  const g = createAddressGate({ maxSockets: MAX_SOCKETS_PER_ADDRESS, joinsPerMinute: JOINS_PER_ADDRESS_PER_MINUTE, now: () => t });
+  const g = createAddressGate({ maxSockets: MAX_SOCKETS_PER_ADDRESS, maxWatchers: MAX_WATCHERS_PER_ADDRESS, joinsPerMinute: JOINS_PER_ADDRESS_PER_MINUTE, now: () => t });
   return { g, advance: (ms: number) => void (t += ms) };
 }
 
 test("the owner's limits: 12 sockets and 30 joins a minute per address, 600 people", () => {
   expect([MAX_SOCKETS_PER_ADDRESS, JOINS_PER_ADDRESS_PER_MINUTE, MAX_PEOPLE]).toEqual([12, 30, 600]);
+});
+
+test("6 watchers per address (#119), below the socket cap so it can ever fire", () => {
+  expect(MAX_WATCHERS_PER_ADDRESS).toBe(6);
+  expect(MAX_WATCHERS_PER_ADDRESS).toBeLessThan(MAX_SOCKETS_PER_ADDRESS);
+});
+
+test("the 7th watcher from one address is refused; one unwatch frees a slot; other addresses are unaffected", () => {
+  const { g } = gate();
+  for (let i = 0; i < 6; i++) expect(g.watch(A)).toBe(true);
+  expect(g.watch(A)).toBe(false);
+  expect(g.watchers(A)).toBe(6); // the refusal counted nothing
+  for (let i = 0; i < 6; i++) expect(g.watch(B)).toBe(true);
+  g.unwatch(A);
+  expect(g.watchers(A)).toBe(5);
+  expect(g.watch(A)).toBe(true);
+  expect(g.watch(A)).toBe(false);
+});
+
+test("an address with watchers is not forgotten; it is once its watchers and sockets are gone", () => {
+  const { g } = gate();
+  g.open(A);
+  g.watch(A);
+  g.close(A);
+  expect(g.size).toBe(1); // still watching: its count must survive
+  g.unwatch(A);
+  expect(g.size).toBe(0);
+  g.unwatch(A); // an unwatch with nothing counted changes nothing
+  expect(g.watchers(A)).toBe(0);
+  expect(g.size).toBe(0);
 });
 
 test("the 31st join in 60 s is refused; the window slides", () => {
@@ -67,6 +97,8 @@ test("the open gate (BUG_SWARM_ALLOW_LOAD=1) allows everything and remembers not
   for (let i = 0; i < 1000; i++) {
     expect(g.open(A)).toBe(true);
     expect(g.join(A)).toBe(true);
+    expect(g.watch(A)).toBe(true);
   }
+  expect(g.watchers(A)).toBe(0);
   expect(g.size).toBe(0);
 });

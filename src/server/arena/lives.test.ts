@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { computeStats, findPlayer, openDb, playerBest, teamTotals, topTen, upsertPlayer } from "../db";
-import { createLifeSaver, writeLife } from "./lives";
+import { countsAsLife, createLifeSaver, writeLife } from "./lives";
 import type { LifeRecord } from "./room";
 
 const KEY = "a".repeat(32);
@@ -22,6 +22,27 @@ beforeEach(() => {
   db = openDb(":memory:");
 });
 afterEach(() => db.close());
+
+describe("what counts as a life (#114)", () => {
+  const saverNow = () => createLifeSaver(db, { defer: () => {} });
+
+  test("0 points within the first 5 s is not a life; points, or 5 s, are", () => {
+    // seconds = ticks * 50 ms: 99 ticks is 4.95 s, 100 ticks is 5 s.
+    expect(countsAsLife(0, 4.95)).toBe(false);
+    expect(countsAsLife(0, 0)).toBe(false);
+    expect(countsAsLife(0, 5)).toBe(true);
+    expect(countsAsLife(1, 0.05)).toBe(true);
+  });
+
+  test("a 0-point life of 5 s or more is saved and counted, but not ranked", () => {
+    const saver = saverNow();
+    saver.save(life({ score: 0, kills: 0, seconds: 6 }));
+    saver.flush();
+    expect(computeStats(db).finishedRuns).toBe(1);
+    expect(playerBest(db, KEY)).toBe(0);
+    expect(topTen(db)).toEqual([]);
+  });
+});
 
 describe("saving a life", () => {
   test("a saved life counts in the top 10, the player's best, team totals and the bet's stats", () => {

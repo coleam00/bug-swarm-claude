@@ -1,4 +1,5 @@
-// Saving finished arena lives (#55). A life is a run (PRD.md, "The bet"): the server writes it
+// Saving finished arena lives (#55). A life is a run (PRD.md, "The bet"), except a 0-point life
+// that ended within its first 5 s, which is never saved (countsAsLife, #114). The server writes it
 // through db.ts as a run_started and a run_ended, so the top 10, best, team totals, /board and
 // `bun run stats` count it with no change. Lives end inside the tick, which must never wait on the
 // database (engineering.md, "Server budget"), so `save` only queues; the queue is written on the
@@ -7,8 +8,20 @@ import type { Database } from "bun:sqlite";
 import { findPlayer, recordRunEnded, recordRunStarted, upsertPlayer } from "../db";
 import type { LifeRecord } from "./room";
 
+/** A life shorter than this, with 0 points, is not a life (#114). */
+export const MIN_LIFE_S = 5;
+
+/**
+ * Whether a finished life counts as a run. A life with 0 points that ended within its first 5 s
+ * (a refresh, a dropped connection, a redeploy in its first seconds) is not a life: it is never
+ * saved, so it is in no stats, top 10 or team total (#114, owner ruling). Anything with points counts.
+ */
+export function countsAsLife(score: number, seconds: number): boolean {
+  return score > 0 || seconds >= MIN_LIFE_S;
+}
+
 export type LifeSaver = {
-  /** Queues a finished life. Never throws, never touches the database. */
+  /** Queues a finished life, or drops it when it is not one (countsAsLife). Never throws, never touches the database. */
   save(r: LifeRecord): void;
   /** Writes everything queued now (the server calls it when it stops). */
   flush(): void;
@@ -56,6 +69,7 @@ export function createLifeSaver(
 
   return {
     save(r) {
+      if (!countsAsLife(r.score, r.seconds)) return;
       queue.push(r);
       if (!scheduled) {
         scheduled = true;

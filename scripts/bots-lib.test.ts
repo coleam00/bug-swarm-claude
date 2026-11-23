@@ -13,6 +13,7 @@ import {
   botName,
   botTeam,
   budgetVerdict,
+  refusalHint,
   countBytes,
   exitCode,
   createTally,
@@ -23,7 +24,6 @@ import {
   rateStats,
   secondHalfKbps,
   stepWander,
-  watcherRates,
   wsUrl,
 } from "./bots-lib";
 
@@ -198,25 +198,34 @@ test("--watchers opens watch sockets; --count 0 is allowed only with watchers (a
   expect(() => parseBotsArgs(["--url", "http://x", "--watchers", "-1"])).toThrow();
 });
 
-test("the summary gives each watcher's received KB/s, mean and max", () => {
-  expect(watcherRates([])).toBeNull();
-  expect(watcherRates([
-    { bytes: 300_000, seconds: 10 },
-    { bytes: 500_000, seconds: 10 },
-  ])).toEqual({ mean: 40, max: 50 });
+test("the summary gives each watcher's second-half KB/s, mean, p95 and max, and a budget line for them (#119)", () => {
   const tally = createTally();
-  tally.watchers.push({ bytes: 650_000, seconds: 10 });
+  tally.watching = 2;
+  tally.watcherKbps.push(65, 25);
   const args = { url: "u", count: 0, seconds: 10, policy: "aimer" as const, watchers: 2 };
-  tally.watchers.push({ bytes: 250_000, seconds: 10 });
-  const text = formatSummary(args, tally, 10, null).join(" ");
-  expect(text).toContain("2 of 2");
-  expect(text).toContain("45.0"); // the mean
-  expect(text).toContain("65.0"); // the max
-  expect(formatSummary({ ...args, watchers: 0 }, tally, 10, null).join(" ")).not.toContain("watchers:");
+  const text = formatSummary(args, tally, 10, { p50: 1, p95: 2 }).join("\n");
+  expect(text).toContain("watchers: 2 of 2 watching, second half, payload: mean 45.0 KB/s, p95 65.0 KB/s, max 65.0 KB/s");
+  expect(text).toContain("budget: at most 40 KB/s per watcher: MISS (max 65.0 KB/s)");
+  expect(text).toContain("verdict: MISS (a watcher received 65.0 KB/s, over 40 KB/s)");
+  tally.watcherKbps.splice(0, 2, 30, 25);
+  expect(formatSummary(args, tally, 10, { p50: 1, p95: 2 }).join("\n")).toContain("budget: at most 40 KB/s per watcher: pass");
+  // Watchers refused (a server without BUG_SWARM_ALLOW_LOAD=1): the line says so, not a bandwidth miss.
+  const refused = formatSummary({ ...args, watchers: 300 }, { ...tally, watching: 6, watcherKbps: [8, 8] }, 10, { p50: 1, p95: 2 }).join("\n");
+  expect(refused).toContain("budget: at most 40 KB/s per watcher: MISS (only 6 of 300 watching: the rest were refused, see the errors)");
+  const none = formatSummary({ ...args, count: 1, watchers: 0 }, tally, 10, null).join(" ");
+  expect(none).not.toContain("watchers:");
+  expect(none).not.toContain("per watcher");
+});
+
+test("a refusal from the per-address limits says, once, to start the server with BUG_SWARM_ALLOW_LOAD=1 (#104, #119)", () => {
+  expect(refusalHint("limit")).toContain("BUG_SWARM_ALLOW_LOAD=1");
+  expect(refusalHint("full")).toContain("per-address watcher limit (6)");
+  expect(refusalHint("full")).toContain("BUG_SWARM_ALLOW_LOAD=1");
+  expect(refusalHint("name")).toBeNull();
 });
 
 describe("the budget gate (#89)", () => {
-  const pass = { errors: 0, joins: 200, count: 200, tick: { p50: 1, p95: 2 }, kbps: rateStats([30, 35, 39.9])! };
+  const pass = { errors: 0, joins: 200, count: 200, tick: { p50: 1, p95: 2 }, kbps: rateStats([30, 35, 39.9])!, watchers: 0, watching: 0, watcherKbps: null };
 
   test("a bot's KB/s is its payload over the run's second half, or its part of it when it was welcomed late", () => {
     expect(secondHalfKbps({ first: 999_999, second: 1_800_000, welcomedAt: 0 }, 60_000, 120_000)).toBe(30);
@@ -261,8 +270,22 @@ describe("the budget gate (#89)", () => {
     expect(budgetVerdict({ ...pass, kbps: rateStats([30, KBPS_PER_PLAYER_BUDGET + 0.1]) })).toEqual(["a player received 40.1 KB/s, over 40 KB/s"]);
     expect(budgetVerdict({ ...pass, kbps: rateStats([KBPS_PER_PLAYER_BUDGET]) })).toEqual([]);
     expect(budgetVerdict({ ...pass, kbps: null })).toEqual(["no per-player bandwidth measured"]);
-    // Watchers only: errors and stats are all that count.
-    expect(budgetVerdict({ errors: 0, joins: 0, count: 0, tick: { p50: null, p95: null }, kbps: null })).toEqual([]);
+    // No players: the players' gates do not apply.
+    expect(budgetVerdict({ ...pass, joins: 0, count: 0, tick: { p50: null, p95: null }, kbps: null })).toEqual([]);
+  });
+
+  test("watchers (#119) are held to the per-player budget, second-half max, with or without players", () => {
+    const watched = { ...pass, watchers: 300, watching: 300, watcherKbps: rateStats([20, 39])! };
+    expect(budgetVerdict(watched)).toEqual([]);
+    expect(budgetVerdict({ ...watched, watcherKbps: rateStats([20, 41]) })).toEqual(["a watcher received 41.0 KB/s, over 40 KB/s"]);
+    expect(budgetVerdict({ ...watched, watching: 260 })).toEqual(["only 260 of 300 watchers watching"]);
+    expect(budgetVerdict({ ...watched, watcherKbps: null })).toEqual(["no per-watcher bandwidth measured"]);
+    // --count 0 --watchers n: an empty server's demo arena is gated too.
+    const demo = { ...watched, joins: 0, count: 0, kbps: null };
+    expect(budgetVerdict(demo)).toEqual([]);
+    expect(budgetVerdict({ ...demo, watcherKbps: rateStats([41]) })).toEqual(["a watcher received 41.0 KB/s, over 40 KB/s"]);
+    // No watchers asked for: nothing about them.
+    expect(budgetVerdict({ ...pass, watcherKbps: rateStats([99]) })).toEqual([]);
   });
 
   test("the summary prints per-player KB/s, memory, a budget line per gate and the verdict", () => {

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { TEAMS, isShownName, isTeam, nameKey, type Team } from "./rules";
 
 // Every event the app records, named once. The server writes them and `bun run stats` reads them,
@@ -31,8 +31,11 @@ const EVENT_COLUMNS: [name: string, type: string][] = [
 
 // One SQLite file holds the app's data. Tables are created here.
 export function openDb(path: string): Database {
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-  const db = new Database(path, { create: true });
+  // Resolve first: Bun on Windows throws EEXIST from a recursive mkdir of an existing folder
+  // given as a relative path with `..` (#113).
+  const file = path === ":memory:" ? path : resolve(path);
+  if (file !== ":memory:") mkdirSync(dirname(file), { recursive: true });
+  const db = new Database(file, { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
   // `bun run hide` writes from a second process while the server runs: wait, don't fail.
   db.exec("PRAGMA busy_timeout = 5000;");
@@ -136,8 +139,8 @@ export type RankEntry = { playerId: string; name: string; score: number; firstAt
 
 /**
  * One row per name (`nameKey`, any case), each at its best life, highest first, non-hidden
- * names only, so one name can't fill the top 10 however many players take it (#106). Ties go to
- * the player who finished a run first, then to the lower player id, so the order is total; a
+ * names only, best above 0 only (the top 10 never shows a 0-point row: #114), so one name can't fill the top 10 however many players take it (#106). Ties go to
+ * the player who first finished a run with points (#114), then to the lower player id, so the order is total; a
  * name's row is the first of its players in that order, with that player's stored spelling.
  * The top 10 is its first ten rows and a player's rank is their name's place in it (rankOf).
  * Stored names the word lists now refuse (isShownName) are left out too: those rows stay
@@ -147,10 +150,11 @@ export type RankEntry = { playerId: string; name: string; score: number; firstAt
 export function ranking(db: Database): RankEntry[] {
   const rows = db
     .query(
-      `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(e.at) AS firstAt
+      `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(CASE WHEN e.score > 0 THEN e.at END) AS firstAt
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY p.id
+       HAVING MAX(e.score) > 0
        ORDER BY score DESC, firstAt ASC, p.id ASC`,
     )
     .all(RUN_ENDED) as RankEntry[];
@@ -181,7 +185,7 @@ export function hiddenKeys(db: Database): Set<string> {
 /**
  * Where a player stands. The ranking has one row per name, and a player is ranked only when
  * their own life is the one on their name's row (owner ruling on #106). `rank` is that row's
- * place among `ranked` visible names (null when hidden, with no finished run, or when another
+ * place among `ranked` visible names (null when hidden, with no finished run, with a best of 0 (#114), or when another
  * player's life holds the name's row); `next` is the rank just above and how many points above
  * the player's own best it takes to pass it (one more than that rank's score minus their best);
  * `row` is the name's index in the top 10 rows, when it is in them and the life on it is theirs.
@@ -227,7 +231,8 @@ export function rankOf(entries: RankEntry[], playerId: string, name: string | nu
     return { rank: null, ranked: entries.length, next: null, row: null, held: { name: mine.name, rank: at + 1, score: mine.score } };
   }
   const row = at >= 0 && at < 10 ? at : null;
-  if (best === null) return { rank: null, ranked: entries.length, next: null, row: null };
+  // A best of 0 is not ranked (#114).
+  if (best === null || best <= 0) return { rank: null, ranked: entries.length, next: null, row: null };
   const score = mine ? Math.max(best, mine.score) : best;
   // The ranking's order: score down, then first finish, then id. Not in the ranking yet: their
   // first finish is after the ranking was read, so after everyone in it.

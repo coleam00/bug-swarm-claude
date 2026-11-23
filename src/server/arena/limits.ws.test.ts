@@ -1,4 +1,4 @@
-// Stream safety (#104) over real sockets: the per-address socket and join limits, the client
+// Stream safety (#104) over real sockets: the per-address socket, watcher (#119) and join limits, the client
 // address behind a proxy, the people cap and the slow-reader drop, against the real server
 // (startServer) on an ephemeral port, closed before each test ends. The clients are raw TCP
 // sockets that upgrade /ws by hand, so each sets its own X-Forwarded-For / X-Real-IP headers, never
@@ -9,8 +9,8 @@ import { connect as tcpConnect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, PROTOCOL_VERSION } from "../../shared/arena/constants";
-import { encodeHello, encodeInput } from "../../shared/arena/protocol";
+import { JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, MAX_WATCHERS_PER_ADDRESS, PROTOCOL_VERSION } from "../../shared/arena/constants";
+import { encodeHello, encodeInput, encodeWatch } from "../../shared/arena/protocol";
 import { computeStats, openDb } from "../db";
 import { startServer, type RunningServer, type ServerOptions } from "../serve";
 
@@ -167,6 +167,45 @@ async function enter(name: string, headers: Record<string, string> = {}): Promis
   return c;
 }
 
+/** Opens a client, sends `watch` once upgraded, and waits for its welcome or its error. */
+async function watching(headers: Record<string, string> = {}): Promise<Raw> {
+  const c = raw(headers);
+  await c.upgraded;
+  c.send(encodeWatch(PROTOCOL_VERSION));
+  await until("the watch's answer", () => c.got.length > 0);
+  return c;
+}
+
+test(
+  "the 7th watch from one address gets `full` and a close; a watcher leaving or saying hello gives its slot back; other addresses are unaffected (#119)",
+  async () => {
+    serve();
+    const A = { "X-Real-IP": "203.0.113.30" };
+    const ws: Raw[] = [];
+    for (let i = 0; i < MAX_WATCHERS_PER_ADDRESS; i++) ws.push(await watching(A));
+    expect(ws.every(welcomed)).toBe(true);
+    const seventh = await watching(A);
+    expect(seventh.got).toEqual([{ t: "error", code: "full" }]);
+    await until("its close", () => seventh.closeFrame());
+    expect(srv.rooms.stats().watchers).toBe(MAX_WATCHERS_PER_ADDRESS);
+    // Another address watches as usual.
+    expect(welcomed(await watching({ "X-Real-IP": "203.0.113.31" }))).toBe(true);
+    // One leaves: the address may watch once more, and no more.
+    ws[0]!.destroy();
+    await until("the watcher gone", () => srv.rooms.stats().watchers === MAX_WATCHERS_PER_ADDRESS);
+    expect(welcomed(await watching(A))).toBe(true);
+    expect(refusedWith(await watching(A), "full")).toBe(true);
+    // A watcher that plays stops watching: its slot comes back while its socket stays, as a player.
+    const player = ws[1]!;
+    player.send(hello("Plays"));
+    await until("the player's welcome", () => player.got.filter((m) => m.t === "welcome").length === 2);
+    expect(srv.rooms.stats().players).toBe(1);
+    expect(welcomed(await watching(A))).toBe(true);
+    expect(player.ended()).toBe(false);
+  },
+  TIMEOUT,
+);
+
 test(
   "500 sockets from one address: 12 are admitted, the other 488 get `limit` and a close",
   async () => {
@@ -270,6 +309,8 @@ test(
     serve({ allowLoad: true });
     for (let i = 0; i < 20; i++) expect(welcomed(await enter(`l${i}`))).toBe(true);
     expect(srv.rooms.stats().players).toBe(20);
+    // And watchers past the per-address cap: bots --watchers runs from one address.
+    for (let i = 0; i < MAX_WATCHERS_PER_ADDRESS + 4; i++) expect(welcomed(await watching())).toBe(true);
   },
   TIMEOUT,
 );
@@ -282,6 +323,8 @@ test(
     const deaf = await enter("Deaf", { "X-Real-IP": "203.0.113.20" });
     const reader = await enter("Reads", { "X-Real-IP": "203.0.113.21" });
     expect(welcomed(deaf) && welcomed(reader)).toBe(true);
+    // A point, so its life counts and is saved when the drop ends it (#114).
+    srv.rooms.room(1)!.state.players.find((p) => p.name === "Deaf")!.score = 1;
     deaf.pause();
     // Both keep sending inputs (so the silent drop can't be what ends them) and flood pings, whose
     // pongs fill a send buffer nobody drains. Not a fixed byte count: loopback buffers differ by OS.
@@ -299,7 +342,8 @@ test(
     expect(deaf.ended()).toBe(true);
     expect(reader.ended()).toBe(false);
     expect(srv.rooms.stats().players).toBe(1);
-    // Its life ended with the drop and was saved, as any disconnect's is.
+    // Its life ended with the drop and was saved, as any disconnect's is that counts (it has a
+    // point, so #114's 0-point rule does not apply).
     await until("the life saved", () => computeStats(db).finishedRuns === 1, 5000);
   },
   TIMEOUT,

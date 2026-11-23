@@ -9,6 +9,7 @@ import {
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
   MAX_PLAYERS_PER_ARENA,
+  MAX_WATCHERS,
   MINIMAP_CELL,
   OUT_IDLE_TICKS,
   PROTOCOL_VERSION,
@@ -754,6 +755,39 @@ describe("watchers (#79, the start screen)", () => {
     tick();
     // From then on they share one stream.
     expect(w2.raw.at(-1)).toBe(w1.raw.at(-1)!);
+  });
+
+  test("stream scale (#119): 300 watchers share one encoded delta per tick; a dropped send keyframes only that watcher; the cap is MAX_WATCHERS", () => {
+    const { rooms, tick } = setup();
+    rooms.join("Ada", "tabs", INFO, client().send);
+    const ws = Array.from({ length: 300 }, () => {
+      const w = { raw: [] as string[], drop: false, send: (m: string) => (w.raw.push(m), !w.drop) };
+      return w;
+    });
+    for (const w of ws) expect(rooms.watch(w.send)).not.toBeNull();
+    const isSnap = (m: string) => m.startsWith('{"t":"snapshot"');
+    const keyOf = (m: string) => (JSON.parse(m) as WireSnapshot).key === 1;
+    tick();
+    // Everyone new: one shared keyframe.
+    expect(ws.every((w) => w.raw.filter(isSnap).length === 1 && keyOf(w.raw.at(-1)!))).toBe(true);
+    tick();
+    const delta = ws[0]!.raw.at(-1)!;
+    expect(keyOf(delta)).toBe(false);
+    expect(ws.every((w) => w.raw.at(-1) === delta)).toBe(true);
+    // One watcher's send is dropped; the next tick only it gets a keyframe.
+    ws[7]!.drop = true;
+    tick();
+    ws[7]!.drop = false;
+    tick();
+    const shared = ws[0]!.raw.at(-1)!;
+    expect(keyOf(shared)).toBe(false);
+    expect(keyOf(ws[7]!.raw.at(-1)!)).toBe(true);
+    expect(ws.filter((w) => w.raw.at(-1) !== shared)).toEqual([ws[7]!]);
+    // Room up to the cap, and not one more.
+    expect(MAX_WATCHERS).toBeGreaterThanOrEqual(300);
+    for (let i = 300; i < MAX_WATCHERS; i++) expect(rooms.watch(client().send)).not.toBeNull();
+    expect(rooms.stats().watchers).toBe(MAX_WATCHERS);
+    expect(rooms.watch(client().send)).toBeNull();
   });
 
   test("a watch lands in the arena with the most people; past the cap it is refused until one leaves", () => {

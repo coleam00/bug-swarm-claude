@@ -38,7 +38,7 @@ The look never costs frames: 60 fps with a full arena (20 players, 150 bugs and 
 - **Other players matter.** Seeing, helping and racing other people is the point; every screen shows you are not alone.
 - **The server is the referee.** The arena runs on the server; clients send inputs and draw what the server says. Scores come from the server, never from a client.
 - **Fair drop-in:** a viewer who joins an hour into the stream gets the same gentle opening as one who joined at the start.
-- **Merges happen live.** The game redeploys on every merge during the stream: clients reconnect on their own, reload to the new version, and a life in progress is saved, never lost silently.
+- **Merges happen live.** The game redeploys on every merge during the stream: clients reconnect on their own, reload to the new version, and a life in progress is saved, never lost silently (a 0-point life under 5 s is not a life: #114).
 - **Time to the next life beats everything:** no menus or confirmations between a life ending and dropping back in.
 - **Clean screens:** the start screen is the title, a name field and two team buttons. Rules appear only as a short message when something is wrong.
 - Anything a viewer types that appears on screen passes the name rules first. The stream is public.

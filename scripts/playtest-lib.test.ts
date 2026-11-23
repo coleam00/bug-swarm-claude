@@ -551,7 +551,7 @@ function restartGame(): PageLog[] {
   return logs;
 }
 
-const REPORT: RestartReport = { pid0: 11, pid1: 12, code: 0, ms: 600, graceful: true, logLine: "shutdown (ipc): 2 lives saved" };
+const REPORT: RestartReport = { pid0: 11, pid1: 12, code: 0, ms: 600, graceful: true, logLine: "shutdown (ipc): 2 lives ended" };
 
 describe("server lifetimes (restart)", () => {
   test("a welcome takes the log's gen; frames, events, inputs and errors take their connection's", () => {

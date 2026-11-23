@@ -15,7 +15,8 @@ const db = openDb(join(startup.dataDir, "app.db"));
 const srv = startServer({ ...startup.options, db });
 for (const line of startup.lines) console.log(line);
 
-// A redeploy (Railway sends SIGTERM) or Ctrl+C: every life in progress is saved and every client
+// A redeploy (Railway sends SIGTERM) or Ctrl+C: every life in progress is ended (and saved when it
+// counts, lives.ts countsAsLife) and every client
 // told to reconnect before the process exits (architecture.md, "Redeploys"). A hard kill loses them.
 const shutdown = gracefulShutdown({
   stop: () => srv.stop(),

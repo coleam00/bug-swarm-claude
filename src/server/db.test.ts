@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { hideCommand, resetCommand, statsCommand } from "../../scripts/admin-lib";
 import {
@@ -10,6 +10,7 @@ import {
   hideName,
   openDb,
   rankOf,
+  ranking,
   topFor,
   recordRunEnded,
   recordRunStarted,
@@ -243,6 +244,24 @@ test("bun run stats, hide and reset run their scripts", () => {
   expect(pkg.scripts.reset).toBe("bun scripts/reset.ts");
 });
 
+test("the ranking leaves out a player whose best is 0, and keeps one with points (#114)", () => {
+  run("p-zero", "2026-11-28T15:00:00.000Z", { score: 0 });
+  run("p-five", "2026-11-28T15:00:01.000Z", { score: 5 });
+  expect(ranking(db).map((e) => [e.playerId, e.score])).toEqual([["p-five", 5]]);
+  expect(topTen(db)).toEqual([{ name: "P-FIVE", score: 5 }]);
+});
+
+test("a tie is decided by the first finish with points, so a fresh rank and the next cached ranking agree (#114, #105)", () => {
+  run("p-x", "2026-11-28T15:00:00.000Z", { score: 0 }); // a saved 0-point life: not ranked
+  run("p-a", "2026-11-28T15:00:01.000Z", { score: 50 });
+  const cached = ranking(db);
+  run("p-x", "2026-11-28T15:00:02.000Z", { score: 50 }); // ties Ada, after her
+  const fresh = ranking(db);
+  expect(fresh.map((e) => e.playerId)).toEqual(["p-a", "p-x"]);
+  expect(rankOf(cached, "p-x", "P-X", 50, false).rank).toBe(2);
+  expect(rankOf(fresh, "p-x", "P-X", 50, false).rank).toBe(2);
+});
+
 test("ten lives under one name, in any case and by different players, take one row: the name's best life", () => {
   const spellings = ["Churn", "churn", "CHURN"];
   const life = (id: string, name: string, score: number, second: number) => {
@@ -274,6 +293,10 @@ describe("rankOf", () => {
 
   test("a fresh best above the stale cached one ranks by the fresh score; `row` stays the cached one", () => {
     expect(rankOf(entries, "p-c", "p-c", 60, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 2 });
+  });
+
+  test("a best of 0 is not ranked (#114)", () => {
+    expect(rankOf(entries, "p-x", "p-x", 0, false)).toEqual({ rank: null, ranked: entries.length, next: null, row: null });
   });
 
   test("past the top 10 there is no row", () => {
@@ -313,5 +336,33 @@ describe("rankOf", () => {
     const lower = topFor(byName, "p-c2", "churn", 30, rankOf(byName, "p-c2", "churn", 30, false));
     expect(lower.top).toEqual([{ name: "Ada", score: 100 }, { name: "Churn", score: 80 }, { name: "Bob", score: 50 }]);
     expect(lower.me.row).toBeNull();
+  });
+});
+
+describe("openDb", () => {
+  // Bun on Windows throws EEXIST from a recursive mkdir of an existing folder given as a
+  // relative path that starts with `..` (#113), so a scratch DATA_DIR such as `../scratch`
+  // failed to open. The folder is made inside the checkout and reached as
+  // `../<checkout>/<folder>`: the temp dir can sit on another drive (CI's Windows runner),
+  // where no relative path reaches it.
+  test("opens a relative path with .. to an existing folder, twice", () => {
+    const cwd = process.cwd();
+    const base = mkdtempSync(join(cwd, ".db-dotdot-"));
+    try {
+      mkdirSync(join(base, "sub"));
+      const rel = join("..", basename(cwd), relative(cwd, base), "sub", "app.db");
+      // Guard: a path that stops starting with `..` would stop testing the bug.
+      expect(rel.startsWith("..")).toBe(true);
+      for (let i = 0; i < 2; i++) {
+        const opened = openDb(rel);
+        try {
+          expect(opened.query("SELECT count(*) AS n FROM events").get()).toEqual({ n: 0 });
+        } finally {
+          opened.close();
+        }
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });

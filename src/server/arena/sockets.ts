@@ -10,14 +10,18 @@
 // idle timeout can't do this: the tick's snapshots keep it alive.
 // A hidden name (`bun run hide`, or a stored name the word lists now refuse) is refused at hello,
 // and every HIDE_SWEEP_MS the joined sockets are checked against it, off the tick: a name hidden
-// mid-life gets the same `error name` and close, and leaving saves its life as a disconnect does.
+// mid-life gets the same `error name` and close, and leaving ends its life as a disconnect does.
 // When the server stops (a redeploy), `restart` sends every socket `error restarting` and closes it
-// (the lives were already ended and saved, Rooms.endAll); from then on any socket is refused the same
+// (the lives were already ended, Rooms.endAll; see lives.ts countsAsLife); from then on any socket is refused the same
 // way, so a quick reconnect can't join an arena on a server that is going away.
 // A socket may `watch` instead of saying hello (#79, the start screen): it gets a welcome with
 // `you: 0` and the arena's events and snapshots, takes no player slot, and its inputs are dropped.
-// Over the watcher cap it gets `error full` and is closed. A hello on a watching socket stops the
-// watch and joins as a player on the same socket, checked exactly like a first hello.
+// Over the watcher cap it gets `error full` and is closed: MAX_WATCHERS server-wide, and (#119)
+// the address gate's watcher cap, MAX_WATCHERS_PER_ADDRESS from one client address, checked first
+// so one address never takes a server-wide slot it may not use. `full`, not `limit`: the start
+// screen shows the drawn backdrop and Play still opens a fresh socket (net.ts). A hello on a
+// watching socket stops the watch (giving its address slot back) and joins as a player on the same
+// socket, checked exactly like a first hello.
 // A frame Bun drops (send returns 0) is reported back to the room, which makes that socket's next
 // snapshot a keyframe (view.ts); -1 (queued under backpressure) is delivered late, not lost.
 // Stream safety (#104): each socket carries its client's address (serve.ts, TRUST_PROXY_HOPS), and
@@ -101,6 +105,11 @@ export type SocketData = {
   address: string;
   /** True once the address gate counted this socket; its close gives the slot back. */
   counted: boolean;
+  /**
+   * True while the address gate counts this socket as a watcher. Its own flag, not `watcher`:
+   * restart nulls `watcher` before the close, which must still give the slot back.
+   */
+  watchCounted: boolean;
   /** Since when its send buffer has been over the slow bound, ms, or null. */
   slowSince: number | null;
   /** After a move-away return (#117): inputs numbered above this are from before the welcome, dropped. Else null. */
@@ -120,6 +129,7 @@ export function newSocketData(address = ""): SocketData {
     watcher: null,
     address,
     counted: false,
+    watchCounted: false,
     slowSince: null,
     staleAbove: null,
   };
@@ -183,6 +193,12 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     if (gate.shouldLog(ws.data.address)) log(`ws refused (${why}): client ${ws.data.address}`);
   };
 
+  /** Gives the address gate's watcher slot back, once. */
+  const releaseWatch = (ws: ServerWebSocket<SocketData>) => {
+    if (ws.data.watchCounted) gate.unwatch(ws.data.address);
+    ws.data.watchCounted = false;
+  };
+
   const sendRestarting = (ws: ServerWebSocket<SocketData>) => {
     ws.send(JSON.stringify({ t: ERROR, code: ERROR_RESTARTING }));
     ws.close(CLOSE_RESTARTING, ERROR_RESTARTING);
@@ -230,6 +246,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     // A watching socket becomes a player: no more watcher frames after the welcome below.
     if (ws.data.watcher !== null) rooms.unwatch(ws.data.watcher);
     ws.data.watcher = null;
+    releaseWatch(ws);
     const entered = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => ws.send(msg) !== 0);
     ws.data.room = entered.room;
     ws.data.entity = entered.entity;
@@ -241,8 +258,17 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
 
   const watch = (ws: ServerWebSocket<SocketData>, v: number) => {
     if (v !== PROTOCOL_VERSION) return refuse(ws, ERROR_VERSION);
+    if (!gate.watch(ws.data.address)) {
+      logRefusal(ws, "watchers");
+      return refuse(ws, ERROR_FULL);
+    }
+    ws.data.watchCounted = true;
     const watching = rooms.watch((msg) => ws.send(msg) !== 0);
-    if (!watching) return refuse(ws, ERROR_FULL);
+    if (!watching) {
+      // The server-wide cap: the address's slot goes back before the refusal's close.
+      releaseWatch(ws);
+      return refuse(ws, ERROR_FULL);
+    }
     if (ws.data.helloTimer) clearTimeout(ws.data.helloTimer);
     ws.data.helloTimer = null;
     ws.data.watcher = watching.watcher;
@@ -339,6 +365,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
       ws.data.counted = false;
       if (ws.data.room !== null && ws.data.entity !== null) rooms.leave(ws.data.room, ws.data.entity);
       if (ws.data.watcher !== null) rooms.unwatch(ws.data.watcher);
+      releaseWatch(ws);
       ws.data.room = null;
       ws.data.entity = null;
       ws.data.watcher = null;
