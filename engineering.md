@@ -18,5 +18,17 @@
 - **Failures are never silent, and never stop play:** a failed score save is logged with the run id and the game carries on. Once a run event is saved, the request succeeds even if a follow-up write fails; log that failure instead, so a retry never duplicates a run.
 - **UI state follows the server:** the top 10, best score and team totals render what the server returned, never a copy taken before the request.
 - **Names live in one list:** `EVENT_TYPES`, `TEAMS`, bug kind ids, pickup ids and protocol message types are constants code imports rather than typing the strings.
-- **Secrets:** none this release. If one is ever added, read it from the environment and list it in `.env.example` with a fake value.
+- **Secrets:** `ADMIN_TOKEN` is the one secret. Read it from the environment, list it in `.env.example` with a fake value, and never print or log it.
+- **Bun:** 1.4.5 is pinned in the `Dockerfile` and CI. The minimum is 1.4.x: on 1.3.5 `bun run check` hangs with EBUSY temp-dir errors.
 - **Small changes:** one outcome per pull request. A new bug kind or pickup is its own pull request.
+
+## Live operations
+
+On Railway there is no shell in the container; the owner runs stats, hide and reset over HTTP (`src/server/admin.ts`).
+
+- Set `ADMIN_TOKEN` on the Railway service (at least 16 random characters), and the same value in your own shell's environment. Without it, or with a shorter one, the admin routes answer 404.
+- `bun run admin -- --url https://<service> stats` (add `--since <ISO>` and `--until <ISO>` for the stream window)
+- `bun run admin -- --url https://<service> hide "<name>"` (off every board, and out of every live arena, within 5 s)
+- `bun run admin -- --url https://<service> reset --yes` (before the stream: every run and player; hidden names stay)
+- The token is read from the environment, never an argument, and never printed. Plain `http://` is refused except to localhost. 10 requests a minute per client.
+- `DATA_DIR` must point at the service's volume: in production the server refuses to start without it.

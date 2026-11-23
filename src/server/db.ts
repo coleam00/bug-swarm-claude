@@ -209,6 +209,23 @@ export function rankOf(entries: RankEntry[], playerId: string, best: number | nu
 }
 
 /**
+ * The top 10 as one player should see it: the ranking's rows with that player's own row placed by
+ * their fresh best at their fresh rank (`me`, from rankOf with the same `best`), so a life that just
+ * ended is on their top 10 at once and `row` points at it. The other rows stay as the ranking read
+ * them. A player with no rank, or ranked below 10, gets the ranking's rows and `me` unchanged.
+ */
+export function topFor(entries: RankEntry[], playerId: string, name: string, best: number | null, me: Me): { top: TopRow[]; me: Me } {
+  if (best === null || me.rank === null || me.rank > 10) return { top: topOf(entries), me };
+  const rows: TopRow[] = [];
+  for (const e of entries) {
+    if (rows.length >= 10) break;
+    if (e.playerId !== playerId) rows.push({ name: e.name, score: e.score });
+  }
+  rows.splice(me.rank - 1, 0, { name, score: best });
+  return { top: rows.slice(0, 10), me: { ...me, row: me.rank - 1 } };
+}
+
+/**
  * Each team's total: the sum of its finished runs' scores, leaving out hidden names and stored
  * names the word lists now refuse (isShownName). A run counts for the team stamped on it, so
  * runs from before teams count for nobody.

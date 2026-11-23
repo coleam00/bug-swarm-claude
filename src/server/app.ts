@@ -1,9 +1,11 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
-import { findPlayer, hiddenKeys, playerBest, rankOf, ranking, teamTotals, topOf, type RankEntry, type TopRow } from "./db";
+import type { Context } from "hono";
+import { findPlayer, hiddenKeys, playerBest, rankOf, ranking, teamTotals, topFor, topOf, type RankEntry, type TopRow } from "./db";
 import { ASSET_PATHS, asset } from "./art";
 import { isShownName, type Team } from "./rules";
+import { clientKey, mountAdminRoutes } from "./admin";
 import type { LiveArenas } from "./arena/rooms";
 
 /** Hundreds of clients polling the top 10 and their rank cost one ranking query a second. */
@@ -20,9 +22,13 @@ export type AppOptions = {
   now?: () => number;
   /** The open arenas and the people in them, read live for the board (serve.ts passes Rooms.live). Defaults to none. */
   live?: () => LiveArenas;
+  /** The owner's admin token (admin.ts adminTokenFrom); null or absent keeps /api/admin/* off (404). */
+  adminToken?: string | null;
+  /** The admin rate limit's key for a request. Defaults to the proxy headers, with no peer address. */
+  clientKey?: (c: Context) => string;
 };
 
-// The API: reads only. Arena lives are saved by the server itself (arena/lives.ts), so the top 10,
+// The API: reads only, but for the owner's token-gated /api/admin/* (admin.ts). Arena lives are saved by the server itself (arena/lives.ts), so the top 10,
 // best, team totals and the board read what it saved. /health answers once the app can serve.
 // The icons and the link preview sit at the root, where browsers and crawlers look for them.
 export function createApp(db: Database, opts: AppOptions = {}): Hono {
@@ -42,6 +48,12 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     });
   }
   app.use("/api/*", bodyLimit({ maxSize: MAX_BODY_BYTES }));
+  // The owner's stats, hide and reset (#110), off unless a token is set. Never linked from the game.
+  mountAdminRoutes(app, db, {
+    token: opts.adminToken ?? null,
+    now,
+    clientKey: opts.clientKey ?? ((c) => clientKey((name) => c.req.header(name), () => undefined)),
+  });
 
   // One ranking a second feeds the top 10, the board and every player's rank, so they agree.
   const cachedRanking = () => {
@@ -60,8 +72,9 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
   };
 
   // With ?player=<id>, also where that player stands (`me`, db.ts rankOf). Their best is read
-  // fresh and ranked against the 1 s snapshot, so a run that just finished ranks at once; `row`
-  // points into the snapshot's rows and catches up on the next poll. No player id is ever sent back.
+  // fresh and ranked against the 1 s snapshot, and their own row in the top 10 is placed by it
+  // (db.ts topFor), so the life that just ended is on their top 10, marked by `row`, at once (#105).
+  // The other rows follow the snapshot. No extra ranking query. No player id is ever sent back.
   app.get("/api/top", (c) => {
     const { entries, top, hidden } = cachedRanking();
     const id = c.req.query("player");
@@ -69,7 +82,8 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const p = findPlayer(db, id);
     // As the ranking's filters compare: lower(name) against the stored keys, and the word lists.
     const isHidden = p !== null && (hidden.has(p.name.toLowerCase()) || !isShownName(p.name));
-    return c.json({ top, me: rankOf(entries, id, playerBest(db, id), isHidden) });
+    const best = playerBest(db, id);
+    return c.json(topFor(entries, id, p?.name ?? "", best, rankOf(entries, id, best, isHidden)));
   });
   app.get("/api/teams", (c) => c.json({ teams: cachedTeams() }));
   // The stream board: the top 10 and the team totals in one read, from the same two caches,
