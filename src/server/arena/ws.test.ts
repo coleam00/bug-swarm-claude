@@ -5,9 +5,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Database } from "bun:sqlite";
-import { DEMO_WARM_TICKS, HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
+import { DEMO_WARM_TICKS, HITS_PER_LIFE, MAX_PLAYERS_PER_ARENA, OUT_IDLE_TICKS, PICKUP_IDS, PROTOCOL_VERSION, REVIVE_POINTS } from "../../shared/arena/constants";
+import { endLife } from "../../shared/arena/sim";
 import { placeBug, placePickup } from "../../shared/arena/testkit";
-import { encodeHello, encodeInput, encodeWatch, parseServerMessage, type ServerMessage, type Snapshot, type Welcome, type WireSnapshot } from "../../shared/arena/protocol";
+import { encodeHello, encodeInput, encodeVisibility, encodeWatch, parseServerMessage, type ServerMessage, type Snapshot, type Welcome, type WireSnapshot } from "../../shared/arena/protocol";
 import { createSnapshotReader } from "../../shared/arena/view";
 import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals } from "../db";
 import { TOP_CACHE_MS } from "../app";
@@ -668,6 +669,63 @@ test(
     await srv.stop();
     expect(await c.closed).toBe(1012);
     expect(c.got.at(-1)).toEqual({ t: "error", code: "restarting" });
+  },
+  TIMEOUT,
+);
+
+test(
+  "a hidden tab stops counting on the board and counts again once shown (#117)",
+  async () => {
+    const a = await enter("Ada", "tabs");
+    await enter("Bob", "spaces");
+    const playing = async () => ((await (await fetch(`${srv.url}/api/board`)).json()) as { playing: number }).playing;
+    expect(await playing()).toBe(2);
+    a.c.send(encodeVisibility(true));
+    await a.c.waitFor("Ada uncounted", () => srv.rooms.live().playing === 1);
+    expect(await playing()).toBe(1);
+    // Still a member: the load numbers count her.
+    expect(srv.rooms.stats().players).toBe(2);
+    a.c.send(encodeVisibility(false));
+    await a.c.waitFor("Ada counted again", () => srv.rooms.live().playing === 2);
+    expect(await playing()).toBe(2);
+  },
+  TIMEOUT,
+);
+
+test(
+  "a player moved away from a full arena presses play and joins another arena on the same socket; closing it leaves that arena (#117)",
+  async () => {
+    // 21 sockets from one address: the load allowance (#104).
+    await srv.stop();
+    srv = serve({ allowLoad: true });
+    const joined = [];
+    for (let i = 0; i < MAX_PLAYERS_PER_ARENA; i++) joined.push(await enter(`p${String(i).padStart(2, "0")}`));
+    const arena = srv.rooms.room(1)!;
+    for (const p of arena.state.players) p.invulnTicks = 1e9;
+    // p00 is out, and has been for OUT_IDLE_S (backdated: no test waits 30 s).
+    const p0 = joined[0]!;
+    const robot = arena.state.players.find((p) => p.id === p0.welcome.you)!;
+    endLife(arena.state, robot);
+    robot.outTick = arena.state.tick - OUT_IDLE_TICKS;
+    const late = await enter("Late");
+    expect(late.welcome.arena).toBe(1);
+    await p0.c.waitFor("p00's own leave", () => p0.c.got.some((m) => m.t === "event" && m.kind === "leave" && m.id === p0.welcome.you));
+    expect([arena.people, arena.size, arena.awayCount]).toEqual([20, 20, 1]);
+    // p00 still watches arena 1 meanwhile.
+    const seen = p0.c.wire.length;
+    await p0.c.waitFor("a watcher snapshot", () => p0.c.wire.length > seen + 2);
+    // Arena 1 is full of people: the play press lands p00 in a new arena, welcomed on this socket.
+    p0.c.send(encodeInput({ seq: 1, mx: 0, my: 0, aim: 0, fire: false, dash: true }));
+    const again = await p0.c.waitFor("a second welcome", () => p0.c.got.filter((m): m is Welcome => m.t === "welcome")[1]);
+    expect(again.arena).toBe(2);
+    expect(p0.c.got.some((m) => m.t === "error")).toBe(false);
+    expect(srv.rooms.room(2)!.size).toBe(1);
+    // It plays there: its inputs reach its new robot.
+    await p0.c.waitFor("p00 alive in arena 2", () => p0.c.got.some((m) => m.t === "snapshot" && m.me.al === 1 && m.p.some((r) => r[0] === again.you)));
+    // Closing the socket leaves arena 2 (no ghost member there) and nothing in arena 1.
+    await p0.c.close();
+    await late.c.waitFor("arena 2 closed", () => srv.rooms.room(2) === undefined);
+    expect([arena.size, arena.awayCount]).toEqual([20, 0]);
   },
   TIMEOUT,
 );

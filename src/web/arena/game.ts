@@ -25,6 +25,11 @@
 // Stream scale (#89): snapshots carry only the bugs near you; the minimap's far swarm comes once a
 // second as cells (`m`). The F readout adds the KB/s the socket receives and the p95 time from an
 // input leaving to a snapshot acknowledging it (netmeter.ts).
+// Hidden tabs (#117): the page tells the server whenever its tab is hidden or shown, and after every
+// player welcome on a hidden page, so a hidden player stops counting as a person. A player out long
+// enough may be moved out of the arena to free a slot: the page then gets a leave for its own robot
+// and the arena's watcher stream (your numbers are kept from your last own snapshot), and its
+// "Play again" press comes back with a fresh welcome, maybe in another arena.
 import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
 
 /** Bugs a snapshot can carry: the arena's cap, plus a hive queen, who is placed whatever the count (#85). */
@@ -43,6 +48,7 @@ import {
   SNAPSHOT,
   WELCOME,
   encodeInput,
+  encodeVisibility,
   type ErrorCode,
   type ServerMessage,
   type SnapshotDown,
@@ -339,6 +345,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       banner.left = 0;
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
       people = countPeople(roster.values());
+      // A new socket or arena counts you as shown until told otherwise.
+      if (you !== null && document.hidden) conn.send(encodeVisibility(true));
     } else if (m.t === SNAPSHOT) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
@@ -349,11 +357,12 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       for (const e of m.e) endShot(shots, e[0], e[1], e[2], m.tick);
       for (const k of m.k) queueKill(kills, m.tick, k[2], k[3], k[4], k[1], k[5] ?? 0);
       if (watch) return setLive(true);
+      // Moved out of the arena (#117), you get the watchers' snapshots: no row of yours, numbers zeroed.
+      const self = m.p.find((p) => p[0] === you);
+      if (!self) return;
       Object.assign(me, m.me);
       haveMe = true;
       if (noteMe(hudFx, m.me)) kick(shake, HIT_SHAKE);
-      const self = m.p.find((p) => p[0] === you);
-      if (!self) return;
       const nowAlive = m.me.al === 1;
       const nowDown = m.me.dn === 1;
       if (!spawned || (nowAlive && !alive) || (down && nowAlive && !nowDown)) {
@@ -535,7 +544,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     if (up) predictLocal(predictor, input);
   };
   // A hidden tab gets no frames: stop rather than repeat the last move until the server's stale limit.
+  // Either way the server is told (#117): a hidden tab does not count as a person.
   const onVisibility = () => {
+    conn.send(encodeVisibility(document.hidden));
     if (document.hidden && spawned) {
       releaseAll(controls);
       sendInput(0, 0, controls.aim, false, false);

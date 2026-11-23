@@ -28,6 +28,10 @@
 // with `limit` past the joins per minute. A socket whose send buffer stays over `slowBytes` for
 // `slowMs` (a client that stopped reading) is terminated by the same ping timer, so nothing runs
 // per tick; meanwhile Bun drops frames past MAX_SEND_BUFFER_BYTES, so its memory stays bounded.
+// A joined socket says when its tab is hidden or shown (`visibility`, #117), read before the input
+// limiter so a dropped "shown" can never leave a player uncounted. A play press from a member moved
+// away to free a slot joins them again (Rooms.input), maybe in another arena: the socket then
+// belongs to that arena and entity, so its close leaves the right one.
 import type { ServerWebSocket, WebSocketHandler } from "bun";
 import { PROTOCOL_VERSION } from "../../shared/arena/constants";
 import {
@@ -42,6 +46,7 @@ import {
   ERROR_TEAM,
   ERROR_VERSION,
   HELLO,
+  VISIBILITY,
   WATCH,
   parseClientMessage,
   type ErrorCode,
@@ -56,7 +61,7 @@ import type { Rooms } from "./rooms";
 export const HELLO_TIMEOUT_MS = 5000;
 /** Frames over this are closed by Bun itself; 1 KiB to 4 KiB is dropped by the validator. */
 export const MAX_FRAME_BYTES = 4096;
-/** How often the server pings each socket, ms. Browsers answer pings even in hidden tabs. */
+/** How often the server pings each socket, ms. Browsers answer pings even in hidden tabs, so a hidden tab comes from the page (`visibility`, #117). */
 export const PING_MS = 5000;
 /** A socket silent (no message, no pong) for longer than this is dropped, ms. */
 export const SILENT_MS = 15_000;
@@ -302,8 +307,13 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
         return;
       }
       if (room === null || entity === null) return;
+      if (m.t === VISIBILITY) return rooms.visibility(room, entity, m.hidden);
       if (!ws.data.limiter.allow(now())) return;
-      rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash });
+      const back = rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash });
+      if (back) {
+        ws.data.room = back.room;
+        ws.data.entity = back.entity;
+      }
     },
     close(ws) {
       all.delete(ws);

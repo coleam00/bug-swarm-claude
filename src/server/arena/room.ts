@@ -21,12 +21,21 @@
 //
 // With `demoTo` above 0, an arena nobody plays in but someone watches runs that many bots (fill.ts
 // botTarget).
+//
+// Active people (#117): a member counts as a person (`people`) only while their tab is not hidden
+// and they are not out of a life for OUT_IDLE_S or more (measured in ticks from the life's end).
+// Fill bots, arena choice and the board go by `people`; the simulation's 20-player limit and the
+// server's people cap still go by members. A person joining a physically full arena takes a bot's
+// slot, else the slot of the member out longest who no longer counts: that member is moved "away",
+// out of the simulation, and their socket gets the watcher stream (and every broadcast) behind its
+// life-over screen. Their play press comes back through Rooms (Rooms.input) as a fresh join.
 import {
   HITS_PER_LIFE,
   PICKUP_IDS,
   INPUT_BUFFER,
   INPUT_STALE_TICKS,
   MAX_PLAYERS_PER_ARENA,
+  OUT_IDLE_TICKS,
   TICK_MS,
   WORLD_H,
   WORLD_W,
@@ -106,10 +115,18 @@ type Member = MemberInfo & {
   lastSeq: number;
   /** What this member was last sent (view.ts). */
   view: ViewState;
+  /** The page said its tab is hidden (#117): not counted as a person while so. */
+  hidden: boolean;
 };
 
 /** A watching socket: its send, and whether its next snapshot must be a keyframe. */
 type Watcher = { send: Send; needKey: boolean };
+
+/**
+ * A member moved out of the simulation to free its slot (#117): who they were, so their play press
+ * can join them again, and their socket, which watches meanwhile.
+ */
+export type Away = Watcher & { name: string; team: Team; info: MemberInfo };
 
 /** A server fill bot: its player, and what its policy sees and remembers. */
 type Bot = { player: Player; obs: Observation; mem: FillMemory; rng: Rng; out: PolicyInput; leaving: boolean };
@@ -150,6 +167,8 @@ export class Room {
   private readonly bots = new Map<number, Bot>();
   /** Watching sockets by watcher id (rooms.ts numbers them). */
   private readonly watchers = new Map<number, Watcher>();
+  /** Members moved away to free their slot, by their old player id (ids are never reused). */
+  private readonly away = new Map<number, Away>();
   /** What every watcher was sent: they share one stream. */
   private readonly watchView: ViewState = createViewState();
   /** This tick's arena, quantized once for every snapshot (view.ts). */
@@ -178,9 +197,76 @@ export class Room {
     this.nextTickAt = startMs + TICK_MS;
   }
 
-  /** People in the arena (members). Bots and watchers never count: capacity goes by people. */
+  /**
+   * Members: sockets with a robot in the arena, counted or not (#117). Bots, watchers and away
+   * sockets are not members. The server's people cap and the load stats go by this; everything a
+   * person sees goes by `people`.
+   */
   get size(): number {
     return this.members.size;
+  }
+
+  /** The members who count as people now (#117): not hidden, and not out for OUT_IDLE_TICKS or more. */
+  get people(): number {
+    let n = 0;
+    for (const m of this.members.values()) if (this.isActive(m)) n++;
+    return n;
+  }
+
+  get awayCount(): number {
+    return this.away.size;
+  }
+
+  private isActive(m: Member): boolean {
+    return !m.hidden && (m.player.alive || this.state.tick - m.player.outTick < OUT_IDLE_TICKS);
+  }
+
+  /** The member out longest who no longer counts (hidden or out OUT_IDLE_S), or null. Never one in a life. */
+  private evictable(): Member | null {
+    let best: Member | null = null;
+    for (const m of this.members.values()) {
+      if (m.player.alive || this.isActive(m)) continue;
+      if (!best || m.player.outTick < best.player.outTick) best = m;
+    }
+    return best;
+  }
+
+  /** True when a person may join now: fewer than 20 people, and a free slot or one a bot or an evictable member gives up. */
+  canTake(): boolean {
+    if (this.people >= MAX_PLAYERS_PER_ARENA) return false;
+    return this.state.players.length < MAX_PLAYERS_PER_ARENA || this.bots.size > 0 || this.evictable() !== null;
+  }
+
+  /** The page says its tab is hidden or shown again (#117). */
+  setHidden(id: number, hidden: boolean): void {
+    const m = this.members.get(id);
+    if (!m || m.hidden === hidden) return;
+    m.hidden = hidden;
+    this.markLeaving();
+  }
+
+  isAway(id: number): boolean {
+    return this.away.has(id);
+  }
+
+  /** Forgets an away socket and returns who it was, to join them again (Rooms). */
+  takeAway(id: number): Away | undefined {
+    const a = this.away.get(id);
+    this.away.delete(id);
+    return a;
+  }
+
+  /**
+   * Takes a member who is out of the simulation to free their slot (#117) and tells everyone, them
+   * included. Their socket stays: it watches (its next snapshot a keyframe) until its play press.
+   */
+  private moveAway(m: Member): void {
+    const id = m.player.id;
+    this.members.delete(id);
+    // Out of a life, so leaving ends none and nothing is saved.
+    leavePlayer(this.state, id);
+    this.away.set(id, { name: m.player.name, team: m.player.team, info: { playerKey: m.playerKey, touch: m.touch }, send: m.send, needKey: true });
+    this.broadcast({ t: EVENT, kind: LEAVE, id });
   }
 
   get botCount(): number {
@@ -201,9 +287,12 @@ export class Room {
     if (this.watchers.delete(id)) this.markLeaving();
   }
 
-  /** People plus bots the arena should hold now (fill.ts botTarget). */
+  /**
+   * Players the arena should hold now (fill.ts botTarget). Members, counted or not, make it a
+   * people arena (#117): one whose people are all out is still topped up to `fillTo`.
+   */
   private target(): number {
-    return botTarget(this.members.size, this.warming ? 1 : this.watchers.size, this.fillTo, this.demoTo);
+    return botTarget(this.members.size, this.warming ? 1 : this.watchers.size + this.away.size, this.fillTo, this.demoTo);
   }
 
   /** The arena's wave now (1 up), as the snapshot sends it. */
@@ -244,7 +333,7 @@ export class Room {
   private markLeaving(): void {
     const target = this.target();
     if (target <= 0) return;
-    const leave = Math.max(0, -fillDelta(this.members.size, this.bots.size, target));
+    const leave = Math.max(0, -fillDelta(this.people, this.bots.size, target));
     let i = 0;
     for (const b of this.bots.values()) b.leaving = i++ >= this.bots.size - leave;
   }
@@ -267,14 +356,21 @@ export class Room {
 
   /**
    * Adds a member and tells everyone else. Returns their player. In a full arena a bot gives up
-   * its slot first; bots past the fill target are marked to leave. Bots are never added here: the
+   * its slot first, else the member out longest who no longer counts is moved away (#117); call it
+   * only when canTake. Bots past the fill target are marked to leave. Bots are never added here: the
    * caller sends the welcome after this returns, and nothing may reach the newcomer before it.
    */
   add(name: string, team: Team, info: MemberInfo, send: Send): Player {
-    if (this.bots.size > 0 && this.state.players.length >= MAX_PLAYERS_PER_ARENA) this.removeBot(this.botToEvict());
+    if (this.state.players.length >= MAX_PLAYERS_PER_ARENA) {
+      if (this.bots.size > 0) this.removeBot(this.botToEvict());
+      else {
+        const out = this.evictable();
+        if (out) this.moveAway(out);
+      }
+    }
     const player = joinPlayer(this.state, name, team);
     this.broadcast({ t: EVENT, kind: JOIN, id: player.id, name, team });
-    this.members.set(player.id, { playerKey: info.playerKey, touch: info.touch, player, send, queue: [], ack: 0, lastSeq: 0, view: createViewState() });
+    this.members.set(player.id, { playerKey: info.playerKey, touch: info.touch, player, send, queue: [], ack: 0, lastSeq: 0, view: createViewState(), hidden: false });
     this.markLeaving();
     return player;
   }
@@ -287,9 +383,13 @@ export class Room {
   /**
    * Removes a member and tells everyone left. A life in progress ends here and is saved, so a
    * disconnect or a server shutting down never loses a score (a reconnect starts a new life).
-   * Returns true when it ended a life (false for a member already out, or not here).
+   * Returns true when it ended a life (false for a member already out, an away socket, or not here).
    */
   remove(id: number, nowMs: number): boolean {
+    if (this.away.delete(id)) {
+      this.markLeaving();
+      return false;
+    }
     const m = this.members.get(id);
     if (!m) return false;
     this.members.delete(id);
@@ -335,7 +435,7 @@ export class Room {
     const target = this.target();
     if (target > 0) {
       for (const b of this.bots.values()) if (b.leaving && !b.player.alive) this.removeBot(b.player.id);
-      const add = Math.min(fillDelta(this.members.size, this.bots.size, target), MAX_PLAYERS_PER_ARENA - this.state.players.length);
+      const add = Math.min(fillDelta(this.people, this.bots.size, target), MAX_PLAYERS_PER_ARENA - this.state.players.length);
       for (let i = 0; i < add; i++) this.addBot();
       this.markLeaving();
     }
@@ -379,7 +479,7 @@ export class Room {
    * anywhere on the server, so the time it takes holds up no player.
    */
   warmUp(ticks: number, nowMs: number): void {
-    if (this.members.size > 0 || this.watchers.size > 0) return;
+    if (this.members.size > 0 || this.watchers.size > 0 || this.away.size > 0) return;
     this.warming = true;
     for (let i = 0; i < ticks; i++) this.step(nowMs);
     this.warming = false;
@@ -423,22 +523,28 @@ export class Room {
       const msg = encodeView(f, m.view, viewBoxOf(p.x, p.y, this.box), p.id, m.ack, meOf(p, this.me));
       if (!m.send(msg)) m.view.needKey = true;
     }
-    if (this.watchers.size > 0) this.sendWatchers(f);
+    if (this.watchers.size > 0 || this.away.size > 0) this.sendWatchers(f);
   }
 
   /**
-   * One stream for every watcher: the delta (or keyframe) the shared view moved by, and a keyframe
-   * for each watcher that is new or had a send dropped. A dropped send marks only that watcher.
+   * One stream for every watcher and away socket: the delta (or keyframe) the shared view moved by,
+   * and a keyframe for each that is new or had a send dropped. A dropped send marks only that one.
    */
   private sendWatchers(f: ArenaFrame): void {
     const vs = this.watchView;
     let behind = 0;
     for (const w of this.watchers.values()) if (w.needKey) behind++;
+    for (const w of this.away.values()) if (w.needKey) behind++;
     // Everyone needs a keyframe: make the shared one a keyframe rather than encode both.
-    if (behind === this.watchers.size) vs.needKey = true;
+    if (behind === this.watchers.size + this.away.size) vs.needKey = true;
     const msg = encodeView(f, vs, null, 0, 0, WATCH_ME);
     let key: string | null = vs.wasKey ? msg : null;
     for (const w of this.watchers.values()) {
+      let out = msg;
+      if (w.needKey && !vs.wasKey) out = key ??= keyframeOf(f, vs, null, 0, 0, WATCH_ME);
+      w.needKey = !w.send(out);
+    }
+    for (const w of this.away.values()) {
       let out = msg;
       if (w.needKey && !vs.wasKey) out = key ??= keyframeOf(f, vs, null, 0, 0, WATCH_ME);
       w.needKey = !w.send(out);
@@ -468,5 +574,6 @@ export class Room {
     const msg = JSON.stringify(event);
     for (const m of this.members.values()) m.send(msg);
     for (const w of this.watchers.values()) w.send(msg);
+    for (const w of this.away.values()) w.send(msg);
   }
 }

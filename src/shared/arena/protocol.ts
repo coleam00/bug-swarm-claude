@@ -5,9 +5,9 @@
 import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
 
 /** Client to server. */
-export const CLIENT_TYPES = ["hello", "input", "watch"] as const;
+export const CLIENT_TYPES = ["hello", "input", "watch", "visibility"] as const;
 export type ClientType = (typeof CLIENT_TYPES)[number];
-export const [HELLO, INPUT, WATCH] = CLIENT_TYPES;
+export const [HELLO, INPUT, WATCH, VISIBILITY] = CLIENT_TYPES;
 
 /** Server to client. */
 export const SERVER_TYPES = ["welcome", "snapshot", "event", "error"] as const;
@@ -80,7 +80,14 @@ export type InputMessage = {
  */
 export type Watch = { t: typeof WATCH; v: number };
 
-export type ClientMessage = Hello | InputMessage | Watch;
+/**
+ * Whether the player's tab is hidden (#117): sent on every change and after a player welcome on a
+ * hidden page. A hidden player does not count as a person (Room.people). It came without a protocol
+ * version bump: an older server drops the unknown type, and an older page never sends it.
+ */
+export type Visibility = { t: typeof VISIBILITY; hidden: boolean };
+
+export type ClientMessage = Hello | InputMessage | Watch | Visibility;
 
 export type RosterEntry = { id: number; name: string; team: string };
 
@@ -362,6 +369,10 @@ export function parseClientMessage(raw: string | ArrayBuffer | Uint8Array): Clie
     if (!Number.isInteger(m.v)) return null;
     return { t: WATCH, v: m.v as number };
   }
+  if (m.t === VISIBILITY) {
+    if (typeof m.hidden !== "boolean") return null;
+    return { t: VISIBILITY, hidden: m.hidden };
+  }
   return null;
 }
 
@@ -387,6 +398,11 @@ export function encodeHello(v: number, name: string, team: string, player: strin
 
 export function encodeWatch(v: number): string {
   const m: Watch = { t: WATCH, v };
+  return JSON.stringify(m);
+}
+
+export function encodeVisibility(hidden: boolean): string {
+  const m: Visibility = { t: VISIBILITY, hidden };
   return JSON.stringify(m);
 }
 

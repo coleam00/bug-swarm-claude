@@ -16,6 +16,13 @@
 //
 // The people cap (#104): `full` is true once `maxPeople` play across every arena. The sockets
 // check it before a join and refuse the hello with `busy`, so past the cap no arena opens.
+//
+// Active people (#117): "people" above means the members who count now (Room.people): not hidden
+// and not out for OUT_IDLE_S. Joins, watches, rehoming and the board go by them; the people cap and
+// the load stats go by members, and an arena closes only once no member, away socket or watcher is
+// left. A member moved away to free a slot (room.ts) comes back on their play press (`input` with a
+// dash): to their arena if it can take them, else to the arena a join would pick, with a fresh
+// welcome sent on their socket and never a refusal.
 import {
   DEMO_BOTS,
   DEMO_WARM_TICKS,
@@ -32,7 +39,7 @@ import {
 import { WELCOME, type Welcome } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
 import type { Team } from "../rules";
-import { Room, type LifeRecord, type MemberInfo, type Send } from "./room";
+import { Room, type Away, type LifeRecord, type MemberInfo, type Send } from "./room";
 import { createTickLog, type TickLog } from "./ticks";
 
 /** Starts calling `fn` every `ms`; returns the function that stops it. */
@@ -91,7 +98,7 @@ const processMemory = () => {
  * her marker.
  */
 export type LiveArena = { id: number; players: number; wave: number; queen: number | null };
-/** What the stream board reads live (GET /api/board): `playing` is the sum of the arenas' people. */
+/** What the stream board reads live (GET /api/board): `playing` is the sum of the arenas' people (active ones, #117). */
 export type LiveArenas = { playing: number; arenas: LiveArena[] };
 
 export type Joined = { room: number; entity: number; welcome: Welcome };
@@ -181,8 +188,39 @@ export class Rooms {
     this.closeIfEmpty(roomId);
   }
 
-  input(roomId: number, entity: number, input: Input): void {
-    this.rooms.get(roomId)?.room.pushInput(entity, input);
+  /**
+   * Queues a member's input. From a member moved away (#117) only a play press (dash) counts: it
+   * joins them again and returns where (the welcome already sent on their socket), so the caller
+   * now knows them by the new room and entity. Else null.
+   */
+  input(roomId: number, entity: number, input: Input): Joined | null {
+    const room = this.rooms.get(roomId)?.room;
+    if (!room) return null;
+    if (!room.isAway(entity)) {
+      room.pushInput(entity, input);
+      return null;
+    }
+    if (!input.dash) return null;
+    return this.comeBack(room, room.takeAway(entity)!);
+  }
+
+  /** The page says its tab is hidden or shown again (#117). */
+  visibility(roomId: number, entity: number, hidden: boolean): void {
+    this.rooms.get(roomId)?.room.setHidden(entity, hidden);
+  }
+
+  /**
+   * A member moved away presses play: back into their arena if it can take them, else into the one
+   * a join would pick (never refused: the socket was admitted already). The welcome goes out on
+   * their socket at once, before any tick of the arena can reach it.
+   */
+  private comeBack(from: Room, a: Away): Joined {
+    const to = from.canTake() ? from : this.pick();
+    const player = to.add(a.name, a.team, a.info, a.send);
+    const welcome = this.welcome(to, player.id);
+    a.send(JSON.stringify(welcome));
+    if (to !== from) this.closeIfEmpty(from.id);
+    return { room: to.id, entity: player.id, welcome };
   }
 
   /**
@@ -225,7 +263,7 @@ export class Rooms {
     if (!to) return;
     for (const [id, w] of this.watchers) {
       const from = this.rooms.get(w.room)?.room;
-      if (!from || from.size > 0) continue;
+      if (!from || from.people > 0) continue;
       from.unwatch(id);
       w.room = to.id;
       // The welcome first: the next tick's snapshot must not reach the watcher before it.
@@ -253,13 +291,17 @@ export class Rooms {
   }
 
   /**
-   * The open arenas for the stream board, by id, with their people (bots never count), wave and
-   * hive queen's health. Read per HTTP request, never in the tick. An arena nobody plays in (only
-   * watched: the start screen's demo arena) is left out, so every arena listed has at least one person.
+   * The open arenas for the stream board, by id, with their people (active ones, #117; bots never
+   * count), wave and hive queen's health. Read per HTTP request, never in the tick. An arena nobody
+   * plays in (only watched: the start screen's demo arena, or every member out or hidden) is left
+   * out, so every arena listed has at least one person.
    */
   live(): LiveArenas {
     const arenas: LiveArena[] = [];
-    for (const { room } of this.rooms.values()) if (room.size > 0) arenas.push({ id: room.id, players: room.size, wave: room.wave, queen: room.queen });
+    for (const { room } of this.rooms.values()) {
+      const people = room.people;
+      if (people > 0) arenas.push({ id: room.id, players: people, wave: room.wave, queen: room.queen });
+    }
     arenas.sort((a, b) => a.id - b.id);
     return { playing: arenas.reduce((n, a) => n + a.players, 0), arenas };
   }
@@ -282,14 +324,20 @@ export class Rooms {
   }
 
   /**
-   * The fullest arena with people and room for one more (ties: the lowest id), else a new one. An
-   * arena with no people (only watched) is never picked: it may be on a late wave.
+   * The arena with the most people that can take one more (Room.canTake; ties: the lowest id), else
+   * a new one. An arena with no people (only watched, or every member out or hidden) is never
+   * picked: it may be on a late wave, and nobody would play with the newcomer.
    */
   private pick(): Room {
     let best: Room | null = null;
+    let bestPeople = 0;
     for (const { room } of this.rooms.values()) {
-      if (room.size === 0 || room.size >= MAX_PLAYERS_PER_ARENA) continue;
-      if (!best || room.size > best.size || (room.size === best.size && room.id < best.id)) best = room;
+      const people = room.people;
+      if (people === 0 || !room.canTake()) continue;
+      if (!best || people > bestPeople || (people === bestPeople && room.id < best.id)) {
+        best = room;
+        bestPeople = people;
+      }
     }
     return best ?? this.open();
   }
@@ -297,9 +345,14 @@ export class Rooms {
   /** The arena with the most people, full or not (ties: the lowest id); null when nobody plays. */
   private busiest(): Room | null {
     let best: Room | null = null;
+    let bestPeople = 0;
     for (const { room } of this.rooms.values()) {
-      if (room.size === 0) continue;
-      if (!best || room.size > best.size || (room.size === best.size && room.id < best.id)) best = room;
+      const people = room.people;
+      if (people === 0) continue;
+      if (!best || people > bestPeople || (people === bestPeople && room.id < best.id)) {
+        best = room;
+        bestPeople = people;
+      }
     }
     return best;
   }
@@ -325,7 +378,7 @@ export class Rooms {
 
   private closeIfEmpty(roomId: number): void {
     const entry = this.rooms.get(roomId);
-    if (!entry || entry.room.size > 0 || entry.room.watcherCount > 0) return;
+    if (!entry || entry.room.size > 0 || entry.room.awayCount > 0 || entry.room.watcherCount > 0) return;
     entry.stop();
     this.rooms.delete(roomId);
   }
