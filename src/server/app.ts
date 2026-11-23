@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Database } from "bun:sqlite";
-import { findPlayer, hiddenKeys, playerBest, rankOf, ranking, teamTotals, topOf, type RankEntry, type TopRow } from "./db";
+import { findPlayer, hiddenKeys, playerBest, rankOf, ranking, teamTotals, topFor, topOf, type RankEntry, type TopRow } from "./db";
 import { ASSET_PATHS, asset } from "./art";
 import { isShownName, type Team } from "./rules";
 import type { LiveArenas } from "./arena/rooms";
@@ -60,8 +60,9 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
   };
 
   // With ?player=<id>, also where that player stands (`me`, db.ts rankOf). Their best is read
-  // fresh and ranked against the 1 s snapshot, so a run that just finished ranks at once; `row`
-  // points into the snapshot's rows and catches up on the next poll. No player id is ever sent back.
+  // fresh and ranked against the 1 s snapshot, and their own row in the top 10 is placed by it
+  // (db.ts topFor), so the life that just ended is on their top 10, marked by `row`, at once (#105).
+  // The other rows follow the snapshot. No extra ranking query. No player id is ever sent back.
   app.get("/api/top", (c) => {
     const { entries, top, hidden } = cachedRanking();
     const id = c.req.query("player");
@@ -69,7 +70,9 @@ export function createApp(db: Database, opts: AppOptions = {}): Hono {
     const p = findPlayer(db, id);
     // As the ranking's filters compare: lower(name) against the stored keys, and the word lists.
     const isHidden = p !== null && (hidden.has(p.name.toLowerCase()) || !isShownName(p.name));
-    return c.json({ top, me: rankOf(entries, id, p?.name ?? null, playerBest(db, id), isHidden) });
+    const best = playerBest(db, id);
+    const name = p?.name ?? null;
+    return c.json(topFor(entries, id, name ?? "", best, rankOf(entries, id, name, best, isHidden)));
   });
   app.get("/api/teams", (c) => c.json({ teams: cachedTeams() }));
   // The stream board: the top 10 and the team totals in one read, from the same two caches,

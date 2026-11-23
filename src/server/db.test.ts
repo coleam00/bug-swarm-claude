@@ -10,6 +10,7 @@ import {
   hideName,
   openDb,
   rankOf,
+  topFor,
   recordRunEnded,
   recordRunStarted,
   resetData,
@@ -296,5 +297,14 @@ describe("rankOf", () => {
 
   test("another player with the name whose fresh best beats the snapshot ranks by the fresh best", () => {
     expect(rankOf(byName, "p-c2", "CHURN", 120, false)).toEqual({ rank: 1, ranked: 3, next: null, row: 1 });
+  });
+
+  test("topFor keeps one row per name: a fresh best replaces the name's row, a lower one leaves the rows as read (#105, #106)", () => {
+    const placed = topFor(byName, "p-c2", "CHURN", 120, rankOf(byName, "p-c2", "CHURN", 120, false));
+    expect(placed.top).toEqual([{ name: "CHURN", score: 120 }, { name: "Ada", score: 100 }, { name: "Bob", score: 50 }]);
+    expect(placed.me.row).toBe(0);
+    const lower = topFor(byName, "p-c2", "churn", 30, rankOf(byName, "p-c2", "churn", 30, false));
+    expect(lower.top).toEqual([{ name: "Ada", score: 100 }, { name: "Churn", score: 80 }, { name: "Bob", score: 50 }]);
+    expect(lower.me.row).toBe(1);
   });
 });
