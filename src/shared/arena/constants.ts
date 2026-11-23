@@ -63,6 +63,19 @@ export const DEMO_WARM_S = 45;
 export const DEMO_WARM_TICKS = Math.round((DEMO_WARM_S * 1000) / TICK_MS);
 /** The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79). */
 export const MAX_WATCHERS = 40;
+/**
+ * The most /ws sockets open at once from one client address (#104, owner ruling): households and
+ * phone carriers share addresses, so it leaves room for several people behind one. The 13th is
+ * refused with `limit`.
+ */
+export const MAX_SOCKETS_PER_ADDRESS = 12;
+/** The most joins (welcomed hellos) from one client address in any 60 s (#104, owner ruling); one more is refused with `limit`. */
+export const JOINS_PER_ADDRESS_PER_MINUTE = 30;
+/**
+ * The most people playing at once, server-wide (#104, owner ruling), so one viewer can't open
+ * arenas without bound. One more is refused with `busy` and opens no arena.
+ */
+export const MAX_PEOPLE = 600;
 /** How often watchers of a people-less arena are moved to the busiest arena with people, ms. */
 export const WATCH_SWEEP_MS = 5000;
 /** Inputs the server queues per player; one is applied each tick, the oldest dropped past this. */

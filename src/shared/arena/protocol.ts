@@ -29,12 +29,15 @@ export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN] = EVENT_KIN
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
  * rejoin from a page of another build: reload), the server stopping for a redeploy (restarting:
- * reconnect), or a watch refused because the server has MAX_WATCHERS watching already (full, v8).
- * The socket closes after each.
+ * reconnect), a watch refused because the server has MAX_WATCHERS watching already (full, v8), too
+ * many sockets or joins from the client's address (limit: MAX_SOCKETS_PER_ADDRESS,
+ * JOINS_PER_ADDRESS_PER_MINUTE) or a hello refused because MAX_PEOPLE are playing (busy). The
+ * socket closes after each. limit and busy (#104) came without a protocol version bump: a page
+ * from before them passes an unknown code through, the close follows, and it rejoins with backoff.
  */
-export const ERROR_CODES = ["version", "name", "team", "hello", "restarting", "build", "full"] as const;
+export const ERROR_CODES = ["version", "name", "team", "hello", "restarting", "build", "full", "limit", "busy"] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
-export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO, ERROR_RESTARTING, ERROR_BUILD, ERROR_FULL] = ERROR_CODES;
+export const [ERROR_VERSION, ERROR_NAME, ERROR_TEAM, ERROR_HELLO, ERROR_RESTARTING, ERROR_BUILD, ERROR_FULL, ERROR_LIMIT, ERROR_BUSY] = ERROR_CODES;
 
 /** The longest name a hello may carry before the server's name rules (rules.ts) even look at it. */
 export const HELLO_NAME_MAX = 64;

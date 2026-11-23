@@ -87,10 +87,20 @@ test("startupFrom: ADMIN_TOKEN reaches the server's options, never the log lines
   const s = startupFrom({ NODE_ENV: "production", DATA_DIR: "/data", PORT: "8080", ADMIN_TOKEN: token, BUILD_ID: "b1" }, 1);
   if ("error" in s) throw new Error(s.error);
   expect(s.dataDir).toBe("/data");
-  expect(s.options).toEqual({ port: 8080, hostname: "0.0.0.0", distDir: "dist", buildId: "b1", arenaStartTick: 0, adminToken: token });
+  expect(s.options).toMatchObject({ port: 8080, hostname: "0.0.0.0", distDir: "dist", buildId: "b1", arenaStartTick: 0, adminToken: token, proxyHops: 0, allowLoad: false });
   for (const line of s.lines) expect(line).not.toContain(token);
   const off = startupFrom({}, 1);
   if ("error" in off) throw new Error(off.error);
   expect(off.dataDir).toBe("data");
   expect(off.options.adminToken).toBeNull();
+});
+
+test("startupFrom: TRUST_PROXY_HOPS and BUG_SWARM_ALLOW_LOAD reach the options; a bad value stops the start (#104)", () => {
+  const s = startupFrom({ TRUST_PROXY_HOPS: "1", BUG_SWARM_ALLOW_LOAD: "1" }, 1);
+  if ("error" in s) throw new Error(s.error);
+  expect(s.options).toMatchObject({ proxyHops: 1, allowLoad: true });
+  expect(s.lines.some((l) => l.includes("proxy hop"))).toBe(true);
+  expect(s.lines.some((l) => l.includes("BUG_SWARM_ALLOW_LOAD=1"))).toBe(true);
+  expect(startupFrom({ TRUST_PROXY_HOPS: "x" }, 1)).toHaveProperty("error");
+  expect(startupFrom({ BUG_SWARM_ALLOW_LOAD: "yes" }, 1)).toHaveProperty("error");
 });

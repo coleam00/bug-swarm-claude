@@ -22,7 +22,7 @@ bun run build && bun run start   # production mode on PORT (default 3000)
 ```
 
 More commands:
-- `bun run bots -- --url <base> --count <n> --seconds <s>`: WebSocket bots.
+- `bun run bots -- --url <base> --count <n> --seconds <s>`: WebSocket bots (against a scratch server started with `BUG_SWARM_ALLOW_LOAD=1`).
 - `bun run skill`: the skill gates.
 - `bun run playtest -- --serve --scenario <basic|revive|late-join|restart|queen>`: several real browser players at once.
 

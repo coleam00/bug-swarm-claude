@@ -166,6 +166,9 @@ test(
 test(
   "the 21st player lands in a second arena, and the stats say so",
   async () => {
+    // 21 sockets from one address: over MAX_SOCKETS_PER_ADDRESS, so this server has the load allowance (#104).
+    await srv.stop();
+    srv = serve({ allowLoad: true });
     const joined = [];
     for (let i = 0; i < MAX_PLAYERS_PER_ARENA + 1; i++) joined.push(await enter(`p${String(i).padStart(2, "0")}`));
     expect(joined.slice(0, MAX_PLAYERS_PER_ARENA).every((j) => j.welcome.arena === 1)).toBe(true);
