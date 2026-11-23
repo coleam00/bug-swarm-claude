@@ -1,6 +1,6 @@
 // Name rules and teams. Pure: no bun:sqlite, node:* or Bun globals, because the browser imports
 // this file too (name entry checks names before the server sees them).
-import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
+import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES } from "./blocked-words";
 
 // Teams.
 /**
@@ -67,6 +67,7 @@ const alternation = (list: readonly string[]) => list.map(entryPattern).join("|"
 const ANYWHERE = new RegExp(alternation(BLOCKED_ANYWHERE));
 const WHOLE = new RegExp(`^(?:${alternation(BLOCKED_WHOLE)})s*$`);
 const RESERVED = new RegExp(`^(?:${alternation(RESERVED_NAMES)})$`);
+const EXACT = new Set(RESERVED_EXACT);
 // Longest first, so a long exception is cut before a shorter one inside it.
 const EXCEPTIONS_LONGEST_FIRST = [...EXCEPTIONS].sort((a, b) => b.length - a.length);
 
@@ -136,7 +137,7 @@ export function listedReason(name: string): "blocked" | "reserved" | null {
   const wordReadings = words.flatMap(readings);
   if (wordReadings.some((c) => ANYWHERE.test(cutExceptions(c)))) return "blocked";
   if ([...wordReadings, ...parts.flatMap(readings)].some((c) => WHOLE.test(c))) return "blocked";
-  if (readings(name).some((c) => RESERVED.test(c))) return "reserved";
+  if (readings(name).some((c) => RESERVED.test(c) || EXACT.has(c))) return "reserved";
   return null;
 }
 

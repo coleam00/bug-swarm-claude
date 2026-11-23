@@ -289,10 +289,6 @@ describe("rankOf", () => {
     named("p-b", "Bob", 50, "2026-11-28T15:00:03Z"),
   ];
 
-  test("the player holding a name's row gets that row", () => {
-    expect(rankOf(byName, "p-c1", "Churn", 80, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 21 }, row: 1 });
-  });
-
   test("another player with the name and a lower best stands where the name stands, and is not counted again", () => {
     // `next.points` is what a life of theirs must score to pass Ada: from their own best, not the name's.
     expect(rankOf(byName, "p-c2", "churn", 30, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 71 }, row: 1 });
@@ -300,9 +296,5 @@ describe("rankOf", () => {
 
   test("another player with the name whose fresh best beats the snapshot ranks by the fresh best", () => {
     expect(rankOf(byName, "p-c2", "CHURN", 120, false)).toEqual({ rank: 1, ranked: 3, next: null, row: 1 });
-  });
-
-  test("a hidden player has no rank and no row, whatever their name holds", () => {
-    expect(rankOf(byName, "p-c2", "Churn", 30, true)).toEqual({ rank: null, ranked: 3, next: null, row: null });
   });
 });

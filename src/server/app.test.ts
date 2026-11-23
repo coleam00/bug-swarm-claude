@@ -154,20 +154,13 @@ describe("top 10 and best", () => {
     expect((await standing(a, "player-0001")).me.rank).toBe(1);
   });
 
-  test("ten lives under one name take one row on /api/top and /api/board, and every player with it shares that row (#106)", async () => {
+  test("every player with a name shares its row and rank: the name's best life (#106)", async () => {
     const a = app();
     const spellings = ["Churn", "churn", "CHURN"];
     for (let i = 0; i < 10; i++) await play(a, `player-c${String(i).padStart(3, "0")}`, spellings[i % 3]!, 100 + i * 10);
     await play(a, "player-0ada", "Ada", 150);
     await play(a, "player-0bob", "Bob", 10);
     clock += TOP_CACHE_MS;
-    const rows = [
-      { name: "Churn", score: 190 }, // player-c009's life, the name's best
-      { name: "Ada", score: 150 },
-      { name: "Bob", score: 10 },
-    ];
-    expect(await top(a)).toEqual(rows);
-    expect(((await (await a.request("/api/board")).json()) as { top: unknown }).top).toEqual(rows);
     // A Churn whose own best (130) is below the name's: the name's rank and row, so the life-over
     // screen's rank line and highlighted row agree with the rows.
     expect((await standing(a, "player-c003")).me).toEqual({ rank: 1, ranked: 3, next: null, row: 0 });

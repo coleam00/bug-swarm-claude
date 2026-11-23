@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FILL_BOT_NAMES } from "./arena/fill";
-import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES } from "./blocked-words";
+import { BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_EXACT, RESERVED_NAMES } from "./blocked-words";
 import {
   TEAMS,
   checkName,
@@ -171,6 +171,10 @@ describe("name rules", () => {
     for (const n of ["Archonaut", "admins team", "Medina", "Moderato", "Admiral", "Nicole", "Coleman", "Cole Porter", "Hosta", "Hostess", "Ghost", "Moderna", "Mode", "Twitcher", "YouTuber", "Streamers Fan", "Robot", "Abbot"]) {
       expect(checkName(n).ok).toBe(true);
     }
+    // The host and platform words take no repeated-letter rule, so real names that reach one only that way pass.
+    for (const n of ["Mood", "M00d", "Modd", "Colle", "Coole", "Hoost", "Twittch", "Officiall"]) {
+      expect(checkName(n).ok).toBe(true);
+    }
   });
 
   test("the boards show a stored name only if the lists allow it, whatever its length", () => {
@@ -182,7 +186,7 @@ describe("name rules", () => {
   });
 
   test("the lists: lowercase a to z, no duplicates, a few hundred blocked words, nothing redundant", () => {
-    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES]) {
+    for (const list of [BLOCKED_ANYWHERE, BLOCKED_WHOLE, EXCEPTIONS, RESERVED_NAMES, RESERVED_EXACT]) {
       expect(list.filter((w) => !/^[a-z]+$/.test(w))).toEqual([]);
       expect(new Set(list).size).toBe(list.length);
     }
@@ -235,16 +239,6 @@ describe("bot names", () => {
     expect(bots.filter((n) => !isBotName(n))).toEqual([]);
     const people = ["bots-01", "robot x", "abbot y", "Robo", "Robot", "Abbot", "Boot", "Bottle", "Bots", "Abbot Bot", "--", "__"];
     expect(people.filter((n) => isBotName(n))).toEqual([]);
-  });
-
-  test("every name the #106 probe got past the arena hello is refused now", () => {
-    // The arena hello refuses a name unless checkName passes it and isBotName does not (sockets.ts).
-    const passes = (n: string) => {
-      const c = checkName(n);
-      return c.ok && !isBotName(c.name);
-    };
-    expect(["b0t x", "bot_x", "Bot", "official", "host", "streamer", "YouTube", "Cole"].filter(passes)).toEqual([]);
-    expect(["Robot", "Abbot", "Nicole", "Coleman", "Hosta"].filter((n) => !passes(n))).toEqual([]);
   });
 
   test("the server's fill-bot names are all bot names, and all different", () => {

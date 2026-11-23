@@ -8,8 +8,9 @@ export const fmt = (n: number): string => n.toLocaleString("en-US");
 export const TOP_SIZE = 10;
 
 /**
- * Where the player's best stands against the top 10, as the server ranked it: "#3 on the top 10",
- * or "120 points to reach the top 10" (one more than the 10th row's score minus their best; never
+ * Where the player stands against the top 10, as the server ranked them: "#3 on the top 10". The
+ * rank is their name's (one row per name, db.ts rankOf), so players sharing a name share its row
+ * and rank. Off it, "120 points to reach the top 10" (one more than the 10th row's score minus their best; never
  * under 1, since the rows can trail the best by a second). Null without a rank or a best (hidden,
  * no saved life yet, or the read failed).
  */
