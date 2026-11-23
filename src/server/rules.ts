@@ -150,15 +150,17 @@ export function checkName(raw: string): NameCheck {
 }
 
 /**
- * Names starting with this (after normalizing, any case) belong to the server's own arena bots,
- * so the arena's /ws refuses them from clients and the start screen refuses them before joining
- * (start.ts). Not folded into checkName: the boards still show stored names from before.
+ * True for a name that reads as one of the server's own arena bots: its first word reads "bot"
+ * once digit swaps, separators, spelled-out letters and a number at either end are undone (the
+ * profanity check's normalisation: "Bot", "b0t x", "bot_x", "b o t", "Bot2", "1 bot", and every
+ * fill bot's "bot Ada"). The arena's /ws refuses these from clients and the start screen before
+ * joining (start.ts), so a name that reads "bot" in the arena is always a server bot. Not folded
+ * into checkName: fill bots keep their names and the boards still show stored ones. "Robot",
+ * "Abbot", "Boot" and "bots-01" are not bot names.
  */
-export const BOT_NAME_PREFIX = "bot ";
-
-/** True for a name reserved for the server's bots: "bot " and more, in any case. "bots-01" is not one. */
 export function isBotName(name: string): boolean {
-  return nameKey(name).startsWith(BOT_NAME_PREFIX);
+  const first = nameWords(normalizeName(name))[0];
+  return first !== undefined && readings(first.text).includes("bot");
 }
 
 const shown = new Map<string, boolean>();

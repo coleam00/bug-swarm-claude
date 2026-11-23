@@ -135,12 +135,14 @@ export type TopRow = { name: string; score: number };
 export type RankEntry = { playerId: string; name: string; score: number; firstAt: string };
 
 /**
- * Every player with a finished run, by best score, non-hidden names only, highest first. Ties go
- * to the player who finished a run first, then to the lower player id, so the order is total.
- * The top 10 is its first ten rows and a player's rank is their place in it. Stored names the
- * word lists now refuse (isShownName) are left out too: those rows stay stored, they are only
- * not shown, and they are dropped before the cut to 10, so a high-ranked one doesn't shorten
- * the board.
+ * One row per name (`nameKey`, any case), each at its best life, highest first, non-hidden
+ * names only, so one name can't fill the top 10 however many players take it (#106). Ties go to
+ * the player who finished a run first, then to the lower player id, so the order is total; a
+ * name's row is the first of its players in that order, with that player's stored spelling.
+ * The top 10 is its first ten rows and a player's rank is their name's place in it (rankOf).
+ * Stored names the word lists now refuse (isShownName) are left out too: those rows stay
+ * stored, they are only not shown, and they are dropped before the cut to 10, so a high-ranked
+ * one doesn't shorten the board.
  */
 export function ranking(db: Database): RankEntry[] {
   const rows = db
@@ -152,10 +154,17 @@ export function ranking(db: Database): RankEntry[] {
        ORDER BY score DESC, firstAt ASC, p.id ASC`,
     )
     .all(RUN_ENDED) as RankEntry[];
-  return rows.filter((r) => isShownName(r.name));
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    if (!isShownName(r.name)) return false;
+    const key = nameKey(r.name);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
-/** The first ten rows of the ranking: best score per player, one row each. */
+/** The first ten rows of the ranking: best life per name, one row each. */
 export function topTen(db: Database): TopRow[] {
   return topOf(ranking(db));
 }
@@ -177,25 +186,33 @@ export function hiddenKeys(db: Database): Set<string> {
 export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
 
 /**
- * Ranks a player's best against a ranking. `best` may be fresher than the ranking (a run that
- * finished since it was read): the player is placed by it, with their first-finish time from the
- * ranking, or after everyone already in it when they are not in it yet. `row` follows the
- * ranking as it is, since it points into the rows read with it.
+ * Ranks a player against a ranking, by their name (`name`, their current stored name, or null
+ * when the server has never stored them): the ranking has one row per name, so a player stands
+ * where their name stands, and `row` is the name's row even when another player holds it. `best`
+ * may be fresher than the ranking (a run that finished since it was read): the name is placed by
+ * the higher of it and the name's row, with the row's first-finish time, or after everyone
+ * already in it when the name is not in it yet. `next.points` is what a life of this player's
+ * must score to pass the rank above. `row` follows the ranking as it is, since it points into
+ * the rows read with it.
  */
-export function rankOf(entries: RankEntry[], playerId: string, best: number | null, hidden: boolean): Me {
-  const at = entries.findIndex((e) => e.playerId === playerId);
+export function rankOf(entries: RankEntry[], playerId: string, name: string | null, best: number | null, hidden: boolean): Me {
+  const key = name === null ? null : nameKey(name);
+  let at = key === null ? -1 : entries.findIndex((e) => nameKey(e.name) === key);
+  // Renamed since the ranking was read: their old row is still theirs until the next read.
+  if (at < 0) at = entries.findIndex((e) => e.playerId === playerId);
   const row = !hidden && at >= 0 && at < 10 ? at : null;
   if (hidden || best === null) return { rank: null, ranked: entries.length, next: null, row: null };
   const mine = at >= 0 ? entries[at]! : null;
+  const score = mine ? Math.max(best, mine.score) : best;
   // The ranking's order: score down, then first finish, then id. Not in the ranking yet: their
   // first finish is after the ranking was read, so after everyone in it.
   const ahead = (e: RankEntry) =>
-    e.score > best ||
-    (e.score === best && (mine === null || e.firstAt < mine.firstAt || (e.firstAt === mine.firstAt && e.playerId < mine.playerId)));
+    e.score > score ||
+    (e.score === score && (mine === null || e.firstAt < mine.firstAt || (e.firstAt === mine.firstAt && e.playerId < mine.playerId)));
   let above: RankEntry | null = null;
   let count = 0;
   for (const e of entries) {
-    if (e.playerId === playerId || !ahead(e)) continue;
+    if (e === mine || !ahead(e)) continue;
     count++;
     above = e;
   }

@@ -226,6 +226,20 @@ test(
 );
 
 test(
+  "names posing as a bot, the host or the platform are refused at hello (#106)",
+  async () => {
+    for (const name of ["b0t x", "bot_x", "bot-x", "Bot", "b o t", "Cole", "host", "streamer", "mod", "official", "YouTube", "twitch"]) {
+      const c = await connect();
+      c.send(hello(name));
+      expect(await c.closed).toBe(1008);
+      expect({ name, got: c.got }).toEqual({ name, got: [{ t: "error", code: "name" }] });
+    }
+    expect(srv.rooms.stats().players).toBe(0);
+  },
+  TIMEOUT,
+);
+
+test(
   "a hidden name is refused at hello",
   async () => {
     hideName(db, "Hidden One", new Date());

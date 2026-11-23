@@ -1,6 +1,6 @@
 // The name tag of a server fill bot (#66): a small "BOT" pill just left of its name, which is drawn
-// dimmer than a person's. A bot is told by its name: only the server may use the `bot ` prefix
-// (rules.ts isBotName), so the protocol carries no flag. Pure: render.ts measures the text once
+// dimmer than a person's. A bot is told by its name: only the server may use a name whose
+// first word reads "bot" (rules.ts isBotName), so the protocol carries no flag. Pure: render.ts measures the text once
 // per robot and keeps the box here on the robot. Also: who counts as a person in the HUD's
 // "N playing" (#90), and where a name tag and HELP go so they never sit under the HUD band (#90).
 import { PLAYER_RADIUS } from "../../shared/arena/constants";

@@ -164,7 +164,13 @@ describe("name rules", () => {
     for (const n of ["colemedin", "Cole Medin", "cole_medin", "c0le-medin", "Dynamous", "ARCHON", "admin", "Addmin", "moderator", "admin99", "Cole Medin 2", "admin1", "Archon2", "Moderator2", "Dynamous 1", "1 Admin", "2 Archon", "007Archon", "1Moderator", "1dynamous", "69 Cole Medin"]) {
       expect(checkName(n)).toEqual(reserved);
     }
-    for (const n of ["Archonaut", "admins team", "Cole", "Medina", "Moderato", "Admiral"]) expect(checkName(n).ok).toBe(true);
+    // The host and the platforms (#106), in the spellings the profanity check reads through.
+    for (const n of ["cole", "Cole", "C0le", "c o le", "host", "Host 2", "H0st", "streamer", "Stream_er", "mod", "M0d", "MOD", "moderator", "admin", "official", "Official", "0fficial", "youtube", "YouTube", "You Tube", "you-tube", "twitch", "Tw1tch", "TWITCH 7"]) {
+      expect(checkName(n)).toEqual(reserved);
+    }
+    for (const n of ["Archonaut", "admins team", "Medina", "Moderato", "Admiral", "Nicole", "Coleman", "Cole Porter", "Hosta", "Hostess", "Ghost", "Moderna", "Mode", "Twitcher", "YouTuber", "Streamers Fan", "Robot", "Abbot"]) {
+      expect(checkName(n).ok).toBe(true);
+    }
   });
 
   test("the boards show a stored name only if the lists allow it, whatever its length", () => {
@@ -224,9 +230,21 @@ describe("teams", () => {
 });
 
 describe("bot names", () => {
-  test("names starting with 'bot ' are reserved for the server's bots, in any case and spacing", () => {
-    for (const name of ["bot alice", "Bot  Bob", "  BOT x", "bot 7"]) expect(isBotName(name)).toBe(true);
-    for (const name of ["bots-01", "robot x", "bot", "abbot y", "bot_x", "bot-x", "Robo"]) expect(isBotName(name)).toBe(false);
+  test("a name whose first word reads 'bot' is kept for the server's bots, whatever the spelling", () => {
+    const bots = ["bot alice", "Bot  Bob", "  BOT x", "bot 7", "bot", "Bot", "B0T", "8ot", "b0t x", "bot_x", "bot-x", "b o t", "bo t", "1 bot", "Bot 4455", "Bot2", "bot99"];
+    expect(bots.filter((n) => !isBotName(n))).toEqual([]);
+    const people = ["bots-01", "robot x", "abbot y", "Robo", "Robot", "Abbot", "Boot", "Bottle", "Bots", "Abbot Bot", "--", "__"];
+    expect(people.filter((n) => isBotName(n))).toEqual([]);
+  });
+
+  test("every name the #106 probe got past the arena hello is refused now", () => {
+    // The arena hello refuses a name unless checkName passes it and isBotName does not (sockets.ts).
+    const passes = (n: string) => {
+      const c = checkName(n);
+      return c.ok && !isBotName(c.name);
+    };
+    expect(["b0t x", "bot_x", "Bot", "official", "host", "streamer", "YouTube", "Cole"].filter(passes)).toEqual([]);
+    expect(["Robot", "Abbot", "Nicole", "Coleman", "Hosta"].filter((n) => !passes(n))).toEqual([]);
   });
 
   test("the server's fill-bot names are all bot names, and all different", () => {

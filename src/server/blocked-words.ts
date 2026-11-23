@@ -93,9 +93,14 @@
 // and "Anna Al" (anal), "Ji Smith" (jism), "Andy Ke" (dyke).
 //
 // RESERVED_NAMES: refused for players, who see the start screen's "Pick a different name"
-// (src/web/start.ts). Matched against the whole normalised name with the same repeated-letter
-// rule ("Cole Medin", "c0le_medin" and "Addmin" are refused); a name that only contains one
-// ("Archonaut") is fine.
+// (src/web/start.ts). Three groups: the factory (colemedin, dynamous, archon), the host and the
+// people running the stream (cole, host, streamer, mod, moderator, admin, official) and the
+// platforms it streams on (youtube, twitch), so nobody poses as them on a public stream (#106).
+// Matched against the whole normalised name with the same repeated-letter rule ("Cole Medin",
+// "c0le_medin", "You Tube", "Host 2" and "Addmin" are refused, and so are "Mood" and "Coole");
+// a name that only contains one ("Archonaut", "Nicole", "Coleman", "Hosta", "Moderna") is fine.
+// Names that read as a bot are kept for the server's bots by rules.ts isBotName, not here, so
+// fill bots keep their names on the boards.
 //
 // The boards (top 10 and team totals) hide a stored name these lists now refuse, at read time.
 //
@@ -531,4 +536,20 @@ export const EXCEPTIONS: readonly string[] = [
   "toshitsugu",
 ];
 
-export const RESERVED_NAMES: readonly string[] = ["colemedin", "dynamous", "archon", "admin", "moderator"];
+export const RESERVED_NAMES: readonly string[] = [
+  // The factory.
+  "colemedin",
+  "dynamous",
+  "archon",
+  // The host and the people running the stream.
+  "cole",
+  "host",
+  "streamer",
+  "mod",
+  "moderator",
+  "admin",
+  "official",
+  // The platforms.
+  "youtube",
+  "twitch",
+];
