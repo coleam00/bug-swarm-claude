@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { Database } from "bun:sqlite";
 import { hideCommand, resetCommand, statsCommand } from "../../scripts/admin-lib";
 import {
@@ -313,5 +313,30 @@ describe("rankOf", () => {
     const lower = topFor(byName, "p-c2", "churn", 30, rankOf(byName, "p-c2", "churn", 30, false));
     expect(lower.top).toEqual([{ name: "Ada", score: 100 }, { name: "Churn", score: 80 }, { name: "Bob", score: 50 }]);
     expect(lower.me.row).toBeNull();
+  });
+});
+
+describe("openDb", () => {
+  // Bun on Windows throws EEXIST from a recursive mkdir of an existing folder given as a
+  // relative path with `..` (#113), so a scratch DATA_DIR such as `../scratch` failed to open.
+  test("opens a relative path with .. to an existing folder, twice", () => {
+    const base = mkdtempSync(join(tmpdir(), "db-dotdot-"));
+    try {
+      mkdirSync(join(base, "sub"));
+      const rel = join(relative(process.cwd(), base), "sub", "app.db");
+      // If the temp folder is on another drive, relative() returns an absolute path and this
+      // test would stop testing the bug: fail loudly instead.
+      expect(rel.startsWith("..")).toBe(true);
+      for (let i = 0; i < 2; i++) {
+        const opened = openDb(rel);
+        try {
+          expect(opened.query("SELECT count(*) AS n FROM events").get()).toEqual({ n: 0 });
+        } finally {
+          opened.close();
+        }
+      }
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });
