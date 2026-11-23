@@ -6,6 +6,7 @@ import type { Database } from "bun:sqlite";
 import { TOP_CACHE_MS, createApp } from "./app";
 import type { LiveArenas } from "./arena/rooms";
 import { findPlayer, hideName, openDb, playerBest, recordRunEnded, recordRunStarted, upsertPlayer } from "./db";
+import { writeLife } from "./arena/lives";
 import { ROBOT_RIM } from "../web/game/look";
 import { TEAMS, type Team } from "./rules";
 
@@ -188,7 +189,7 @@ describe("top 10 and best", () => {
     expect((await standing(a, "player-9999")).me).toEqual(none);
   });
 
-  test("a run that just finished ranks at once; the rows and `row` follow the 1 s snapshot", async () => {
+  test("a run that just finished ranks at once, and that player's own row is in their top 10 at once", async () => {
     const a = app();
     await play(a, "player-0001", "Ada", 100);
     await play(a, "player-0002", "Bob", 50);
@@ -198,12 +199,97 @@ describe("top 10 and best", () => {
     // Same instant: inside the window the read above filled.
     endRun(runId, 60, 6, 10);
     const fresh = await standing(a, "player-0003");
-    expect(fresh.top.map((r) => r.name)).toEqual(["Ada", "Bob"]);
-    expect(fresh.me).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: null });
+    expect(fresh.top.map((r) => r.name)).toEqual(["Ada", "Cy", "Bob"]);
+    expect(fresh.me).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 1 });
+    // Everyone else's top 10 follows the snapshot: Cy shows there from the next cache turn.
+    expect((await top(a)).map((r) => r.name)).toEqual(["Ada", "Bob"]);
     clock += TOP_CACHE_MS;
     const later = await standing(a, "player-0003");
     expect(later.top.map((r) => r.name)).toEqual(["Ada", "Cy", "Bob"]);
     expect(later.me).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 1 });
+  });
+
+  /** Seeds `n` players at scores 100, 101, ... (names Seed100, ...) and fills the cache. */
+  async function seeded(n: number) {
+    const a = app();
+    for (let i = 0; i < n; i++) await play(a, `player-seed${100 + i}`, `Seed${100 + i}`, 100 + i);
+    clock += TOP_CACHE_MS;
+    return a;
+  }
+
+  // From here on in each test the clock stands still, so the snapshot is the one read before the save.
+  const life = (playerKey: string, name: string, score: number) =>
+    writeLife(db, `run-${nextRun++}`, { playerKey, name, team: TABS, touch: false, score, kills: 1, seconds: 30, endedAtMs: clock });
+
+  test("a life that just ended is on that player's top 10 at once, row marked, with no new ranking query (#105)", async () => {
+    const a = await seeded(10);
+    await standing(a, "player-rec01"); // the snapshot, read before the life ends
+    const queries = spyOn(db, "query");
+    life("player-rec01", "Rec", 99999);
+    const { top: rows, me } = await standing(a, "player-rec01");
+    expect(rows[0]).toEqual({ name: "Rec", score: 99999 });
+    expect(rows).toHaveLength(10);
+    expect(rows.some((r) => r.name === "Seed100")).toBe(false);
+    expect(me).toEqual({ rank: 1, ranked: 11, next: null, row: 0 });
+    expect(queries.mock.calls.every(([sql]) => !String(sql).includes("GROUP BY"))).toBe(true);
+    queries.mockRestore();
+  });
+
+  test("a player already on the top 10 moves up: one row for them, the rows between shift down", async () => {
+    const a = await seeded(9);
+    await play(a, "player-mover1", "Mover", 101); // 8th of 10
+    clock += TOP_CACHE_MS;
+    await standing(a, "player-mover1");
+    life("player-mover1", "Mover", 106);
+    const { top: rows, me } = await standing(a, "player-mover1");
+    expect(rows.map((r) => r.score)).toEqual([108, 107, 106, 106, 105, 104, 103, 102, 101, 100]);
+    expect(rows.filter((r) => r.name === "Mover")).toEqual([{ name: "Mover", score: 106 }]);
+    // Seed106 finished first, so the tie goes to them, as the ranking orders it.
+    expect(rows[2]!.name).toBe("Seed106");
+    expect(me.row).toBe(3);
+    expect(me.rank).toBe(4);
+  });
+
+  test("a fresh best below the top 10 leaves the rows as the snapshot read them and no row", async () => {
+    const a = await seeded(10);
+    const before = await standing(a, "player-low001");
+    life("player-low001", "Low", 50);
+    const after = await standing(a, "player-low001");
+    expect(after.top).toEqual(before.top);
+    expect(after.me).toEqual({ rank: 11, ranked: 11, next: { rank: 10, points: 51 }, row: null });
+  });
+
+  test("a newcomer tying the 10th row sits after it, as the ranking orders ties", async () => {
+    const a = await seeded(10);
+    await standing(a, "player-tie001");
+    life("player-tie001", "Tie", 100);
+    const { top: rows, me } = await standing(a, "player-tie001");
+    expect(rows.at(-1)).toEqual({ name: "Seed100", score: 100 });
+    expect(me).toMatchObject({ rank: 11, row: null });
+    life("player-tie002", "Tie Two", 101);
+    const two = await standing(a, "player-tie002");
+    expect(two.top.slice(-2)).toEqual([{ name: "Seed101", score: 101 }, { name: "Tie Two", score: 101 }]);
+    expect(two.me).toMatchObject({ rank: 10, row: 9 });
+  });
+
+  test("a hidden name's fresh best is not put on any top 10", async () => {
+    const a = await seeded(10);
+    hideName(db, "Hidden", new Date(clock));
+    clock += TOP_CACHE_MS;
+    const before = await standing(a, "player-hide01");
+    life("player-hide01", "Hidden", 99999);
+    const after = await standing(a, "player-hide01");
+    expect(after.top).toEqual(before.top);
+    expect(after.me).toEqual({ rank: null, ranked: 10, next: null, row: null });
+  });
+
+  test("the top 10 without ?player= follows the snapshot: a life shows there from the next cache turn", async () => {
+    const a = await seeded(10);
+    await top(a);
+    life("player-rec01", "Rec", 99999);
+    expect((await top(a))[0]).toEqual({ name: "Seed109", score: 109 });
+    clock += TOP_CACHE_MS;
+    expect((await top(a))[0]).toEqual({ name: "Rec", score: 99999 });
   });
 
   test("a missing or malformed ?player= gives exactly { top }; no player id is ever sent back", async () => {
