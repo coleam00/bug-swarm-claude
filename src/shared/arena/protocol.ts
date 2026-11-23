@@ -29,7 +29,8 @@ export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN] = EVENT_KIN
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
  * rejoin from a page of another build: reload), the server stopping for a redeploy (restarting:
- * reconnect), a watch refused because the server has MAX_WATCHERS watching already (full, v8), too
+ * reconnect), a watch refused because the server has MAX_WATCHERS watching already, or the client's address
+ * MAX_WATCHERS_PER_ADDRESS (full, v8; the per-address cap, #119, without a version bump), too
  * many sockets or joins from the client's address (limit: MAX_SOCKETS_PER_ADDRESS,
  * JOINS_PER_ADDRESS_PER_MINUTE) or a hello refused because MAX_PEOPLE are playing (busy). The
  * socket closes after each. limit and busy (#104) came without a protocol version bump: a page

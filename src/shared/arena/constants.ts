@@ -61,14 +61,26 @@ export const DEMO_BOTS = FILL_TARGET;
  */
 export const DEMO_WARM_S = 45;
 export const DEMO_WARM_TICKS = Math.round((DEMO_WARM_S * 1000) / TICK_MS);
-/** The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79). */
-export const MAX_WATCHERS = 40;
+/**
+ * The most sockets watching arenas at once, server-wide; one more is refused with `full` (#79).
+ * #119: 300 start screens at once, with room for a few more. Measured: 300 watchers in one arena
+ * add about 3.3 ms to its tick (p95 6.26 ms, one send of the shared frame each, about 11 us), so
+ * about 400 would approach the 10 ms tick budget.
+ */
+export const MAX_WATCHERS = 320;
 /**
  * The most /ws sockets open at once from one client address (#104, owner ruling): households and
  * phone carriers share addresses, so it leaves room for several people behind one. The 13th is
  * refused with `limit`.
  */
 export const MAX_SOCKETS_PER_ADDRESS = 12;
+/**
+ * The most sockets from one client address watching at once (#119), so no one client can take the
+ * server's MAX_WATCHERS. One more is refused with `full`: that start screen shows the drawn
+ * backdrop, and Play still joins. Half of MAX_SOCKETS_PER_ADDRESS, so an address at its watcher
+ * cap still has sockets for players; it must stay below it, or the socket cap always fires first.
+ */
+export const MAX_WATCHERS_PER_ADDRESS = 6;
 /** The most joins (welcomed hellos) from one client address in any 60 s (#104, owner ruling); one more is refused with `limit`. */
 export const JOINS_PER_ADDRESS_PER_MINUTE = 30;
 /**
