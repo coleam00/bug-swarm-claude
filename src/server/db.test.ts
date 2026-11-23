@@ -290,9 +290,16 @@ describe("rankOf", () => {
     named("p-b", "Bob", 50, "2026-11-28T15:00:03Z"),
   ];
 
-  test("another player with the name and a lower best stands where the name stands, and is not counted again", () => {
-    // `next.points` is how far above their own best (30) Ada's 100 is, plus 1: from their best, not the name's.
-    expect(rankOf(byName, "p-c2", "churn", 30, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 71 }, row: 1 });
+  test("the holder of the name's row is ranked on it", () => {
+    expect(rankOf(byName, "p-c1", "Churn", 80, false)).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 21 }, row: 1 });
+  });
+
+  test("another player with the name and a best that doesn't beat its row has no rank or row, only who holds it (owner ruling)", () => {
+    const held = { rank: null, ranked: 3, next: null, row: null, held: { name: "Churn", rank: 2, score: 80 } };
+    expect(rankOf(byName, "p-c2", "churn", 30, false)).toEqual(held);
+    expect(rankOf(byName, "p-c2", "churn", 80, false)).toEqual(held); // a tie stays with the holder, who finished first
+    expect(rankOf(byName, "p-c2", "churn", null, false)).toEqual(held);
+    expect(rankOf(byName, "p-c2", "churn", 30, true)).toEqual({ rank: null, ranked: 3, next: null, row: null });
   });
 
   test("another player with the name whose fresh best beats the snapshot ranks by the fresh best", () => {
@@ -305,6 +312,6 @@ describe("rankOf", () => {
     expect(placed.me.row).toBe(0);
     const lower = topFor(byName, "p-c2", "churn", 30, rankOf(byName, "p-c2", "churn", 30, false));
     expect(lower.top).toEqual([{ name: "Ada", score: 100 }, { name: "Churn", score: 80 }, { name: "Bob", score: 50 }]);
-    expect(lower.me.row).toBe(1);
+    expect(lower.me.row).toBeNull();
   });
 });

@@ -111,7 +111,7 @@ describe("top 10 and best", () => {
     ]);
   });
 
-  type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
+  type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null; held?: { name: string; rank: number; score: number } };
   async function standing(a: App, playerId: string) {
     const res = await a.request(`/api/top?player=${playerId}`);
     expect(res.status).toBe(200);
@@ -155,16 +155,17 @@ describe("top 10 and best", () => {
     expect((await standing(a, "player-0001")).me.rank).toBe(1);
   });
 
-  test("every player with a name shares its row and rank: the name's best life (#106)", async () => {
+  test("a name takes one row, at its best life, and only that life's player is ranked on it (#106)", async () => {
     const a = app();
     const spellings = ["Churn", "churn", "CHURN"];
     for (let i = 0; i < 10; i++) await play(a, `player-c${String(i).padStart(3, "0")}`, spellings[i % 3]!, 100 + i * 10);
     await play(a, "player-0ada", "Ada", 150);
     await play(a, "player-0bob", "Bob", 10);
     clock += TOP_CACHE_MS;
-    // A Churn whose own best (130) is below the name's: the name's rank and row, so the life-over
-    // screen's rank line and highlighted row agree with the rows.
-    expect((await standing(a, "player-c003")).me).toEqual({ rank: 1, ranked: 3, next: null, row: 0 });
+    // The holder of the Churn row is ranked on it. Another Churn whose own best (130) is below
+    // it gets no rank or highlighted row, only who holds the name (owner ruling).
+    expect((await standing(a, "player-c009")).me).toEqual({ rank: 1, ranked: 3, next: null, row: 0 });
+    expect((await standing(a, "player-c003")).me).toEqual({ rank: null, ranked: 3, next: null, row: null, held: { name: "Churn", rank: 1, score: 190 } });
     expect((await standing(a, "player-0ada")).me).toEqual({ rank: 2, ranked: 3, next: { rank: 1, points: 41 }, row: 1 });
   });
 

@@ -179,13 +179,22 @@ export function hiddenKeys(db: Database): Set<string> {
 }
 
 /**
- * Where a player stands: where their name stands, since the ranking has one row per name.
- * `rank` is its place among `ranked` visible names (null when hidden or with no finished run);
- * `next` is the rank just above and how many points above the player's own best it takes to
- * pass it (one more than that rank's score minus their best);
- * `row` is the name's index in the top 10 rows, when it is in them.
+ * Where a player stands. The ranking has one row per name, and a player is ranked only when
+ * their own life is the one on their name's row (owner ruling on #106). `rank` is that row's
+ * place among `ranked` visible names (null when hidden, with no finished run, or when another
+ * player's life holds the name's row); `next` is the rank just above and how many points above
+ * the player's own best it takes to pass it (one more than that rank's score minus their best);
+ * `row` is the name's index in the top 10 rows, when it is in them and the life on it is theirs.
+ * `held`, only when another player's life holds the name's row: that row's name as stored, its
+ * rank and score ("Churn holds #1 with 1,900").
  */
-export type Me = { rank: number | null; ranked: number; next: { rank: number; points: number } | null; row: number | null };
+export type Me = {
+  rank: number | null;
+  ranked: number;
+  next: { rank: number; points: number } | null;
+  row: number | null;
+  held?: { name: string; rank: number; score: number };
+};
 
 /**
  * The index of a player's name's row in a ranking, or -1: the row with their name (any case),
@@ -200,19 +209,25 @@ function nameRow(entries: RankEntry[], playerId: string, name: string | null): n
 
 /**
  * Ranks a player against a ranking, by their name (`name`, their current stored name, or null
- * when the server has never stored them): the ranking has one row per name, so a player stands
- * where their name stands, and `row` is the name's row even when another player holds it. `best`
- * may be fresher than the ranking (a run that finished since it was read): the name is placed by
- * the higher of it and the name's row, with the row's first-finish time, or after everyone
- * already in it when the name is not in it yet. `next.points` is how many points above this
+ * when the server has never stored them). The ranking has one row per name: when the life on the
+ * name's row is another player's and `best` does not beat it, this player has no rank or row,
+ * and `held` says who holds the name and where (owner ruling on #106). Otherwise the row is
+ * theirs, or becomes theirs: `best` may be fresher than the ranking (a run that finished since it
+ * was read), and the name is placed by the higher of it and the row, with the row's first-finish
+ * time, or after everyone already in it when the name is not in it yet. `next.points` is how many points above this
  * player's own best (not the name's) it takes to pass the rank above. `row` follows the ranking as it is, since it points into
  * the rows read with it.
  */
 export function rankOf(entries: RankEntry[], playerId: string, name: string | null, best: number | null, hidden: boolean): Me {
   const at = nameRow(entries, playerId, name);
-  const row = !hidden && at >= 0 && at < 10 ? at : null;
-  if (hidden || best === null) return { rank: null, ranked: entries.length, next: null, row: null };
   const mine = at >= 0 ? entries[at]! : null;
+  if (hidden) return { rank: null, ranked: entries.length, next: null, row: null };
+  // Another player's life on the name's row, not beaten by this player's best: not theirs.
+  if (mine && mine.playerId !== playerId && (best === null || best <= mine.score)) {
+    return { rank: null, ranked: entries.length, next: null, row: null, held: { name: mine.name, rank: at + 1, score: mine.score } };
+  }
+  const row = at >= 0 && at < 10 ? at : null;
+  if (best === null) return { rank: null, ranked: entries.length, next: null, row: null };
   const score = mine ? Math.max(best, mine.score) : best;
   // The ranking's order: score down, then first finish, then id. Not in the ranking yet: their
   // first finish is after the ranking was read, so after everyone in it.

@@ -25,6 +25,13 @@ test("below it: one more than the 10th row's score minus the best, not the gap t
   );
 });
 
+test("when another player's life holds the name's row: who holds it, where, and with what", () => {
+  const me = { rank: null, ranked: 40, next: null, row: null, held: { name: "Churn", rank: 1, score: 1900 } };
+  expect(topLine(me, TEN, 300)).toBe("Churn holds #1 with 1,900");
+  expect(topLine({ ...me, held: { name: "CHURN", rank: 14, score: 300 } }, TEN, 120)).toBe("CHURN holds #14 with 300");
+  expect(topLine(me, TEN, null)).toBeNull();
+});
+
 test("nothing without a rank or a best: hidden, no saved life yet, or the read failed", () => {
   expect(topLine(null, TEN, 500)).toBeNull();
   expect(topLine({ rank: null, ranked: 40, next: null, row: null }, TEN, 500)).toBeNull();
