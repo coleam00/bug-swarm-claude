@@ -13,6 +13,7 @@ import {
   botName,
   botTeam,
   budgetVerdict,
+  refusalHint,
   countBytes,
   exitCode,
   createTally,
@@ -204,13 +205,23 @@ test("the summary gives each watcher's second-half KB/s, mean, p95 and max, and 
   const args = { url: "u", count: 0, seconds: 10, policy: "aimer" as const, watchers: 2 };
   const text = formatSummary(args, tally, 10, { p50: 1, p95: 2 }).join("\n");
   expect(text).toContain("watchers: 2 of 2 watching, second half, payload: mean 45.0 KB/s, p95 65.0 KB/s, max 65.0 KB/s");
-  expect(text).toContain("budget: at most 40 KB/s per watcher: MISS");
+  expect(text).toContain("budget: at most 40 KB/s per watcher: MISS (max 65.0 KB/s)");
   expect(text).toContain("verdict: MISS (a watcher received 65.0 KB/s, over 40 KB/s)");
   tally.watcherKbps.splice(0, 2, 30, 25);
   expect(formatSummary(args, tally, 10, { p50: 1, p95: 2 }).join("\n")).toContain("budget: at most 40 KB/s per watcher: pass");
+  // Watchers refused (a server without BUG_SWARM_ALLOW_LOAD=1): the line says so, not a bandwidth miss.
+  const refused = formatSummary({ ...args, watchers: 300 }, { ...tally, watching: 6, watcherKbps: [8, 8] }, 10, { p50: 1, p95: 2 }).join("\n");
+  expect(refused).toContain("budget: at most 40 KB/s per watcher: MISS (only 6 of 300 watching: the rest were refused, see the errors)");
   const none = formatSummary({ ...args, count: 1, watchers: 0 }, tally, 10, null).join(" ");
   expect(none).not.toContain("watchers:");
   expect(none).not.toContain("per watcher");
+});
+
+test("a refusal from the per-address limits says, once, to start the server with BUG_SWARM_ALLOW_LOAD=1 (#104, #119)", () => {
+  expect(refusalHint("limit")).toContain("BUG_SWARM_ALLOW_LOAD=1");
+  expect(refusalHint("full")).toContain("per-address watcher limit (6)");
+  expect(refusalHint("full")).toContain("BUG_SWARM_ALLOW_LOAD=1");
+  expect(refusalHint("name")).toBeNull();
 });
 
 describe("the budget gate (#89)", () => {

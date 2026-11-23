@@ -21,13 +21,15 @@
 // `bun run skill`'s perfect information (the skill gates run on the simulation and are unaffected).
 // Every bot connects from this machine's one address, so the server must run with
 // BUG_SWARM_ALLOW_LOAD=1 (#104, load testing only): without it every socket past
-// MAX_SOCKETS_PER_ADDRESS gets `error limit`, which stays an error (the gate fails) and prints a hint once.
+// MAX_SOCKETS_PER_ADDRESS gets `error limit`, and every watcher past MAX_WATCHERS_PER_ADDRESS `error full`;
+// each stays an error (the gate fails) and prints a hint once (bots-lib.ts refusalHint).
 import { PROTOCOL_VERSION, TICK_MS } from "../src/shared/arena/constants";
 import { POLICIES, createMemory, type PolicyInput, type PolicyMemory } from "../src/shared/arena/policies";
 import { createRng } from "../src/shared/arena/rng";
-import { ERROR, ERROR_LIMIT, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
+import { ERROR, EVENT, OVER, SNAPSHOT, WELCOME, encodeHello, encodeInput, encodeWatch, parseServerMessage, utf8Bytes } from "../src/shared/arena/protocol";
 import { createSnapshotReader } from "../src/shared/arena/view";
 import type { ArenaStats } from "../src/server/arena/rooms";
+import type { ErrorCode } from "../src/shared/arena/protocol";
 import {
   USAGE,
   botName,
@@ -44,6 +46,7 @@ import {
   rateStats,
   secondHalfKbps,
   parseBotsArgs,
+  refusalHint,
   randomPlayerId,
   stepWander,
   wsUrl,
@@ -88,12 +91,13 @@ const started = performance.now();
 /** The second half of the run starts here; bandwidth is measured from it. */
 const midAt = started + (args.seconds * 1000) / 2;
 
-let hinted = false;
-/** Says once why bots are refused with `limit`: the server runs with its per-address limits on. */
-function limitHint(): void {
-  if (hinted) return;
-  hinted = true;
-  console.error("bots: refused by the per-address limit: start the server with BUG_SWARM_ALLOW_LOAD=1 (load testing only)");
+const hinted = new Set<string>();
+/** Says once per code why sockets are refused (`limit`, `full`): the per-address limits are on (refusalHint). */
+function refusalHintOnce(code: ErrorCode): void {
+  const hint = refusalHint(code);
+  if (hint === null || hinted.has(code)) return;
+  hinted.add(code);
+  console.error(hint);
 }
 
 function open(i: number): void {
@@ -149,7 +153,7 @@ function open(i: number): void {
       tally.lives.push(m.score ?? 0);
     } else if (m.t === ERROR) {
       tally.errors.push(`error ${m.code}`);
-      if (m.code === ERROR_LIMIT) limitHint();
+      refusalHintOnce(m.code);
     }
   });
   ws.addEventListener("close", (e) => {
@@ -186,7 +190,7 @@ function openWatcher(): void {
     countBytes(w.bytes, utf8Bytes(raw), performance.now(), midAt);
     if (m?.t === ERROR) {
       tally.errors.push(`watcher error ${m.code}`);
-      if (m.code === ERROR_LIMIT) limitHint();
+      refusalHintOnce(m.code);
     }
   });
   ws.addEventListener("close", (e) => {
