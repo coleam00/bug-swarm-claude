@@ -248,9 +248,17 @@ test("the ranking leaves out a player whose best is 0, and keeps one with points
   run("p-five", "2026-11-28T15:00:01.000Z", { score: 5 });
   expect(ranking(db).map((e) => [e.playerId, e.score])).toEqual([["p-five", 5]]);
   expect(topTen(db)).toEqual([{ name: "P-FIVE", score: 5 }]);
-  // A later 0 does not change the tie order of a player who has points: their first finish stays.
-  run("p-five", "2026-11-28T15:00:02.000Z", { score: 0 });
-  expect(ranking(db)[0]!.firstAt).toBe("2026-11-28T15:00:01.000Z");
+});
+
+test("a tie is decided by the first finish with points, so a fresh rank and the next cached ranking agree (#114, #105)", () => {
+  run("p-x", "2026-11-28T15:00:00.000Z", { score: 0 }); // a saved 0-point life: not ranked
+  run("p-a", "2026-11-28T15:00:01.000Z", { score: 50 });
+  const cached = ranking(db);
+  run("p-x", "2026-11-28T15:00:02.000Z", { score: 50 }); // ties Ada, after her
+  const fresh = ranking(db);
+  expect(fresh.map((e) => e.playerId)).toEqual(["p-a", "p-x"]);
+  expect(rankOf(cached, "p-x", 50, false).rank).toBe(2);
+  expect(rankOf(fresh, "p-x", 50, false).rank).toBe(2);
 });
 
 describe("rankOf", () => {

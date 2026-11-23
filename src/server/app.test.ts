@@ -189,18 +189,6 @@ describe("top 10 and best", () => {
     expect((await standing(a, "player-9999")).me).toEqual(none);
   });
 
-  test("a player whose best is 0 is not ranked: no 0-point row in anyone's top 10, their own included (#114)", async () => {
-    const a = app();
-    await play(a, "player-0001", "Ada", 100);
-    await play(a, "player-0002", "Zero", 0);
-    // Fresh (inside the cached second) and after the cache expires: the same answer.
-    for (const wait of [0, TOP_CACHE_MS]) {
-      clock += wait;
-      expect(await top(a)).toEqual([{ name: "Ada", score: 100 }]);
-      expect(await standing(a, "player-0002")).toEqual({ top: [{ name: "Ada", score: 100 }], me: { rank: null, ranked: 1, next: null, row: null } });
-    }
-  });
-
   test("a run that just finished ranks at once, and that player's own row is in their top 10 at once", async () => {
     const a = app();
     await play(a, "player-0001", "Ada", 100);

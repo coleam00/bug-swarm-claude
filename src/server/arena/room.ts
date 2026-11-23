@@ -285,8 +285,9 @@ export class Room {
   }
 
   /**
-   * Removes a member and tells everyone left. A life in progress ends here and is saved, so a
-   * disconnect or a server shutting down never loses a score (a reconnect starts a new life).
+   * Removes a member and tells everyone left. A life in progress ends here and is saved when it
+   * counts (lives.ts countsAsLife: not a 0-point life under 5 s), so a disconnect or a server
+   * shutting down never loses a score (a reconnect starts a new life).
    * Returns true when it ended a life (false for a member already out, or not here).
    */
   remove(id: number, nowMs: number): boolean {

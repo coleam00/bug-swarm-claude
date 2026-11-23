@@ -56,11 +56,12 @@ async function until(what: string, ok: () => boolean): Promise<void> {
   }
 }
 
-/** The browser's connection, as game.ts opens it, recording what it is told. */
 /** Gives the client's life in progress points, so the stop that cuts it saves it (a 0-point life under 5 s is not saved: #114). */
 function score(s: RunningServer, welcome: Welcome, points: number): void {
   s.rooms.room(welcome.arena)!.state.players.find((p) => p.id === welcome.you)!.score = points;
 }
+
+/** The browser's connection, as game.ts opens it, recording what it is told. */
 
 function joinArena(url: string) {
   const welcomes: Welcome[] = [];

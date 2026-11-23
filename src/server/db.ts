@@ -136,8 +136,10 @@ export type RankEntry = { playerId: string; name: string; score: number; firstAt
 
 /**
  * Every player with a finished run and a best above 0, by best score, non-hidden names only,
- * highest first: the top 10 never shows a 0-point row (#114). Ties go
- * to the player who finished a run first, then to the lower player id, so the order is total.
+ * highest first: the top 10 never shows a 0-point row (#114). Ties go to the player who first
+ * finished a run with points (a 0-point run does not count: the player was not ranked then, so
+ * rankOf can place a player new to the ranking after everyone in it), then to the lower player
+ * id, so the order is total.
  * The top 10 is its first ten rows and a player's rank is their place in it. Stored names the
  * word lists now refuse (isShownName) are left out too: those rows stay stored, they are only
  * not shown, and they are dropped before the cut to 10, so a high-ranked one doesn't shorten
@@ -146,7 +148,7 @@ export type RankEntry = { playerId: string; name: string; score: number; firstAt
 export function ranking(db: Database): RankEntry[] {
   const rows = db
     .query(
-      `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(e.at) AS firstAt
+      `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(CASE WHEN e.score > 0 THEN e.at END) AS firstAt
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY p.id
@@ -190,8 +192,8 @@ export function rankOf(entries: RankEntry[], playerId: string, best: number | nu
   const row = !hidden && at >= 0 && at < 10 ? at : null;
   if (hidden || best === null || best <= 0) return { rank: null, ranked: entries.length, next: null, row: null };
   const mine = at >= 0 ? entries[at]! : null;
-  // The ranking's order: score down, then first finish, then id. Not in the ranking yet: their
-  // first finish is after the ranking was read, so after everyone in it.
+  // The ranking's order: score down, then first finish with points, then id. Not in the ranking
+  // yet: their first finish with points is after the ranking was read, so after everyone in it.
   const ahead = (e: RankEntry) =>
     e.score > best ||
     (e.score === best && (mine === null || e.firstAt < mine.firstAt || (e.firstAt === mine.firstAt && e.playerId < mine.playerId)));
