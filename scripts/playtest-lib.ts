@@ -647,7 +647,7 @@ export type TouchLayout = { left: { x: number; y: number }; right: { x: number; 
 
 /** Where the thumbs land (the floating sticks' centres: left half moves, right half aims) and the dash button (no safe-area insets in Chrome). */
 export function touchLayout(device: Device): TouchLayout {
-  const b = dashButtonAt(device.width, device.height, { top: 0, right: 0, bottom: 0, left: 0 }, { x: 0, y: 0, r: 0, id: -1 });
+  const b = dashButtonAt(device.width, device.height, { top: 0, right: 0, bottom: 0, left: 0 }, { x: 0, y: 0, r: 0, id: -1, zone: 0 });
   const y = device.height - 110;
   return { left: { x: device.width * 0.22, y }, right: { x: device.width * 0.72, y }, dash: { x: b.x, y: b.y } };
 }

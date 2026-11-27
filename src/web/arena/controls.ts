@@ -5,9 +5,11 @@
 // already held is ignored. The aim stick, dragged past STICK_DEAD, sets the aim and fires while
 // held (direction = aim, held = fire); the last aim is kept otherwise. Nothing fires for you.
 // Dash (#60): Space or Shift (`pressDash`), the right mouse button, or the round dash button above
-// the right stick (`dashButtonAt`). The button is there only on a touch screen (#64): a coarse
-// pointer, or once a finger has touched (`dashButtonOn`); then any pointer can tap it, and a finger
-// on it never starts a stick. A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
+// the right stick's aim zone (`dashButtonAt`). The button is there only on a touch screen (#64): a
+// coarse pointer, or once a finger has touched (`dashButtonOn`); then any pointer can tap it, and a
+// finger on it never starts a stick. A finger landing in the aim zone (the right half's bottom band,
+// where the aim thumb rests) always starts the aim stick, never the button, so the aim thumb never
+// dashes by accident, even sliding over the button (#124). A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
 // while alive and the respawn while out. The click or tap that pressed a respawn does not fire
 // until it is let go, so it does not end the new life's spawn protection (#58). Pure: main.ts
 // feeds it DOM events in CSS px relative to the canvas.
@@ -18,16 +20,25 @@ import { minimapLayout } from "./minimap";
 
 /** Keys that dash (KeyboardEvent.code). */
 export const DASH_KEYS: ReadonlySet<string> = new Set(["Space", "ShiftLeft", "ShiftRight"]);
-/** The dash button's radius, CSS px (68 px across: over the 44 px touch target). */
-export const DASH_BUTTON_RADIUS = 34;
+/** The dash button's radius, CSS px (56 px across: over the 44 px touch target). */
+export const DASH_BUTTON_RADIUS = 28;
 /** A press this far outside the button's edge still counts, CSS px. */
 export const DASH_BUTTON_SLOP = 6;
-/** The button's centre, from the right and bottom safe edges, CSS px: above the right thumb's stick. */
-export const DASH_BUTTON_RIGHT = 80;
-export const DASH_BUTTON_BOTTOM = 200;
+/** The button's centre, from the right safe edge, CSS px. */
+export const DASH_BUTTON_RIGHT = 56;
+/** The aim zone reaches this far up from the bottom safe edge, CSS px, at most: where the aim thumb rests (#124). */
+export const AIM_ZONE_HEIGHT = 240;
+/** ...and takes at most this share of the safe height (a landscape phone). */
+export const AIM_ZONE_SHARE = 0.35;
+/** The gap between the button's tap reach (radius and slop) and the aim zone's top, CSS px. */
+export const DASH_ZONE_GAP = 8;
 
-/** The dash button: centre and radius in CSS px, and the touch pointer holding it (-1: none). */
-export type DashButton = { x: number; y: number; r: number; id: number };
+/**
+ * The dash button: centre and radius in CSS px, the touch pointer holding it (-1: none), and `zone`,
+ * the aim zone's top (CSS px): a finger landing on the right half at or below it starts the aim
+ * stick, never the button (Infinity until laid out: no zone).
+ */
+export type DashButton = { x: number; y: number; r: number; id: number; zone: number };
 
 export type Controls = {
   /** Held keys, by KeyboardEvent.code. */
@@ -74,24 +85,28 @@ export function createControls(width: number): Controls {
     respawn: false,
     holdFire: false,
     dashPress: false,
-    dashButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1 },
+    dashButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1, zone: Infinity },
     dashButtonOn: false,
   };
 }
 
 /**
- * Lays the dash button out on a `width` x `height` CSS px canvas, into `out`: DASH_BUTTON_RIGHT in
- * from the right safe edge and DASH_BUTTON_BOTTOM up from the bottom one, above where the right
- * thumb holds the aim stick, but never under the minimap (top right) nor off the bottom.
+ * Lays the dash button and the aim zone out on a `width` x `height` CSS px canvas, into `out`. The
+ * aim zone is the bottom AIM_ZONE_HEIGHT of the safe area (at most AIM_ZONE_SHARE of its height),
+ * where the right thumb holds the aim stick. The button sits DASH_BUTTON_RIGHT in from the right
+ * safe edge, its tap reach DASH_ZONE_GAP above the zone, but never under the minimap (top right)
+ * nor off the bottom.
  */
 export function dashButtonAt(width: number, height: number, insets: Insets, out: DashButton): DashButton {
   const r = DASH_BUTTON_RADIUS;
   const map = minimapLayout(width, height, insets);
   out.r = r;
+  const safeH = height - insets.top - insets.bottom;
+  out.zone = height - insets.bottom - Math.min(AIM_ZONE_HEIGHT, Math.round(safeH * AIM_ZONE_SHARE));
   out.x = width - insets.right - DASH_BUTTON_RIGHT;
   const lowest = height - insets.bottom - r - 8;
   const highest = map.y + map.size + r + 12;
-  out.y = Math.max(highest, Math.min(lowest, height - insets.bottom - DASH_BUTTON_BOTTOM));
+  out.y = Math.max(highest, Math.min(lowest, out.zone - r - DASH_BUTTON_SLOP - DASH_ZONE_GAP));
   return out;
 }
 
@@ -122,13 +137,17 @@ function setMouseButtons(c: Controls, buttons: number): void {
 /**
  * A press. `button` is the DOM's: 0 is the left mouse button or a pen's tip, 2 the right button
  * (a dash); `buttons` all those held now, `button`'s alone by default. A press on the dash button
- * dashes and does nothing else.
+ * dashes and does nothing else, except a finger in the aim zone: that always starts the aim stick.
  */
 export function pointerDown(c: Controls, kind: PointerKind, id: number, x: number, y: number, button = 0, buttons = BUTTON_BITS[button] ?? 0): void {
   if (kind === "touch") {
     c.touched = true;
     c.dashButtonOn = true;
     c.mouse.on = false;
+    if (x >= c.width / 2 && y >= c.dashButton.zone) {
+      stickDown(c.aimStick, id, x, y);
+      return;
+    }
   }
   if (onDashButton(c, x, y)) {
     c.dashPress = true;

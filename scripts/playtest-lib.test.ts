@@ -809,7 +809,7 @@ describe("intent to input", () => {
     const l = touchLayout(PHONE);
     expect(l.left.x).toBeLessThan(PHONE.width / 2);
     expect(l.right.x).toBeGreaterThan(PHONE.width / 2);
-    const b = dashButtonAt(PHONE.width, PHONE.height, { top: 0, right: 0, bottom: 0, left: 0 }, { x: 0, y: 0, r: 0, id: -1 });
+    const b = dashButtonAt(PHONE.width, PHONE.height, { top: 0, right: 0, bottom: 0, left: 0 }, { x: 0, y: 0, r: 0, id: -1, zone: 0 });
     expect(l.dash).toEqual({ x: b.x, y: b.y });
     expect(Math.hypot(l.right.x - b.x, l.right.y - b.y)).toBeGreaterThan(DASH_BUTTON_RADIUS + 6 + STICK_DEAD * 6);
     const [move, aim] = touchPoints(l, { mode: "fight", mx: 0, my: -1, aim: Math.PI, fire: true, dash: false });
