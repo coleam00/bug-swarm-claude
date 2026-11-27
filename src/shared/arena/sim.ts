@@ -9,10 +9,10 @@ import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
 import { stepDrone } from "./pickups/drone";
 import { stepDowns } from "./downs";
+import { goldenInterval, goldenKills, stepGolden } from "./golden";
 import { stepPickups } from "./pickups";
 import { FIRST_LIFE_SHIELD_TICKS, SHIELD, shieldBlocks } from "./pickups/shield";
 import { payQueen, stepQueen } from "./queen";
-import { goldenInterval, goldenKills, stepGolden } from "./golden";
 import {
   ACCEL,
   DASH_COOLDOWN_TICKS,
