@@ -9,6 +9,7 @@ import {
   computeStats,
   hideName,
   openDb,
+  playerBest,
   rankOf,
   ranking,
   topFor,
@@ -279,6 +280,24 @@ test("ten lives under one name, in any case and by different players, take one r
     { name: "Churn", score: 1090 }, // p-churn-9, the best life, in its stored spelling
     { name: "Ada", score: 1050 },
     { name: "Linus", score: 500 },
+  ]);
+});
+
+test("stored fractional scores read as whole numbers on the top 10, team totals and a player's best (#123)", () => {
+  run("p-a", "2026-11-28T15:01:00.000Z", { score: 2217.5 });
+  run("p-b", "2026-11-28T15:02:00.000Z", { score: 1907.5 });
+  expect(topTen(db)).toEqual([
+    { name: "P-A", score: 2218 },
+    { name: "P-B", score: 1908 },
+  ]);
+  expect(playerBest(db, "p-a")).toBe(2218);
+  expect(teamTotals(db)[TEAMS[0]]).toBe(4126);
+  // Ties are on the rounded score: a later 2218 ties the earlier 2217.5, which ranks first (#114).
+  run("p-c", "2026-11-28T15:03:00.000Z", { score: 2218 });
+  expect(ranking(db).map((e) => [e.playerId, e.score])).toEqual([
+    ["p-a", 2218],
+    ["p-c", 2218],
+    ["p-b", 1908],
   ]);
 });
 

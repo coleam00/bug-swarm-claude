@@ -97,6 +97,19 @@ describe("the refactor bomb", () => {
     expect(a.events.kills.reduce((s, k) => s + k.points, 0)).toBe(want);
   });
 
+  test("at x1.5 its kills score whole points, rounded half up: a dasher 38, not 37.5 (#123)", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.streak = 5;
+    placeBug(a, 1100, 1100, "dasher");
+    placePickup(a, 1200, 1200, "bomb");
+    nextDrop(a, 0.5, true);
+    stepQuiet(a);
+    expect(mult(5) * bugDef("dasher").points).toBe(37.5);
+    expect(a.events.kills.map((k) => k.points)).toEqual([38]);
+    expect(p.score).toBe(38);
+  });
+
   test("each of its kills draws one drop, landing on the floor this step", () => {
     const { a } = arenaWith([1200, 1200]);
     placeBug(a, 1300, 1200);
