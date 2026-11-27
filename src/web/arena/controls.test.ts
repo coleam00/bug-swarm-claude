@@ -245,6 +245,8 @@ describe("dash", () => {
       [844, 390],
       [1280, 720],
       [667, 320],
+      // Short enough that the minimap holds the button down where the aim zone would start.
+      [562, 260],
     ] as const) {
       const b = dashButtonAt(w, h, NO_INSETS, { x: 0, y: 0, r: 0, id: -1, zone: 0 });
       expect(b.r * 2).toBeGreaterThanOrEqual(44);

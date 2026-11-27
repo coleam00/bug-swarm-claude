@@ -95,7 +95,8 @@ export function createControls(width: number): Controls {
  * aim zone is the bottom AIM_ZONE_HEIGHT of the safe area (at most AIM_ZONE_SHARE of its height),
  * where the right thumb holds the aim stick. The button sits DASH_BUTTON_RIGHT in from the right
  * safe edge, its tap reach DASH_ZONE_GAP above the zone, but never under the minimap (top right)
- * nor off the bottom.
+ * nor off the bottom; where that pushes it down (a short landscape screen), the zone shrinks to
+ * start below the button's tap reach.
  */
 export function dashButtonAt(width: number, height: number, insets: Insets, out: DashButton): DashButton {
   const r = DASH_BUTTON_RADIUS;
@@ -107,6 +108,8 @@ export function dashButtonAt(width: number, height: number, insets: Insets, out:
   const lowest = height - insets.bottom - r - 8;
   const highest = map.y + map.size + r + 12;
   out.y = Math.max(highest, Math.min(lowest, out.zone - r - DASH_BUTTON_SLOP - DASH_ZONE_GAP));
+  // A short screen holds the button under the minimap: the zone then starts below its tap reach, so it can still be tapped.
+  out.zone = Math.max(out.zone, out.y + r + DASH_BUTTON_SLOP + 1);
   return out;
 }
 
