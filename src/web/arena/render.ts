@@ -265,8 +265,8 @@ const BANNER_SUB_BELOW = 30;
 /** The golden bug's banner (#122), in its gold. */
 const GOLD_COLOUR = PALETTE[GLOW_GOLD];
 /**
- * The golden bug's arrow at the screen's edge while it is off screen (#122), CSS px: a downed
- * player's size, in gold, so the player can find it and run it down.
+ * The golden bug's arrow at the screen's edge while it is off screen (#122), CSS px: between a
+ * downed player's (26) and the queen's (34), in gold, so the player can find it and run it down.
  */
 const GOLDEN_ARROW_LENGTH = 28;
 const GOLDEN_ARROW_WIDTH = 24;
