@@ -44,7 +44,7 @@ const R2 = BOMB_RADIUS * BOMB_RADIUS;
 /**
  * The effect: the bomb goes off on `p`. Every live bug whose centre is within BOMB_RADIUS of `p`'s
  * is killed (its kind cleared) or loses BOMB_DAMAGE and dies at 0. Each kill scores its kind's
- * points times `p`'s multiplier at `p`'s current streak (a bomb is not a shot: the streak neither
+ * points times `p`'s multiplier at `p`'s current streak, rounded half up to a whole number (a bomb is not a shot: the streak neither
  * grows nor resets), goes in events.kills by `p`, and `p`'s id goes in events.bombKills. A bug
  * already at 0 (killed by another bomb this step) is skipped. Allocates nothing but the kill rows.
  */
@@ -60,7 +60,7 @@ export function bombGoesOff(state: ArenaState, p: Player): void {
     // A hive queen's damage is credited to the taker (#85, queen.ts).
     creditQueen(p, b, BOMB_DAMAGE, before);
     if (b.hp > 0) continue;
-    const points = bugDef(b.kind).points * mult(p.streak);
+    const points = Math.round(bugDef(b.kind).points * mult(p.streak));
     p.score += points;
     p.kills++;
     ev.kills.push({ bug: b.id, by: p.id, x: b.x, y: b.y, points, kind: b.kind });

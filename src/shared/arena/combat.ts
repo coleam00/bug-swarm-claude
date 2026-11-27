@@ -173,7 +173,8 @@ export function stepShots(state: ArenaState): void {
       if (owner) {
         if (!s.drone) owner.streak++;
         if (hitBug.hp <= 0) {
-          const points = bugDef(hitBug.kind).points * (s.drone ? 1 : mult(owner.streak));
+          // Whole points: x1.5 on a 25 or 5 point kind would be a half (#123).
+          const points = Math.round(bugDef(hitBug.kind).points * (s.drone ? 1 : mult(owner.streak)));
           owner.score += points;
           owner.kills++;
           ev.kills.push({ bug: hitBug.id, by: owner.id, x: hitBug.x, y: hitBug.y, points, kind: hitBug.kind });

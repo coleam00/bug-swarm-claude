@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { STICK_DEAD, STICK_RANGE } from "../game/stick";
-import { NO_INSETS } from "../game/hud";
+import { NO_INSETS, type Insets } from "../game/hud";
 import { STEERING_KEYS } from "../game/keys";
 import {
   DASH_BUTTON_RADIUS,
+  DASH_BUTTON_SLOP,
   DASH_KEYS,
+  aimZoneTop,
   createControls,
   dashButtonAt,
   pointerDown,
@@ -238,22 +240,114 @@ describe("dash", () => {
     }
   });
 
+  /** A landscape and a portrait phone's safe-area insets (notch and home bar). */
+  const LANDSCAPE_INSETS = { top: 0, right: 47, bottom: 21, left: 47 };
+  const PORTRAIT_INSETS = { top: 47, right: 0, bottom: 34, left: 0 };
+
   test("the button sits on screen, in the right half, clear of the minimap, and big enough to tap", () => {
-    for (const [w, h] of [
-      [390, 844],
-      [844, 390],
-      [1280, 720],
-      [667, 320],
+    for (const [w, h, ins] of [
+      [390, 844, NO_INSETS],
+      [390, 844, PORTRAIT_INSETS],
+      [844, 390, NO_INSETS],
+      [844, 390, LANDSCAPE_INSETS],
+      [1280, 720, NO_INSETS],
+      [667, 320, NO_INSETS],
+      [562, 260, NO_INSETS],
     ] as const) {
-      const b = dashButtonAt(w, h, NO_INSETS, { x: 0, y: 0, r: 0, id: -1 });
+      const b = dashButtonAt(w, h, ins, { x: 0, y: 0, r: 0, id: -1 });
       expect(b.r * 2).toBeGreaterThanOrEqual(44);
       expect(b.r).toBe(DASH_BUTTON_RADIUS);
+      // Its whole tap reach is above the aim zone (#124).
+      expect([w, h, b.y + b.r + DASH_BUTTON_SLOP < aimZoneTop(h, ins)]).toEqual([w, h, true]);
       expect(b.x - b.r).toBeGreaterThan(w / 2);
-      expect(b.x + b.r).toBeLessThanOrEqual(w);
-      expect(b.y - b.r).toBeGreaterThanOrEqual(0);
-      expect(b.y + b.r).toBeLessThanOrEqual(h);
-      const m = minimapLayout(w, h, NO_INSETS);
-      expect(b.y - b.r).toBeGreaterThan(m.y + m.size);
+      expect(b.x + b.r).toBeLessThanOrEqual(w - ins.right);
+      expect(b.y - b.r).toBeGreaterThanOrEqual(ins.top);
+      // Under the minimap, or left of it.
+      const m = minimapLayout(w, h, ins);
+      expect([w, h, b.y - b.r > m.y + m.size || b.x + b.r < m.x]).toEqual([w, h, true]);
+    }
+  });
+
+  // #124: on a phone the right thumb resting on the aim stick dashed instead of aiming.
+  /**
+   * Where the right thumb rests: the issue's working spot, playtest's aim thumb, and the issue's
+   * failing spot (186 px up). In landscape also spots up and right of those, which dashed on the
+   * old layout.
+   */
+  const restingSpots = (w: number, h: number): [number, number][] => [
+    [w - 98, h - 101],
+    [Math.round(0.72 * w), h - 110],
+    [w - 98, h - 186],
+    ...(h < w
+      ? ([
+          [w - 89, h - 186],
+          [w - 74, h - 165],
+          [w - 64, h - 150],
+          [w - 54, h - 160],
+        ] as [number, number][])
+      : []),
+  ];
+  const PHONES = [
+    [390, 844, NO_INSETS],
+    [390, 844, PORTRAIT_INSETS],
+    [844, 390, NO_INSETS],
+    [844, 390, LANDSCAPE_INSETS],
+  ] as const;
+  /** Controls on a `w` x `h` touch screen with the dash button laid out for `ins`. */
+  const phone = (w: number, h: number, ins: Insets) => {
+    const c = createControls(w);
+    dashButtonAt(w, h, ins, c.dashButton);
+    c.dashButtonOn = true;
+    return c;
+  };
+
+  test("a phone thumb starting at the right stick's resting spot aims and fires and never dashes (#124)", () => {
+    for (const [w, h, ins] of PHONES) {
+      for (const [x, y] of restingSpots(w, h)) {
+        const c = phone(w, h, ins);
+        const o = out();
+        // The spot is in the aim zone, which the button keeps clear of.
+        expect([w, h, x, y, y >= aimZoneTop(h, ins)]).toEqual([w, h, x, y, true]);
+        pointerDown(c, "touch", 2, x, y);
+        pointerMove(c, "touch", 2, x - STICK_DEAD * 3, y);
+        readControls(c, 0, 0, o);
+        expect([w, h, x, y, o.dash, o.fire, c.aimStick.active]).toEqual([w, h, x, y, false, true, true]);
+      }
+    }
+  });
+
+  test("an aim thumb sliding over the dash button keeps aiming and firing and never dashes (#124)", () => {
+    for (const [w, h, ins] of PHONES) {
+      for (const [x, y] of restingSpots(w, h)) {
+        const c = phone(w, h, ins);
+        const o = out();
+        pointerDown(c, "touch", 2, x, y);
+        for (const [px, py] of [
+          [c.dashButton.x, c.dashButton.y],
+          [x - STICK_DEAD * 3, y],
+        ] as [number, number][]) {
+          pointerMove(c, "touch", 2, px, py);
+          readControls(c, 0, 0, o);
+          expect([w, h, x, y, o.dash, o.fire, c.aimStick.active, c.dashButton.id]).toEqual([w, h, x, y, false, true, true, -1]);
+        }
+      }
+    }
+  });
+
+  test("on a phone a tap on the dash button, at its centre or the edge of its reach, still dashes and starts no stick (#124)", () => {
+    for (const [w, h, ins] of PHONES) {
+      const b = phone(w, h, ins).dashButton;
+      for (const [x, y] of [
+        [b.x, b.y],
+        [b.x, b.y + b.r + DASH_BUTTON_SLOP - 1],
+      ] as [number, number][]) {
+        const c = phone(w, h, ins);
+        c.dashButtonOn = false;
+        const o = out();
+        pointerDown(c, "touch", 3, x, y);
+        readControls(c, 0, 0, o);
+        expect([w, h, o.dash, c.aimStick.active, c.dashButton.id]).toEqual([w, h, true, false, 3]);
+      }
     }
   });
 });

@@ -76,6 +76,11 @@ describe("bun run skill: the hive queen (#85, reported, not gated)", () => {
 });
 
 describe("bun run skill", () => {
+  test("a life's score is a whole number through a full 120 s aimer life (#123)", () => {
+    // Before #123 seeds 1 and 5 ended at 2837.5 (a dasher at x1.5); tuning can move which seeds do.
+    for (const seed of [0, 1, 2, 3, 4, 5]) expect(Number.isInteger(playLife("aimer", seed, 120).score)).toBe(true);
+  });
+
   test("on 8 seeds the aimer out-scores the mover at least 2x, and neither median is degenerate", () => {
     const r = runSkill(8, 180);
     const by = (n: string) => r.policies.find((p) => p.policy === n)!;
