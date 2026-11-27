@@ -105,7 +105,7 @@ import {
 import { markUpdateReload } from "../player";
 import { connectArena, watchArena, type Connection, type PlayHandlers, type WatchConnection } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
-import { createBanner, showBanner, updateBanner } from "./queenhud";
+import { createBanner, goldenBannerText, showBanner, updateBanner } from "./queenhud";
 import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 import { countPeople, isBot } from "./tag";
@@ -139,6 +139,11 @@ export type ArenaEvents = {
   alive(): void;
   /** You are in a life for the first time since `startArena`. Once. */
   firstSpawn(): void;
+  /**
+   * A golden bug was killed in your arena (#122): its banner's text. The canvas draws it while you
+   * are in a life; the life-over screen, over the canvas, shows it itself (App.tsx).
+   */
+  golden(text: string): void;
 };
 
 export type ArenaHandle = {
@@ -154,6 +159,8 @@ export type WatchEvents = {
   live(on: boolean): void;
   /** The server will not take a watcher (its cap, or another version): nothing reconnects. */
   unavailable(): void;
+  /** A golden bug was killed in the watched arena (#122): its banner's text, which the start screen shows (App.tsx). */
+  golden(text: string): void;
 };
 
 export type WatchHandle = {
@@ -434,6 +441,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         if (r) spawnBurst(particles, r.x, r.y, BURST_COUNT, GLOW_GOLD, fxRng);
         goldName = r?.name ?? "";
         showBanner(goldBanner, m.id);
+        // Pages the canvas HUD does not reach (the life-over screen, the start screen) show it as a line.
+        mode.on.golden(goldenBannerText(goldName));
       }
     }
   };
