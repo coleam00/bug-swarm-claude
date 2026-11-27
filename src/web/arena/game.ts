@@ -39,6 +39,7 @@ import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
   BLOCK,
   EVENT,
+  GOLDEN,
   JOIN,
   LEAVE,
   OVER,
@@ -67,7 +68,7 @@ import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
+import { GLOW_GOLD, GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createDrift, stepDrift } from "./drift";
@@ -233,6 +234,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   let queenQ: SnapshotQueen = noQueen;
   const banner = createBanner();
   let bannerName = "";
+  // The golden bug (#122): "<name> got the golden bug!" on every page in the arena.
+  const goldBanner = createBanner();
+  let goldName = "";
 
   // Who is in the arena: names and teams come once, in the welcome and in join events.
   const roster = new Map<number, Robot>();
@@ -343,6 +347,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       resetHudFx(hudFx);
       queenQ = noQueen;
       banner.left = 0;
+      goldBanner.left = 0;
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
       people = countPeople(roster.values());
       // A new socket or arena counts you as shown until told otherwise.
@@ -423,6 +428,12 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         }
         bannerName = roster.get(m.id)?.name ?? "";
         showBanner(banner, m.id);
+      } else if (m.kind === GOLDEN) {
+        // A golden bug is down: a gold burst on its killer and the banner naming them, for everyone.
+        const r = roster.get(m.id);
+        if (r) spawnBurst(particles, r.x, r.y, BURST_COUNT, GLOW_GOLD, fxRng);
+        goldName = r?.name ?? "";
+        showBanner(goldBanner, m.id);
       }
     }
   };
@@ -621,6 +632,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     queen: noQueen,
     banner,
     bannerName: "",
+    goldBanner,
+    goldName: "",
   };
   const meter = createFpsMeter();
   const record: WatchRecord | null = watch && import.meta.env.DEV ? { work: new Float64Array(COST_FRAMES), count: 0 } : null;
@@ -747,6 +760,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     updateShake(shake, dt, fxRng);
     updateHudFx(hudFx, dt);
     updateBanner(banner, dt);
+    updateBanner(goldBanner, dt);
 
     // Who to draw: everyone in a life in the newest snapshot, you predicted, the rest interpolated.
     drawn.length = 0;
@@ -832,6 +846,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
     scene.queen = queenQ;
     scene.bannerName = bannerName;
+    scene.goldName = goldName;
     renderer.draw(cam, scene);
     if (record) {
       record.work[record.count % COST_FRAMES] = performance.now() - t0;

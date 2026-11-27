@@ -1,6 +1,7 @@
 // What the hive queen (#85) puts on the HUD, laid out here and drawn by render.ts: her health bar
 // under the HUD line, her marker's pulse and countdown while she arrives, and the banners ("The
-// hive queen is coming", "Queen down!" with who dealt the most). Pure and allocation-free: every
+// hive queen is coming", "Queen down!" with who dealt the most), and the golden bug's banner
+// (#122), which shares their timing and place. Pure and allocation-free: every
 // function writes into an object the caller keeps.
 import { QUEEN_MARKER_TICKS } from "../../shared/arena/queen";
 import { DT } from "../../shared/arena/constants";
@@ -102,6 +103,14 @@ export function bannerY(cssH: number, floor: number): number {
  */
 export function bannerFloor(cx: number, halfW: number, minimapX: number, minimapBottom: number, hudBottom: number, gap: number): number {
   return cx + halfW > minimapX - gap ? Math.max(minimapBottom, hudBottom) : hudBottom;
+}
+
+/**
+ * The golden bug's banner (#122), shown on every page in its arena for BANNER_S with the same
+ * fades: who killed it, or just that it is down when the killer has left the roster.
+ */
+export function goldenBannerText(name: string): string {
+  return name ? `${name} got the golden bug!` : "Golden bug down!";
 }
 
 /** The scale that fits text `textW` wide into `maxW` (1 when it fits already). */

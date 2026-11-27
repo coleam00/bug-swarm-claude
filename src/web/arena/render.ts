@@ -37,6 +37,7 @@ import {
   BOMB_RING_GLOW_WIDTH,
   BOMB_RING_WIDTH,
   GLOW_DRONE,
+  GLOW_GOLD,
   GLOW_LASER,
   GLOW_QUEEN,
   GLOW_SHOT,
@@ -90,6 +91,7 @@ import {
   bannerY,
   barFill,
   fitScale,
+  goldenBannerText,
   markerLook,
   queenBarLayout,
   type Banner,
@@ -260,6 +262,8 @@ const BANNER_DOWN = "Queen down!";
 /** The banners stay this far inside the safe edges, CSS px, and their second line this far under the first. */
 const BANNER_MARGIN = 16;
 const BANNER_SUB_BELOW = 30;
+/** The golden bug's banner (#122), in its gold. */
+const GOLD_COLOUR = PALETTE[GLOW_GOLD];
 
 /**
  * One robot to draw, world units. `inv`: untouchable, so it blinks. `prot`: spawn-protected (a
@@ -370,6 +374,9 @@ export type Scene = {
   /** "Queen down!" (#85) and the name of who dealt the most ("" for no name). */
   banner: Banner;
   bannerName: string;
+  /** "<name> got the golden bug!" (#122) and the killer's name ("" when they have left). */
+  goldBanner: Banner;
+  goldName: string;
 };
 
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
@@ -442,6 +449,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let comingW = 0;
   let downW = 0;
   let subW = 0;
+  let goldFor: string | null = null;
+  let goldText = "";
+  let goldW = 0;
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
   let vt = 0;
@@ -918,7 +928,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   /**
    * The hive queen's HUD (#85): her health bar under the line while she lives, and the banners:
    * "The hive queen is coming" while her marker shows, "Queen down!" naming who dealt the most for
-   * a few seconds after her kill. Banner texts are measured only when they change.
+   * a few seconds after her kill. The golden bug's banner (#122) shares their place, two lines
+   * lower while one of hers shows. Banner texts are measured only when they change.
    */
   function drawQueenHud(sc: Scene, lineY: number, icons: number): void {
     const q = sc.queen;
@@ -944,7 +955,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     const coming = q.length > 0 && q[0] === 0;
     const downAlpha = bannerAlpha(sc.banner.left);
-    if (!coming && downAlpha <= 0) return;
+    const goldAlpha = bannerAlpha(sc.goldBanner.left);
+    const queenShows = coming || downAlpha > 0;
+    if (!queenShows && goldAlpha <= 0) return;
     const maxW = cssW - safe.left - safe.right - 2 * BANNER_MARGIN;
     const cx = safe.left + (cssW - safe.left - safe.right) / 2;
     if (comingW === 0) {
@@ -958,7 +971,14 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.font = BANNER_SUB_FONT;
       subW = bannerSub ? ctx.measureText(bannerSub).width : 0;
     }
-    const halfW = Math.min(maxW, coming ? comingW : Math.max(downW, subW)) / 2 + BANNER_MARGIN;
+    if (sc.goldName !== goldFor) {
+      goldFor = sc.goldName;
+      goldText = goldenBannerText(goldFor);
+      ctx.font = BANNER_FONT;
+      goldW = ctx.measureText(goldText).width;
+    }
+    const queenW = !queenShows ? 0 : coming ? comingW : Math.max(downW, subW);
+    const halfW = Math.min(maxW, Math.max(queenW, goldAlpha > 0 ? goldW : 0)) / 2 + BANNER_MARGIN;
     const hudBottom = hud.top + LINE_MIDDLE + barShift(sc) + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
     const y = bannerY(cssH, bannerFloor(cx, halfW, minimap.x, minimap.y + minimap.size + BANNER_MARGIN * 2, hudBottom, BANNER_MARGIN));
     ctx.textAlign = "center";
@@ -970,16 +990,21 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 0.75 + 0.25 * Math.sin(sc.t * TAU * 2);
       ctx.fillStyle = QUEEN_COLOUR;
       drawFitted(BANNER_COMING, comingW, BANNER_FONT, cx, y, maxW);
-      ctx.globalAlpha = 1;
-      return;
+    } else if (downAlpha > 0) {
+      ctx.globalAlpha = downAlpha;
+      ctx.fillStyle = QUEEN_COLOUR;
+      drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
+      if (bannerSub) {
+        ctx.fillStyle = TEXT_FILL;
+        ctx.lineWidth = 4;
+        drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+      }
     }
-    ctx.globalAlpha = downAlpha;
-    ctx.fillStyle = QUEEN_COLOUR;
-    drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
-    if (bannerSub) {
-      ctx.fillStyle = TEXT_FILL;
-      ctx.lineWidth = 4;
-      drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+    if (goldAlpha > 0) {
+      ctx.globalAlpha = goldAlpha;
+      ctx.lineWidth = 5;
+      ctx.fillStyle = GOLD_COLOUR;
+      drawFitted(goldText, goldW, BANNER_FONT, cx, queenShows ? y + 2 * BANNER_SUB_BELOW : y, maxW);
     }
     ctx.globalAlpha = 1;
   }

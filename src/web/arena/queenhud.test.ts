@@ -1,5 +1,5 @@
 // The hive queen's HUD pieces (#85): her health bar's place and fill, her marker's pulse and
-// countdown, and the banners' timer, opacity, place and fit.
+// countdown, and the banners' timer, opacity, place and fit, and the golden bug's banner text (#122).
 import { describe, expect, test } from "bun:test";
 import { DT } from "../../shared/arena/constants";
 import { QUEEN_MARKER_TICKS } from "../../shared/arena/queen";
@@ -16,6 +16,7 @@ import {
   barFill,
   createBanner,
   fitScale,
+  goldenBannerText,
   markerLook,
   queenBarLayout,
   showBanner,
@@ -92,6 +93,11 @@ describe("banners", () => {
     expect(bannerAlpha(b.left)).toBeCloseTo(0.5 + BANNER_IN_S / 2 / BANNER_OUT_S, 6);
     updateBanner(b, 10);
     expect([b.left, bannerAlpha(b.left)]).toEqual([0, 0]);
+  });
+
+  test("the golden bug's banner (#122) names its killer, or says it is down when the killer has left", () => {
+    expect(goldenBannerText("Ada")).toBe("Ada got the golden bug!");
+    expect(goldenBannerText("")).toBe("Golden bug down!");
   });
 
   test("they sit in the upper third, never above the floor given (under the HUD and the minimap)", () => {
