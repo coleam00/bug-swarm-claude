@@ -175,8 +175,8 @@ describe("golden bug timer", () => {
 });
 
 describe("golden bug fleeing", () => {
-  test("it runs straight away from the nearest player who is up at 1.4x a crawler's speed", () => {
-    expect(GOLDEN_SPEED).toBeCloseTo(1.4 * CRAWLER_SPEED, 9);
+  test("it runs straight away from the nearest player who is up at 1.1x a crawler's speed", () => {
+    expect(GOLDEN_SPEED).toBeCloseTo(1.1 * CRAWLER_SPEED, 9);
     const { a, ps } = arenaWith([1200, 1200], [300, 300]);
     const g = placeBug(a, 1260, 1280, GOLDEN_KIND);
     const p = ps[0]!;

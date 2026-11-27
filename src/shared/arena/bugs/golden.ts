@@ -11,8 +11,12 @@ import { STEP_EXPIRE, type BugKindDef } from "./kind";
 
 /** Collision radius, units: a crawler's 12 or under, so it moves no spawn clamp (MAX_BUG_RADIUS). */
 export const GOLDEN_RADIUS = 11;
-/** Speed, units per second: 1.4x a crawler's (224), under a player's 300, so it can be run down. */
-export const GOLDEN_SPEED = 1.4 * CRAWLER_SPEED;
+/**
+ * Speed, units per second: 1.1x a crawler's (176), well under a player's 300, so a player who
+ * chases it catches it (owner ruling, #122: 1.4x left it on a still player's screen for about
+ * 0.5 s, too short to see on stream).
+ */
+export const GOLDEN_SPEED = 1.1 * CRAWLER_SPEED;
 /** How long it stays before it leaves unscored, seconds, and in ticks. */
 export const GOLDEN_LIFE_S = 20;
 export const GOLDEN_LIFE_TICKS = Math.round(GOLDEN_LIFE_S / DT);

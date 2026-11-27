@@ -169,6 +169,12 @@ export type SnapshotPickup = [id: number, pickup: number, x: number, y: number, 
  * appears instead of the ticks left, and positions are whole units.
  */
 export type SnapshotQueen = [] | [stage: 0, x: number, y: number, ticksLeft: number] | [stage: 1, id: number, x: number, y: number, hp: number, maxHp: number];
+/**
+ * The golden bug (v13, #122): empty with none alive, else its bug id and where it is (whole units).
+ * Every recipient gets it, never culled to the view, so its gold minimap dot and edge arrow show
+ * wherever it runs.
+ */
+export type SnapshotGolden = [] | [id: number, x: number, y: number];
 
 /** Your own numbers, in your snapshots only. */
 export type SnapshotMe = {
@@ -227,6 +233,8 @@ export type Snapshot = {
   w: number;
   /** The hive queen's marker or health (v12, #85), never culled. */
   q: SnapshotQueen;
+  /** The golden bug (v13, #122), never culled. */
+  g: SnapshotGolden;
   me: SnapshotMe;
   /**
    * On keyframes only (v11): every bug outside your view square, globs left out, as minimap cells
@@ -270,6 +278,7 @@ export type WireSnapshot = {
   d?: number[][];
   w?: number;
   q?: number[];
+  g?: number[];
   me?: Partial<SnapshotMe>;
   m?: number[];
   gb?: number[];

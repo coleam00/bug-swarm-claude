@@ -6,7 +6,8 @@
 //   once a minute), counted from the last slot, not the last golden bug. A slot finding a golden
 //   bug alive, nobody up, or the arena at MAX_BUGS_PER_ARENA bugs is skipped, not queued.
 // - Spot: GOLDEN_SPAWN_DIST from a player who is up, picked at random, at a random angle, kept
-//   GOLDEN_WALL_CLEAR inside the walls: on that player's screen, whatever its shape.
+//   GOLDEN_WALL_CLEAR inside the walls: in that player's view as it appears (it flees at once;
+//   its gold minimap dot and edge arrow, from the snapshot's `g`, lead players to it).
 // - Kill (goldenKills, after pickups, so a shot kill and a bomb kill are both in the step's kills):
 //   events.golden gets the killer's id, for the arena-wide banner. A kill by a finished life (by 0)
 //   scores nothing and names no one; expiry is no kill.
@@ -23,7 +24,8 @@ export const GOLDEN_EVERY_MIN_S = 45;
 export const GOLDEN_EVERY_MAX_S = 75;
 /**
  * It appears this far from the player it is placed for, units. The camera keeps 360,000 units² in
- * view (camera.ts), so a 390x844 portrait phone sees about 408 units across: 180 is on any screen.
+ * view (camera.ts), so a 390x844 portrait phone sees about 408 units across: 180 is inside any
+ * screen as it appears.
  */
 export const GOLDEN_SPAWN_DIST = 180;
 /** ...and at least this far inside every wall, units. */

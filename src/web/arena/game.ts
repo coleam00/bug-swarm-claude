@@ -54,6 +54,7 @@ import {
   type ServerMessage,
   type SnapshotDown,
   type SnapshotMe,
+  type SnapshotGolden,
   type SnapshotQueen,
 } from "../../shared/arena/protocol";
 import { clampInput, wrapAngle, type Input } from "../../shared/arena/sim";
@@ -241,7 +242,10 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   let queenQ: SnapshotQueen = noQueen;
   const banner = createBanner();
   let bannerName = "";
-  // The golden bug (#122): "<name> got the golden bug!" on every page in the arena.
+  // The golden bug (#122): the newest snapshot's `g` (its minimap dot and edge arrow), and
+  // "<name> got the golden bug!" on every page in the arena.
+  const noGolden: SnapshotGolden = [];
+  let goldenG: SnapshotGolden = noGolden;
   const goldBanner = createBanner();
   let goldName = "";
 
@@ -353,6 +357,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       clearKills(kills);
       resetHudFx(hudFx);
       queenQ = noQueen;
+      goldenG = noGolden;
       banner.left = 0;
       goldBanner.left = 0;
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
@@ -363,6 +368,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
       queenQ = m.q ?? noQueen;
+      goldenG = m.g ?? noGolden;
       if (m.m) far = m.m;
       noteAck(net, m.ack, performance.now());
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5]);
@@ -639,6 +645,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     dashButton: null,
     dashReady: 1,
     queen: noQueen,
+    golden: noGolden,
     banner,
     bannerName: "",
     goldBanner,
@@ -854,6 +861,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
     scene.queen = queenQ;
+    scene.golden = goldenG;
     scene.bannerName = bannerName;
     scene.goldName = goldName;
     renderer.draw(cam, scene);
