@@ -146,11 +146,13 @@ export type RankEntry = { playerId: string; name: string; score: number; firstAt
  * Stored names the word lists now refuse (isShownName) are left out too: those rows stay
  * stored, they are only not shown, and they are dropped before the cut to 10, so a high-ranked
  * one doesn't shorten the board.
+ * A best stored with a fraction (before #123) reads rounded half up, in the SQL, so the order
+ * and the ties are on the whole number shown.
  */
 export function ranking(db: Database): RankEntry[] {
   const rows = db
     .query(
-      `SELECT p.id AS playerId, p.name AS name, MAX(e.score) AS score, MIN(CASE WHEN e.score > 0 THEN e.at END) AS firstAt
+      `SELECT p.id AS playerId, p.name AS name, CAST(ROUND(MAX(e.score)) AS INTEGER) AS score, MIN(CASE WHEN e.score > 0 THEN e.at END) AS firstAt
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY p.id
@@ -279,12 +281,12 @@ export function topFor(entries: RankEntry[], playerId: string, name: string, bes
 /**
  * Each team's total: the sum of its finished runs' scores, leaving out hidden names and stored
  * names the word lists now refuse (isShownName). A run counts for the team stamped on it, so
- * runs from before teams count for nobody.
+ * runs from before teams count for nobody. Each run is rounded half up before the sum (#123).
  */
 export function teamTotals(db: Database): Record<Team, number> {
   const rows = db
     .query(
-      `SELECT e.team AS team, p.name AS name, SUM(e.score) AS total
+      `SELECT e.team AS team, p.name AS name, SUM(CAST(ROUND(e.score) AS INTEGER)) AS total
        FROM events e JOIN players p ON p.id = e.player_id
        WHERE e.type = ? AND e.team IS NOT NULL AND lower(p.name) NOT IN (SELECT name_key FROM hidden_names)
        GROUP BY e.team, p.id`,
@@ -298,7 +300,7 @@ export function teamTotals(db: Database): Record<Team, number> {
 /** A player's best finished score, or null with none. */
 export function playerBest(db: Database, playerId: string): number | null {
   const row = db
-    .query("SELECT MAX(score) AS best FROM events WHERE type = ? AND player_id = ?")
+    .query("SELECT CAST(ROUND(MAX(score)) AS INTEGER) AS best FROM events WHERE type = ? AND player_id = ?")
     .get(RUN_ENDED, playerId) as { best: number | null } | null;
   return row?.best ?? null;
 }

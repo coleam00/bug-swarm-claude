@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { crawler } from "./bugs/crawler";
+import { bugDef } from "./bugs/registry";
 import { BARREL, DOWN_TICKS, DT, HEAT_LOCK_S, SHOT_RANGE, SHOT_SPEED, SHOT_SPREAD } from "./constants";
 import { mult, segmentHit, shellBlocks, shotTravelAt } from "./combat";
 import { leavePlayer } from "./sim";
@@ -249,5 +250,22 @@ describe("streak", () => {
       stepQuiet(a, 3);
       expect([p.score, p.streak]).toEqual([points, before + 1]);
     }
+  });
+
+  test("a dasher killed on the 5th hit in a row (x1.5) scores a whole 38, not 37.5 (#123)", () => {
+    const { a, ps } = arenaWith([1200, 1200]);
+    const p = ps[0]!;
+    p.streak = 4;
+    const b = placeBug(a, 1290, 1200, "dasher");
+    b.hp = 1;
+    const kills: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      hold(p, i === 0 ? { fire: true } : {});
+      stepQuiet(a);
+      kills.push(...a.events.kills.map((k) => k.points));
+    }
+    expect(mult(5) * bugDef("dasher").points).toBe(37.5);
+    expect(kills).toEqual([38]);
+    expect([p.score, p.streak]).toEqual([38, 5]);
   });
 });
