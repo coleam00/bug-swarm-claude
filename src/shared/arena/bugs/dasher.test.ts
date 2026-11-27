@@ -235,8 +235,7 @@ describe("dasher spawns", () => {
   });
 
   test("an arena never holds more than its cap of dashers", () => {
-    const a = createArena(7);
-    a.tick = Math.round((5 * WAVE_S) / DT);
+    const a = createArena(7, Math.round((5 * WAVE_S) / DT));
     for (let i = 0; i < 20; i++) joinPlayer(a, `p${i}`, "tabs").lifeStartTick = a.tick - Math.round(300 / DT);
     let most = 0;
     for (let t = 0; t < 20 / DT; t++) {

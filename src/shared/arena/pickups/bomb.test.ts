@@ -58,7 +58,7 @@ describe("the refactor bomb", () => {
 
   test("the kinds it does not clear lose the item's 4 hit points, and die and score at 0: a spitter and a glob today", () => {
     expect(BOMB_DAMAGE).toBe(4);
-    expect(BOMB_CLEARS).toEqual({ crawler: true, dasher: true, spitter: false, glob: false, beetle: false, queen: false });
+    expect(BOMB_CLEARS).toEqual({ crawler: true, dasher: true, spitter: false, glob: false, beetle: false, queen: false, golden: true });
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
     // A spitter with more hit points than any has (none has more than 3 today) keeps the rest.

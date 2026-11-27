@@ -18,13 +18,14 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
  * What an `event` reports: a join, a leave, your life being over (sent to you only), a player
  * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
  * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v12,
- * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points).
+ * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points) and
+ * a golden bug killed (v13, #122: `id` the killer, for the banner every page in the arena shows).
  * Hits, kills and shots travel in snapshots, and so do who is down now (`d`), the pickups on the
  * floor (`f`) and the hive queen's marker or health (`q`), for a late joiner.
  */
-export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen", "golden"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN, GOLDEN] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a

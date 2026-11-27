@@ -481,6 +481,51 @@ describe("lives", () => {
     expect(saved).toMatchObject([{ playerKey: INFO.playerKey, score: reward }]);
   });
 
+  test("a golden bug (#122): its kill reaches every member and watcher of its arena as a `golden` event naming the killer, and no one in another arena", () => {
+    const { rooms, tick } = setup();
+    const key = (i: number) => i.toString(16).padStart(32, "0");
+    // A full arena A and one more player in arena B.
+    const cs = Array.from({ length: MAX_PLAYERS_PER_ARENA + 1 }, () => client());
+    const js = cs.map((c, i) => rooms.join(`p${i}`, "tabs", { playerKey: key(i), touch: false }, c.send));
+    expect(js.at(-1)!.room).not.toBe(js[0]!.room);
+    const inA = cs.filter((_, i) => js[i]!.room === js[0]!.room);
+    expect(inA).toHaveLength(MAX_PLAYERS_PER_ARENA);
+    // A start-screen watcher is shown the busiest arena: A.
+    const w = client();
+    rooms.watch(w.send);
+    inA.push(w);
+    const st = rooms.room(js[0]!.room)!.state;
+    const quiet = () => {
+      for (const p of st.players) {
+        p.budget = 0;
+        p.invulnTicks = 1000;
+      }
+    };
+    quiet();
+    tick();
+    st.bugs.length = 0;
+    // The killer stands alone at the left wall; everyone else is far away, so it flees right, along her shot.
+    const pa = st.players.find((p) => p.id === js[0]!.entity)!;
+    for (const p of st.players) {
+      p.x = 2000;
+      p.y = 2000;
+    }
+    pa.x = 100;
+    pa.y = 1200;
+    pa.protectTicks = 0;
+    const g = placeBug(st, 220, 1200, "golden");
+    g.hp = 1;
+    for (let i = 0; i < 10 && st.bugs.includes(g); i++) {
+      rooms.input(js[0]!.room, js[0]!.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false });
+      quiet();
+      tick();
+    }
+    expect(st.bugs).not.toContain(g);
+    expect(pa.score).toBe(100);
+    for (const c of inA) expect(c.got.filter((m) => m.t === "event" && m.kind === "golden")).toEqual([{ t: "event", kind: "golden", id: pa.id }]);
+    expect(cs.at(-1)!.got.some((m) => m.t === "event" && m.kind === "golden")).toBe(false);
+  });
+
   test("a stale input stops firing as well as moving", () => {
     const { rooms, tick } = setup();
     const j = rooms.join("Ada", "tabs", INFO, client().send);

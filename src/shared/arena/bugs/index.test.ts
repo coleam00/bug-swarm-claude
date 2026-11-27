@@ -60,8 +60,7 @@ describe("personal spawn budget", () => {
 
   test("the wave counter shows the arena's age but never changes spawn volume", () => {
     const early = createArena(9);
-    const late = createArena(9);
-    late.tick = Math.round((5 * WAVE_S) / DT);
+    const late = createArena(9, Math.round((5 * WAVE_S) / DT));
     joinPlayer(early, "a", "tabs");
     joinPlayer(late, "a", "tabs");
     expect(wave(early.tick)).toBe(1);
@@ -215,9 +214,10 @@ describe("fair drop-in: personal pacing", () => {
         p.invulnTicks = 1e9;
         const before = a.nextBugId;
         stepArena(a);
-        // Spawns only: a glob a spitter launches (#72) takes an id but is not sent by anyone's budget.
-        for (const b of a.bugs) if (b.id >= before && b.kind !== "glob") count++;
-        for (const k of a.events.kills) if (k.bug >= before && k.kind !== "glob") count++;
+        // Spawns only: a glob a spitter launches (#72) and a golden bug on its own timer (#122) take
+        // an id but are not sent by anyone's budget.
+        for (const b of a.bugs) if (b.id >= before && b.kind !== "glob" && b.kind !== "golden") count++;
+        for (const k of a.events.kills) if (k.bug >= before && k.kind !== "glob" && k.kind !== "golden") count++;
       }
       expect(p.alive).toBe(true);
       return count;
