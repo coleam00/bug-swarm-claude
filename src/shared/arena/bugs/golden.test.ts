@@ -238,9 +238,11 @@ describe("golden bug kills", () => {
   test("it takes 2 shots and pays 100 times the multiplier to the killer, named in events.golden", () => {
     expect(bugDef(GOLDEN_KIND).hp).toBe(2);
     expect(GOLDEN_POINTS).toBe(100);
-    const { a, ps } = arenaWith([1200, 1200]);
-    const p = ps[0]!;
+    // The killer is the second player (id 2), the bug id 1: events.golden must name the player, not the bug.
+    const { a, ps } = arenaWith([2000, 400], [1200, 1200]);
+    const p = ps[1]!;
     const g = placeBug(a, 1290, 1200, GOLDEN_KIND);
+    expect(p.id).not.toBe(g.id);
     const kills: Kill[] = [];
     let named: number[] = [];
     let ended = 0;
