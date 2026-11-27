@@ -138,8 +138,7 @@ describe("the spawn cap (#85)", () => {
   });
 
   test("the spawn mix stops at the reduced cap while a queen is staged", () => {
-    const a = createArena(5);
-    a.tick = Math.round(WAVE_S / DT);
+    const a = createArena(5, Math.round(WAVE_S / DT));
     const p = joinPlayer(a, "a", "tabs");
     p.lifeStartTick = a.tick - Math.round(600 / DT);
     p.firstLife = false;

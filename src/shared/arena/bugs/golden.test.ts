@@ -7,7 +7,7 @@ import { BUG_KINDS, DT, MAX_BUGS_PER_ARENA, PICKUP_IDS, WORLD_H, WORLD_W } from 
 import { GOLDEN_EVERY_MAX_S, GOLDEN_EVERY_MIN_S, GOLDEN_KIND, GOLDEN_SPAWN_DIST, GOLDEN_WALL_CLEAR, goldenInterval } from "../golden";
 import { createRng } from "../rng";
 import { createArena, endLife, joinPlayer, stepArena, type ArenaState, type Kill, type Player } from "../sim";
-import { arenaWith, hold, placeBug, stepQuiet } from "../testkit";
+import { arenaWith, hold, nextDrop, placeBug, placePickup, stepQuiet } from "../testkit";
 import { CRAWLER_SPEED } from "./crawler";
 import { GOLDEN_LIFE_TICKS, GOLDEN_POINTS, GOLDEN_RADIUS, GOLDEN_SPEED } from "./golden";
 import { bugDef } from "./registry";
@@ -258,18 +258,17 @@ describe("golden bug kills", () => {
     expect(named).toEqual([p.id]);
   });
 
-  test("with a streak behind it the multiplier applies, like any kill", () => {
+  test("a refactor bomb that kills it pays the taker 100 and names them in events.golden", () => {
     const { a, ps } = arenaWith([1200, 1200]);
     const p = ps[0]!;
-    p.streak = 19;
-    const g = placeBug(a, 1290, 1200, GOLDEN_KIND);
-    g.hp = 1;
-    for (let t = 0; t < 30 && a.bugs.includes(g); t++) {
-      hold(p, { fire: t === 0 });
-      stepQuiet(a);
-    }
-    expect(p.score).toBe(GOLDEN_POINTS * mult(20));
-    expect(mult(20)).toBe(3);
+    const g = placeBug(a, 1300, 1200, GOLDEN_KIND);
+    placePickup(a, 1200, 1200, "bomb");
+    nextDrop(a, 0.5, true);
+    stepQuiet(a);
+    expect(a.bugs).not.toContain(g);
+    expect(a.events.kills).toEqual([expect.objectContaining({ bug: g.id, by: p.id, points: GOLDEN_POINTS, kind: GOLDEN_KIND })]);
+    expect(a.events.golden).toEqual([p.id]);
+    expect(p.score).toBe(GOLDEN_POINTS);
   });
 
   test("a kill by a shot whose life is over scores nothing and names no one", () => {

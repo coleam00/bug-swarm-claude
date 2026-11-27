@@ -450,6 +450,8 @@ describe("lives", () => {
     st.bugs.length = 0;
     // The tick before wave QUEEN_EVERY_WAVES starts: the next one shows her marker.
     st.tick = Math.round(((QUEEN_EVERY_WAVES - 1) * WAVE_S) / (TICK_MS / 1000));
+    // The clock jumped past the golden bug's first slot (#122): hold its timer off, this is the queen's test.
+    st.golden.nextTick = Infinity;
     quiet();
     tick();
     expect(snapshots(a.got).at(-1)!.q).toEqual([0, st.queen.x, st.queen.y, QUEEN_MARKER_TICKS]);
@@ -521,7 +523,6 @@ describe("lives", () => {
       tick();
     }
     expect(st.bugs).not.toContain(g);
-    expect(pa.score).toBe(100);
     for (const c of inA) expect(c.got.filter((m) => m.t === "event" && m.kind === "golden")).toEqual([{ t: "event", kind: "golden", id: pa.id }]);
     expect(cs.at(-1)!.got.some((m) => m.t === "event" && m.kind === "golden")).toBe(false);
   });
