@@ -8,8 +8,8 @@ import type { PickupDraw } from "./kind";
 const COLOUR = PALETTE[GLOW_CLOAK];
 /** A cloaked robot's body opacity (the issue's 30%). */
 export const CLOAK_ALPHA = 0.3;
-/** The outline's radius, world units, and its shimmer (cycles a second: slow). */
-export const CLOAK_OUTLINE_RADIUS = PLAYER_RADIUS + 3;
+/** The outline's radius, world units (outside your own white marker and a shield's bubble), and its shimmer (cycles a second: slow). */
+export const CLOAK_OUTLINE_RADIUS = PLAYER_RADIUS + 11;
 const SHIMMER_HZ = 0.8;
 const TAU = Math.PI * 2;
 
@@ -49,7 +49,7 @@ export const cloakDraw: PickupDraw = {
     ctx.drawImage(glow, x - g, y - g, g * 2, g * 2);
     ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = COLOUR;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     const spin = t * 0.6 + id;
     ctx.globalAlpha = 0.45 + 0.45 * k;
     ctx.beginPath();
