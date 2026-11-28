@@ -1,5 +1,5 @@
 // The arena (release 2), plain TypeScript with no React in the loop. App.tsx mounts a canvas and
-// calls `startArena` once the start screen has a name and a team: it joins an arena over the
+// calls `startArena` once the start screen has a name (and the stored team, if any): it joins an arena over the
 // WebSocket and runs the frame loop: every local 50 ms step reads the controls, sends one input
 // and predicts your robot with it; every frame draws you between predicted steps, everyone else and
 // the bugs ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the
@@ -131,8 +131,11 @@ const BLOCK_WHITE = 3;
 /** A pickup's label floats up from this far above the robot that took it, world units (#73). */
 const LABEL_ABOVE = 46;
 
-/** Who joins: the local player's id, name and team (player.ts). */
-export type ArenaPlayer = { id: string; name: string; team: Team };
+/**
+ * Who joins: the local player's id, name and stored team (player.ts), or null for none: the
+ * server picks one and the welcome says which (#131, ArenaEvents.team).
+ */
+export type ArenaPlayer = { id: string; name: string; team: Team | null };
 
 /** A life that ended, as the server scored it. */
 export type LifeSummary = { score: number; kills: number; seconds: number };
@@ -149,6 +152,8 @@ export type ArenaEvents = {
   alive(): void;
   /** You are in a life for the first time since `startArena`. Once. */
   firstSpawn(): void;
+  /** Your team, as the server decided it: on every player welcome (#131). */
+  team(team: Team): void;
   /**
    * A golden bug was killed in your arena (#122): its banner's text. The canvas draws it while you
    * are in a life; the life-over screen, over the canvas, shows it itself (App.tsx).
@@ -488,9 +493,16 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     });
   } else {
     const { player, on, adopt } = mode;
-    const hello = { name: player.name, team: player.team, player: player.id, touch: () => controls.touched || coarsePointer() };
+    const hello = { name: player.name, team: player.team ?? "", player: player.id, touch: () => controls.touched || coarsePointer() };
     const handlers: PlayHandlers = {
-      message: onMessage,
+      message: (m) => {
+        // The server's team (#131): a rejoin's hello says it from now on.
+        if (m.t === WELCOME && m.you !== 0 && isTeam(m.team)) {
+          hello.team = m.team;
+          on.team(m.team);
+        }
+        onMessage(m);
+      },
       status: on.status,
       refused: on.refused,
       // A redeploy with a new build: load it and go straight back in (the life before was ended by

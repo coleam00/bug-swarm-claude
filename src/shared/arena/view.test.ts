@@ -411,7 +411,7 @@ describe("keyframes and resync", () => {
     expect(send()).not.toBeNull();
     a.tick++;
     expect(send()).not.toBeNull();
-    read({ t: WELCOME, v: PROTOCOL_VERSION, you: 0, arena: 1, build: "", world: { w: WORLD_W, h: WORLD_H }, tickMs: TICK_MS, tick: a.tick, roster: [] });
+    read({ t: WELCOME, v: PROTOCOL_VERSION, you: 0, arena: 1, build: "", world: { w: WORLD_W, h: WORLD_H }, tickMs: TICK_MS, tick: a.tick, roster: [], team: "" });
     a.tick++;
     expect(send()).toBeNull();
   });

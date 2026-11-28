@@ -132,7 +132,28 @@ describe("joining", () => {
         { id: 1, name: "Ada", team: "tabs" },
         { id: 2, name: "Bob", team: "spaces" },
       ],
+      team: "spaces",
     });
+  });
+
+  test("people playing on each team, across arenas: fill bots, hidden members and watchers never count (#131)", () => {
+    const { rooms, tick } = setup(undefined, 6);
+    expect(rooms.playingByTeam()).toEqual({ tabs: 0, spaces: 0 });
+    const a = rooms.join("Ada", "tabs", INFO, client().send);
+    rooms.join("Bob", "tabs", INFO, client().send);
+    rooms.join("Cy", "spaces", INFO, client().send);
+    rooms.watch(client().send);
+    tick();
+    expect(rooms.stats().bots).toBeGreaterThan(0);
+    expect(rooms.playingByTeam()).toEqual({ tabs: 2, spaces: 1 });
+    rooms.visibility(a.room, a.entity, true);
+    expect(rooms.playingByTeam()).toEqual({ tabs: 1, spaces: 1 });
+  });
+
+  test("a watcher's welcome has no team", () => {
+    const { rooms } = setup();
+    rooms.join("Ada", "tabs", INFO, client().send);
+    expect(rooms.watch(client().send)!.welcome.team).toBe("");
   });
 
   test("the others get join and leave events; the last leave closes the arena and its timer", () => {

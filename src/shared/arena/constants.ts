@@ -111,9 +111,10 @@ export const MAX_CLIENT_MESSAGE_BYTES = 1024;
  * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
  * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event; v13 (#122): the
  * golden bug (kind index 6) and the `golden` event; v14 (#130): the input's `grenade`, the `grenade`
- * event and `me`'s `gc`.
+ * event and `me`'s `gc`; v15 (#131): the server picks the team (a hello's team may be "")
+ * and the welcome carries it.
  */
-export const PROTOCOL_VERSION = 14;
+export const PROTOCOL_VERSION = 15;
 
 // ---- Snapshots at stream scale (#89, view.ts). ----
 

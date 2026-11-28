@@ -54,7 +54,11 @@ export type Hello = {
   /** PROTOCOL_VERSION the client speaks. Any whole number parses; the server decides. */
   v: number;
   name: string;
-  /** Checked against TEAMS by the server. */
+  /**
+   * The team the page has stored, or "" for none (#131): the server then picks one (rules.ts
+   * pickTeam). A team the server stored for this player wins over it; anything else but a team is
+   * refused with `team`.
+   */
   team: string;
   /** The browser's 32-hex player id (player.ts). Never sent to other players. */
   player: string;
@@ -109,6 +113,8 @@ export type Welcome = {
   tick: number;
   /** Everyone in the arena, you included. Later joins and leaves come as events. */
   roster: RosterEntry[];
+  /** Your team, as the server decided it (v13, #131); "" on a watching socket. */
+  team: string;
 };
 
 /**

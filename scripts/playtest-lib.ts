@@ -1,4 +1,4 @@
-// The pure half of `bun run playtest` (#94): arguments, where Chrome is, the pages' names, teams
+// The pure half of `bun run playtest` (#94): arguments, where Chrome is, the pages' names
 // and devices, what each page recorded, the scripted "human" each page plays, how its intent
 // becomes real mouse, keyboard or touch input, and the checks that the pages' screens agree. No
 // I/O, no clock and no Math.random here (randomness from rng.ts, seeded per page), so `bun test`
@@ -45,7 +45,7 @@ import {
 } from "../src/shared/arena/protocol";
 import { QUEEN_EVERY_WAVES } from "../src/shared/arena/bugs/queen";
 import { createRng, nextRandom, type Rng } from "../src/shared/arena/rng";
-import { NAME_MAX, TEAMS, type Team } from "../src/server/rules";
+import { NAME_MAX, isTeam, type Team } from "../src/server/rules";
 import { CAMERA_SECONDS, createCamera, snapCamera, type Camera } from "../src/web/arena/camera";
 import { dashButtonAt } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
@@ -246,13 +246,13 @@ export const DESKTOP: Device = { touch: false, width: 1280, height: 800, scale: 
 export const PHONE: Device = { touch: true, width: 390, height: 844, scale: 1 };
 
 /** `late`: the late-join scenario's late page (the last one), opened once the arena reads LATE_JOIN_WAVE. */
-export type PageSpec = { index: number; name: string; team: Team; device: Device; role: Role; seed: number; late: boolean };
+export type PageSpec = { index: number; name: string; device: Device; role: Role; seed: number; late: boolean };
 
 const LETTERS = "ABCDEFGHIJKLMNOPQRST";
 
 /**
- * The pages: names `PT<tag>-<letter>` (the tag tells runs apart on the top 10), teams alternating
- * over TEAMS, every second page a touch phone, and each page's role in the scenario.
+ * The pages: names `PT<tag>-<letter>` (the tag tells runs apart on the top 10), every second page
+ * a touch phone, and each page's role in the scenario. The server picks each page's team (#131).
  */
 export function pageSpecs(n: number, scenario: ScenarioName, seed: number): PageSpec[] {
   const tag = (seed >>> 0).toString(36).slice(-3).toUpperCase();
@@ -260,7 +260,6 @@ export function pageSpecs(n: number, scenario: ScenarioName, seed: number): Page
   return Array.from({ length: n }, (_, i) => ({
     index: i,
     name: `PT${tag}-${LETTERS[i]}`.slice(0, NAME_MAX),
-    team: TEAMS[i % TEAMS.length]!,
     device: i % 2 === 0 ? DESKTOP : PHONE,
     role: roles[i] ?? "fighter",
     seed: (seed + i * 7919) | 0,
@@ -298,7 +297,8 @@ export type ScreenRec = { over: number; text: string | null };
 export type PageLog = {
   index: number;
   name: string;
-  team: Team;
+  /** The team the server gave the page, from its first player welcome (#131); null until then. */
+  team: Team | null;
   touch: boolean;
   role: Role;
   late: boolean;
@@ -317,7 +317,7 @@ export type PageLog = {
 };
 
 export function createLog(spec: PageSpec): PageLog {
-  return { index: spec.index, name: spec.name, team: spec.team, touch: spec.device.touch, role: spec.role, late: spec.late, gen: 0, you: 0, welcomes: [], frames: [], events: [], tops: [], sent: [], intents: [], screens: [], errors: [] };
+  return { index: spec.index, name: spec.name, team: null, touch: spec.device.touch, role: spec.role, late: spec.late, gen: 0, you: 0, welcomes: [], frames: [], events: [], tops: [], sent: [], intents: [], screens: [], errors: [] };
 }
 
 /**
@@ -332,6 +332,7 @@ export function addFrame(log: PageLog, at: number, hat: number, m: ServerMessage
   if (m.t === WELCOME) {
     if (m.you !== 0) {
       log.you = m.you;
+      if (isTeam(m.team)) log.team = m.team;
       log.welcomes.push({ at, you: m.you, gen: log.gen, arena: m.arena, build: m.build, roster: m.roster });
     } else log.you = 0;
     return;

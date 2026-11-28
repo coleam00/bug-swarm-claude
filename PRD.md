@@ -15,7 +15,7 @@ Release 1 played well alone, but the robot fired by itself, so there was little 
 
 ## Outcome
 
-- Opening the link shows the live arena behind a clean start screen: the title, a name field and two team buttons. A returning player sees one "Play as <name>" button and a small "change name" link that reopens the name field.
+- Opening the link shows the live arena behind a clean start screen: the title, a name field and a Play button; the server assigns the team (the side with fewer people playing now, then the lower team total, then Tabs; a player who has a team keeps it) and a short animation reveals it before the arena. A returning player sees one "Play as <name>" button and a small "change name" link that reopens the name field.
 - Joining drops you into the fullest arena that has room (up to 20 players), at a safe spot with 2 s of spawn protection. You see the others, their names and team colours, live. Arenas with fewer than 4 people are topped up with bots (marked "bot", never on the board), which leave as people arrive.
 - You move and aim separately and fire by holding. Shots travel; the gun overheats if held. A dash (1.5 s cooldown) moves you a short distance fast and makes you untouchable for a moment.
 - Swarm pressure is personal: it starts low with each life and rises with that life's age, so late joiners get an opening. Bugs chase the nearest player, so groups share pressure. The arena's wave clock (every 30 s) unlocks bug kinds and events, never raw spawn volume.
