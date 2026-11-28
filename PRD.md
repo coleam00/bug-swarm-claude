@@ -57,7 +57,7 @@ No phase gates: the owner (the orchestrator) files small items in dependency ord
 ## Non-goals
 
 - Accounts, sign-in, saved progress, purchases, ads, audio.
-- Friendly fire.
+- Friendly fire, except the grenade's blast.
 - Reading YouTube chat or any outside service.
 - A matchmaking service, regions, or more than one server process.
 
