@@ -47,8 +47,8 @@ const q2 = (v: number) => Math.round(v * 100) / 100 || 0;
 const q3 = (v: number) => Math.round(v * 1000) / 1000 || 0;
 
 function meOf(p: Player | undefined): SnapshotMe {
-  if (!p) return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0 };
-  return { sc: p.score, ki: p.kills, st: p.streak, mu: 1, he: p.heat, lk: p.lockTicks > 0 ? 1 : 0, hl: 0, al: p.alive ? 1 : 0, dk: p.dashTicks, dc: p.dashCooldown, dn: p.down ? 1 : 0, fx: p.effect.slice(), x: p.x, y: p.y, vx: p.vx, vy: p.vy };
+  if (!p) return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
+  return { sc: p.score, ki: p.kills, st: p.streak, mu: 1, he: p.heat, lk: p.lockTicks > 0 ? 1 : 0, hl: 0, al: p.alive ? 1 : 0, dk: p.dashTicks, dc: p.dashCooldown, dn: p.down ? 1 : 0, fx: p.effect.slice(), x: p.x, y: p.y, vx: p.vx, vy: p.vy, gc: p.grenadeCooldown };
 }
 
 const inBox = (box: ViewBox | null, x: number, y: number, pad = 0) => !box || (Math.abs(x - box.cx) <= box.half + pad && Math.abs(y - box.cy) <= box.half + pad);

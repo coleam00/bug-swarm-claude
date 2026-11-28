@@ -217,7 +217,7 @@ const inputs = setInterval(() => {
       out.fire = false;
       out.dash = false;
     } else POLICIES[args.policy](bot.seen.obs, bot.memory, rng, out);
-    bot.ws.send(encodeInput({ seq: ++bot.seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash }));
+    bot.ws.send(encodeInput({ seq: ++bot.seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash, grenade: false }));
   }
 }, TICK_MS);
 

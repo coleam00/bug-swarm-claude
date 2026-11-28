@@ -29,8 +29,8 @@ export function placeBug(a: ArenaState, x: number, y: number, kind: BugKind = BU
   return newBug(a, kind, x, y, 0);
 }
 
-export function hold(p: Player, o: { mx?: number; my?: number; aim?: number; fire?: boolean; dash?: boolean }): void {
-  p.input = clampInput({ seq: p.input.seq + 1, mx: o.mx ?? 0, my: o.my ?? 0, aim: o.aim ?? 0, fire: o.fire ?? false, dash: o.dash ?? false });
+export function hold(p: Player, o: { mx?: number; my?: number; aim?: number; fire?: boolean; dash?: boolean; grenade?: boolean }): void {
+  p.input = clampInput({ seq: p.input.seq + 1, mx: o.mx ?? 0, my: o.my ?? 0, aim: o.aim ?? 0, fire: o.fire ?? false, dash: o.dash ?? false, grenade: o.grenade ?? false });
 }
 
 /** Puts `p` down now: its last hit, from a bug placed on it, in one quiet step. */

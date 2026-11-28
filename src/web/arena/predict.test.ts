@@ -12,7 +12,7 @@ function inputs(n: number): Input[] {
   for (let i = 1; i <= n; i++) {
     const a = i * 0.37;
     const stop = i % 11 < 2;
-    out.push(clampInput({ seq: i, mx: stop ? 0 : Math.cos(a) * 1.3, my: stop ? 0 : Math.sin(a), aim: a, fire: false, dash: false }));
+    out.push(clampInput({ seq: i, mx: stop ? 0 : Math.cos(a) * 1.3, my: stop ? 0 : Math.sin(a), aim: a, fire: false, dash: false, grenade: false }));
   }
   return out;
 }
@@ -77,7 +77,7 @@ describe("prediction", () => {
   test("a correction moves nothing on screen at the moment it lands, at any point between steps", () => {
     const p = createPredictor();
     resetPredictor(p, 500, 500);
-    for (let seq = 1; seq <= 4; seq++) predictLocal(p, clampInput({ seq, mx: 1, my: 0.5, aim: 0, fire: false, dash: false }));
+    for (let seq = 1; seq <= 4; seq++) predictLocal(p, clampInput({ seq, mx: 1, my: 0.5, aim: 0, fire: false, dash: false, grenade: false }));
     const before = { x: 0, y: 0 };
     const after = { x: 0, y: 0 };
     for (const alpha of [0, 0.3, 0.7]) {
@@ -94,7 +94,7 @@ describe("prediction", () => {
   test("at most MAX_PENDING unacknowledged inputs are kept, the oldest dropped", () => {
     const p = createPredictor();
     resetPredictor(p, 500, 500);
-    for (let seq = 1; seq <= MAX_PENDING + 5; seq++) predictLocal(p, clampInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash: false }));
+    for (let seq = 1; seq <= MAX_PENDING + 5; seq++) predictLocal(p, clampInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     expect(p.pending.length).toBe(MAX_PENDING);
     expect(p.pending[0]!.seq).toBe(6);
   });
@@ -102,7 +102,7 @@ describe("prediction", () => {
   test("a huge correction snaps instead of sliding across the arena", () => {
     const p = createPredictor();
     resetPredictor(p, 100, 100);
-    predictLocal(p, clampInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    predictLocal(p, clampInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     reconcile(p, 100 + SNAP_DISTANCE * 3, 100, 0, 0, 0, 0, 1);
     expect([p.offX, p.offY]).toEqual([0, 0]);
     const out = { x: 0, y: 0 };
@@ -113,7 +113,7 @@ describe("prediction", () => {
   test("drawing between steps lerps from the previous predicted position", () => {
     const p = createPredictor();
     resetPredictor(p, 500, 500);
-    predictLocal(p, clampInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    predictLocal(p, clampInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     const out = { x: 0, y: 0 };
     predictedAt(p, 0.5, out);
     expect(out.x).toBeCloseTo(503, 9); // 120 u/s for 0.05 s = 6 units over the step
@@ -125,7 +125,7 @@ describe("predicting a dash", () => {
   /** Inputs 1 to n, moving right and slightly down, with a dash press on `press` only. */
   const run = (n: number, press: number) => {
     const out: Input[] = [];
-    for (let i = 1; i <= n; i++) out.push(clampInput({ seq: i, mx: 1, my: 0.3, aim: 0, fire: false, dash: i === press }));
+    for (let i = 1; i <= n; i++) out.push(clampInput({ seq: i, mx: 1, my: 0.3, aim: 0, fire: false, dash: i === press, grenade: false }));
     return out;
   };
   /** A server player past its spawn lock, and a predictor started where it is. */

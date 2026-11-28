@@ -192,11 +192,11 @@ describe("dash", () => {
     const a = createArena(3);
     const p = joinPlayer(a, "new", "tabs");
     for (let t = 1; t < DASH_SPAWN_LOCK_TICKS; t++) {
-      p.input = clampInput({ seq: t, mx: 1, my: 0, aim: 0, fire: false, dash: t % 2 === 0 });
+      p.input = clampInput({ seq: t, mx: 1, my: 0, aim: 0, fire: false, dash: t % 2 === 0, grenade: false });
       stepArena(a);
       expect(p.dashTicks).toBe(0);
     }
-    p.input = clampInput({ seq: 100, mx: 1, my: 0, aim: 0, fire: false, dash: true });
+    p.input = clampInput({ seq: 100, mx: 1, my: 0, aim: 0, fire: false, dash: true, grenade: false });
     stepArena(a);
     expect(p.dashTicks).toBe(DASH_TICKS);
   });

@@ -4,7 +4,8 @@
 // and predicts your robot with it; every frame draws you between predicted steps, everyone else and
 // the bugs ~100 ms behind the server, every shot (yours at your own time, others' at theirs), the
 // effects and the HUD line, with the camera following you. Space, Shift, the right mouse button or
-// (on a touch screen) the dash button dash (predicted at once, like the move). When you go down
+// (on a touch screen) the dash button dash (predicted at once, like the move); Q, E or the grenade
+// button throw a grenade (#130: not predicted; its `grenade` event draws it for everyone, grenades.ts). When you go down
 // you stop (no move, no fire, no dash, no prediction: you are drawn where the server has you)
 // until someone revives you; when your life ends the server says so ("over") and App shows the
 // life-over screen over the arena, which keeps playing behind it; its "Play again" calls
@@ -30,7 +31,7 @@
 // enough may be moved out of the arena to free a slot: the page then gets a leave for its own robot
 // and the arena's watcher stream (your numbers are kept from your last own snapshot), and its
 // "Play again" press comes back with a fresh welcome, maybe in another arena.
-import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
+import { BUG_KINDS, DASH_COOLDOWN_TICKS, DT, GRENADE_COOLDOWN_TICKS, MAX_BUGS_PER_ARENA, MAX_PICKUPS_PER_ARENA, PICKUP_IDS, TICK_MS } from "../../shared/arena/constants";
 
 /** Bugs a snapshot can carry: the arena's cap, plus a hive queen, who is placed whatever the count (#85). */
 const BUG_SLOTS = MAX_BUGS_PER_ARENA + 1;
@@ -38,6 +39,7 @@ import { BOMB_RADIUS, bomb } from "../../shared/arena/pickups/bomb";
 import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
   BLOCK,
+  GRENADE,
   EVENT,
   JOIN,
   LEAVE,
@@ -67,7 +69,7 @@ import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
+import { GLOW_AMBER, GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createDrift, stepDrift } from "./drift";
@@ -77,10 +79,13 @@ import {
   DASH_KEYS,
   createControls,
   dashButtonAt,
+  grenadeButtonAt,
+  GRENADE_KEYS,
   pointerDown,
   pointerMove,
   pointerUp,
   pressDash,
+  pressGrenade,
   pressRespawn,
   readControls,
   releaseAll,
@@ -109,6 +114,7 @@ import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Sc
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 import { countPeople, isBot } from "./tag";
 import { createTings, spawnTing, updateTings } from "./tings";
+import { addGrenade, clearGrenades, createGrenades, stepGrenadeFx } from "./grenades";
 
 /** Local steps one frame may run; a stalled tab drops the rest rather than burst inputs. */
 const MAX_STEPS_PER_FRAME = 3;
@@ -116,6 +122,9 @@ const MAX_STEPS_PER_FRAME = 3;
 const SPARK_COUNT = 5;
 /** Particles in the spark off a beetle's shell (#80), in steel and in white. */
 const BLOCK_STEEL = 6;
+/** A grenade's blast shakes your screen this much (#130), when your camera is this near it, world units. */
+const GRENADE_SHAKE = 6;
+const GRENADE_SHAKE_NEAR = 300;
 const BLOCK_WHITE = 3;
 /** A pickup's label floats up from this far above the robot that took it, world units (#73). */
 const LABEL_ABOVE = 46;
@@ -223,6 +232,8 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   const texts = createTexts(TEXT_CAPACITY, PICKUP_LABELS);
   const tings = createTings();
   const shake = createShake();
+  // Grenades thrown (#130).
+  const grenades = createGrenades();
   const hudFx = createHudFx();
   // Effects draw from their own generator, never the simulation's.
   const fxRng = createRng(Date.now() | 0);
@@ -248,7 +259,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   let seq = 0;
   let wave = 0;
   /** Your numbers from the last snapshot. */
-  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0 };
+  const me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
   /** The minimap's bugs outside your view, as cells (the last keyframe's `m`). */
   let far: number[] = [];
   const net = createNetMeter();
@@ -305,6 +316,12 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     spawnBurst(particles, x, y, BLOCK_WHITE, GLOW_WHITE, fxRng);
     spawnTing(tings, x, y);
   };
+  /** A grenade going off (#130): a burst of fire at its landing point, and a small shake when your camera is near it. */
+  const grenadeBlast = (x: number, y: number) => {
+    spawnBurst(particles, x, y, BURST_COUNT * 2, GLOW_AMBER, fxRng);
+    spawnBurst(particles, x, y, BURST_COUNT, GLOW_WHITE, fxRng);
+    if ((cam.x - x) ** 2 + (cam.y - y) ** 2 <= GRENADE_SHAKE_NEAR * GRENADE_SHAKE_NEAR) kick(shake, GRENADE_SHAKE);
+  };
   const showKill = (x: number, y: number, points: number, _by: number, kind: number) => {
     spawnBurst(particles, x, y, BURST_COUNT, killGlows[kind] ?? killGlows[0]!, fxRng);
     if (points > 0) spawnText(texts, x, y, points);
@@ -340,6 +357,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       resetInterp(interp);
       clearShots(shots);
       clearKills(kills);
+      clearGrenades(grenades);
       resetHudFx(hudFx);
       queenQ = noQueen;
       banner.left = 0;
@@ -408,6 +426,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
           // robot is where you see it, predicted), its kills arriving as ordinary kill rows.
           if (id === bomb.id) spawnRing(rings, r.x, r.y, BOMB_RADIUS);
         }
+      } else if (m.kind === GRENADE && m.gr) {
+        // A grenade thrown (#130): every page draws its flight, blink ring and blast from this.
+        addGrenade(grenades, m.id, m.gr);
       } else if (m.kind === BLOCK) {
         // A shield blocked a hit: the bubble pops, for everyone.
         const r = roster.get(m.id);
@@ -486,6 +507,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     insets.bottom = parseFloat(cs.paddingBottom) || 0;
     insets.left = parseFloat(cs.paddingLeft) || 0;
     dashButtonAt(w, h, insets, controls.dashButton);
+    grenadeButtonAt(controls.dashButton, controls.grenadeButton);
     renderer.resize(w, h, dpr, cam, insets);
   };
   resize();
@@ -498,6 +520,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.code === STATS_KEY && !e.repeat) showStats = !showStats;
     if (alive && DASH_KEYS.has(e.code) && !e.repeat) pressDash(controls);
+    if (alive && GRENADE_KEYS.has(e.code) && !e.repeat) pressGrenade(controls);
     if (STEERING_KEYS.has(e.code)) {
       controls.keys.add(e.code);
       e.preventDefault();
@@ -532,13 +555,14 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
    * Sends one input, and while up predicts with it. `dash` is the dash press while up and the
    * respawn press while out, when you send no move and no fire (and nothing is predicted: you are
    * not drawn, and the respawn resets the prediction). While down you send nothing that acts and
-   * predict nothing (the server holds you still; the revive resets the prediction).
+   * predict nothing (the server holds you still; the revive resets the prediction). `grenade` (#130)
+   * goes out only while up.
    */
-  const sendInput = (mx: number, my: number, aim: number, fire: boolean, dash: boolean) => {
+  const sendInput = (mx: number, my: number, aim: number, fire: boolean, dash: boolean, grenade = false) => {
     const up = alive && !down;
     const input: Input = up
-      ? clampInput({ seq: ++seq, mx, my, aim, fire, dash })
-      : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash: alive ? false : dash });
+      ? clampInput({ seq: ++seq, mx, my, aim, fire, dash, grenade })
+      : clampInput({ seq: ++seq, mx: 0, my: 0, aim, fire: false, dash: alive ? false : dash, grenade: false });
     conn.send(encodeInput(input));
     noteSent(net, input.seq, performance.now());
     if (up) predictLocal(predictor, input);
@@ -567,7 +591,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     document.addEventListener("visibilitychange", onVisibility);
   }
 
-  const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false };
+  const read = { mx: 0, my: 0, aim: 0, fire: false, dash: false, grenade: false, respawn: false };
   const self = { x: 0, y: 0 };
   const at = { x: 0, y: 0, aim: 0, alive: false, inv: false, dash: false, prot: false, fx: 0 };
   const span: BugSpan = { from: null, to: null, t: 0 };
@@ -618,6 +642,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     stats: null,
     dashButton: null,
     dashReady: 1,
+    grenadeButton: null,
+    grenadeReady: 1,
+    grenades,
     queen: noQueen,
     banner,
     bannerName: "",
@@ -725,7 +752,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         // Aim from your robot's spot on screen, where the player sees it.
         predictedAt(predictor, 1, self);
         readControls(controls, (self.x - cam.x) * cam.scale + (cam.w * cam.scale) / 2, (self.y - cam.y) * cam.scale + (cam.h * cam.scale) / 2, read);
-        sendInput(read.mx, read.my, read.aim, read.fire, alive ? read.dash : read.respawn);
+        sendInput(read.mx, read.my, read.aim, read.fire, alive ? read.dash : read.respawn, read.grenade);
         acc -= TICK_MS;
         steps++;
       }
@@ -744,6 +771,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     updateRings(rings, dt);
     updateTexts(texts, dt);
     updateTings(tings, dt);
+    stepGrenadeFx(grenades, you, mineAt, rt, grenadeBlast);
     updateShake(shake, dt, fxRng);
     updateHudFx(hudFx, dt);
     updateBanner(banner, dt);
@@ -830,6 +858,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.stats = showStats ? statsText : null;
     scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
+    scene.grenadeButton = scene.dashButton ? controls.grenadeButton : null;
+    // From your numbers only (#130): the throw is not predicted, so the sweep starts with the server's.
+    scene.grenadeReady = haveMe ? 1 - me.gc / GRENADE_COOLDOWN_TICKS : 1;
     scene.queen = queenQ;
     scene.bannerName = bannerName;
     renderer.draw(cam, scene);

@@ -358,7 +358,7 @@ export function createViewState(): ViewState {
 }
 
 /** The numbers of `me` on the wire, in order; he, x, y, vx and vy go to 0.01. */
-const ME_KEYS = ["sc", "ki", "st", "mu", "he", "lk", "hl", "al", "dk", "dc", "dn", "x", "y", "vx", "vy"] as const;
+const ME_KEYS = ["sc", "ki", "st", "mu", "he", "lk", "hl", "al", "dk", "dc", "dn", "x", "y", "vx", "vy", "gc"] as const;
 const ME_Q2 = new Set<string>(["he", "x", "y", "vx", "vy"]);
 
 let stampSeq = 0;
@@ -591,7 +591,7 @@ export function createViewMirror(): ViewMirror {
 }
 
 function zeroMe(): SnapshotMe {
-  return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0 };
+  return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
 }
 
 /** Forgets everything: the next snapshot must be a keyframe (a new welcome). */

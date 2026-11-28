@@ -144,7 +144,7 @@ function playLifeWith<M extends PolicyMemory>(
   for (let t = 0; t < maxTicks; t++) {
     observe(state, p.id, WORLD_W, WORLD_H, obs);
     act(obs, mem, rng, out);
-    p.input = clampInput({ seq: ++seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash });
+    p.input = clampInput({ seq: ++seq, mx: out.mx, my: out.my, aim: out.aim, fire: out.fire, dash: out.dash, grenade: false });
     const firstNew = state.nextBugId;
     stepArena(state);
     // A dash the simulation started this tick (not one the policy merely asked for).
@@ -403,7 +403,7 @@ function drive(state: ArenaState, bot: Bot, act: (typeof POLICIES)[PolicyName], 
   observe(state, bot.id, WORLD_W, WORLD_H, bot.obs);
   act(bot.obs, bot.mem, bot.rng, bot.out);
   const o = bot.out;
-  p.input = clampInput({ seq: ++bot.seq, mx: o.mx, my: o.my, aim: o.aim, fire: o.fire, dash: respawn && o.dash });
+  p.input = clampInput({ seq: ++bot.seq, mx: o.mx, my: o.my, aim: o.aim, fire: o.fire, dash: respawn && o.dash, grenade: false });
 }
 
 function newBot(id: number, rngSeed: number): Bot {

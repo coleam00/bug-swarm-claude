@@ -9,6 +9,7 @@ import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
 import { stepDrone } from "./pickups/drone";
 import { stepDowns } from "./downs";
+import { stepGrenades } from "./grenade";
 import { stepPickups } from "./pickups";
 import { FIRST_LIFE_SHIELD_TICKS, SHIELD, shieldBlocks } from "./pickups/shield";
 import { payQueen, stepQueen } from "./queen";
@@ -57,6 +58,11 @@ export type Input = {
    * not, so holding it dashes once. While out, it respawns you (held is enough).
    */
   dash: boolean;
+  /**
+   * Grenade pressed (#130). Edge-triggered like the dash: a throw on a tick whose input has it after
+   * one that did not. Never the respawn press.
+   */
+  grenade: boolean;
 };
 
 /**
@@ -134,6 +140,10 @@ export type Player = Mover & {
    * life and by her arrival, so only the life that dealt it is paid.
    */
   queenDmg: number;
+  /** Ticks until a grenade press is accepted (#130, grenade.ts). */
+  grenadeCooldown: number;
+  /** Last tick's `input.grenade`, for the edge. */
+  grenadeWas: boolean;
 };
 
 /**
@@ -189,6 +199,13 @@ export type Shot = {
   /** Bugs it has hit. */
   hits: number;
 };
+
+/**
+ * A grenade in the air or blinking on the floor (#130, grenade.ts): thrown by player `owner` in the
+ * life that began at `life`, on the step of tick `tick`, from (fromX, fromY) to (toX, toY); it goes
+ * off in the step of tick `explodeTick`.
+ */
+export type Grenade = { owner: number; life: number; tick: number; fromX: number; fromY: number; toX: number; toY: number; explodeTick: number };
 
 /** A pickup lying on the floor (#73): `id` unique within its arena, `ticksLeft` before it goes. */
 export type FloorPickup = { id: number; kind: PickupId; x: number; y: number; ticksLeft: number };
@@ -253,6 +270,8 @@ export type ArenaEvents = {
   droneKills: number[];
   /** A hive queen killed this step and who was paid (#85), else null. */
   queenDown: QueenDown | null;
+  /** Grenades thrown this step (#130; sent as `grenade` events). */
+  grenadesThrown: Grenade[];
 };
 
 export type ArenaState = {
@@ -273,11 +292,13 @@ export type ArenaState = {
   queen: QueenState;
   /** Her arrival spot draws from here, never from `rng`, so spawns and spread replay as with no queen. */
   queenRng: Rng;
+  /** Grenades thrown and not yet gone off (#130), oldest first. */
+  grenades: Grenade[];
   events: ArenaEvents;
 };
 
 export function noInput(seq = 0): Input {
-  return { seq, mx: 0, my: 0, aim: 0, fire: false, dash: false };
+  return { seq, mx: 0, my: 0, aim: 0, fire: false, dash: false, grenade: false };
 }
 
 /**
@@ -300,7 +321,8 @@ export function createArena(seed: number, startTick = 0): ArenaState {
     dropRng: createRng(seed ^ 0x68e31da4),
     queen: { stage: 0, x: 0, y: 0, ticksLeft: 0, bugId: 0, maxHp: 0 },
     queenRng: createRng(seed ^ 0x2c1b3c6d),
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [], queenDown: null },
+    grenades: [],
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [], queenDown: null, grenadesThrown: [] },
   };
 }
 
@@ -340,6 +362,7 @@ function startLife(state: ArenaState, p: Player, x: number, y: number): void {
   p.effect.fill(0);
   if (p.firstLife) p.effect[SHIELD] = FIRST_LIFE_SHIELD_TICKS;
   p.queenDmg = 0;
+  p.grenadeCooldown = 0;
 }
 
 function clearDown(p: Player): void {
@@ -478,6 +501,8 @@ export function joinPlayer(state: ArenaState, name: string, team: Team, bot = fa
     effect: PICKUP_IDS.map(() => 0),
     bot,
     queenDmg: 0,
+    grenadeCooldown: 0,
+    grenadeWas: false,
   };
   startLife(state, p, spot.x, spot.y);
   state.players.push(p);
@@ -520,20 +545,20 @@ export function canBeHit(p: Player): boolean {
 }
 
 /**
- * Every hit on a player enters here (bugs/index.ts contact today; a later hit source, such as a
- * spitter's spit, must call this too, never hitPlayer). The caller checked `p` can be hit and
+ * Every hit on a player enters here (bugs/index.ts contact, a grenade's blast in grenade.ts; a later
+ * hit source must call this too, never hitPlayer). The caller checked `p` can be hit and
  * spends whatever hit it. A test shield (#73, pickups/shield.ts) blocks the hit: the shield is
  * spent, `p` is untouchable for INVULN_S as after a hit (so a second bug in the same contact pass
  * does not land at once), and events.blocks gets `p` (no touch, no hit taken). Else `p` takes it:
- * events.touches gets which kind, and hitPlayer.
+ * events.touches gets which kind (a bug's; `null`, a grenade's blast, is no touch), and hitPlayer.
  */
-export function strikePlayer(state: ArenaState, p: Player, kind: BugKind): void {
+export function strikePlayer(state: ArenaState, p: Player, kind: BugKind | null): void {
   if (shieldBlocks(p)) {
     p.invulnTicks = Math.round(INVULN_S / DT);
     state.events.blocks.push(p.id);
     return;
   }
-  state.events.touches.push({ player: p.id, kind });
+  if (kind !== null) state.events.touches.push({ player: p.id, kind });
   hitPlayer(state, p);
 }
 
@@ -585,6 +610,7 @@ export function clampInput(input: Input): Input {
   input.aim = wrapAngle(input.aim);
   input.fire = input.fire === true;
   input.dash = input.dash === true;
+  input.grenade = input.grenade === true;
   return input;
 }
 
@@ -710,6 +736,9 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits (a test
  *    shield blocks one: strikePlayer); the last hit puts a player down (bugs/);
  * 4. shots: travel, hits (a review laser shot pierces), kills, misses (combat.ts);
+ * 4b. grenades (#130, grenade.ts): players who are up throw on a press, and every grenade whose time
+ *    has come goes off, its kills in this step's kills (so they drop, and a hive queen it kills is
+ *    paid, as a shot's), its hits through strikePlayer; it draws no randomness;
  * 5. pickups: effects count down, floor pickups age, this step's kills drop, players who are up
  *    take what they touch (a refactor bomb goes off at the take, its kills drop too and its dead
  *    bugs leave in the same step) (pickups/);
@@ -736,6 +765,7 @@ export function stepArena(state: ArenaState): void {
   ev.bombKills.length = 0;
   ev.droneKills.length = 0;
   ev.queenDown = null;
+  ev.grenadesThrown.length = 0;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;
@@ -746,9 +776,11 @@ export function stepArena(state: ArenaState): void {
       }
       // The edge is tracked while out too, so the press that respawned you is not also a dash.
       p.dashWas = p.input.dash;
+      p.grenadeWas = p.input.grenade;
     } else if (p.down) {
       // Tracked while down too, so a dash held through the revive is not a press on the way up.
       p.dashWas = p.input.dash;
+      p.grenadeWas = p.input.grenade;
     } else {
       p.aim = p.input.aim;
       stepMover(p, p.input);
@@ -764,6 +796,7 @@ export function stepArena(state: ArenaState): void {
   stepQueen(state);
   stepBugs(state);
   stepShots(state);
+  stepGrenades(state);
   stepPickups(state);
   payQueen(state);
   stepDowns(state);
