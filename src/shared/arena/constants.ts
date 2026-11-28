@@ -263,9 +263,9 @@ export const STREAK_STEPS: readonly (readonly [number, number])[] = [
 /** How long you stay down before the life ends (bleeds out), seconds. */
 export const DOWN_S = 10;
 /** How long a player must stay in range to revive you, seconds. */
-export const REVIVE_S = 2;
+export const REVIVE_S = 1;
 /** How close a reviver must be, centre to centre, units (inclusive). */
-export const REVIVE_RANGE = 60;
+export const REVIVE_RANGE = 110;
 /** Untouchable time after a revive, seconds. */
 export const REVIVE_PROTECT_S = 1.5;
 /** Points a revive scores for the reviver (and so for their team). */
