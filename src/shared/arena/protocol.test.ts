@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
+import { MAX_CLIENT_MESSAGE_BYTES, PROTOCOL_VERSION } from "./constants";
 import {
   CLIENT_TYPES,
   EVENT,
   EVENT_KINDS,
+  GOLDEN,
   QUEEN,
   SERVER_TYPES,
   type ArenaEvent,
@@ -150,9 +151,15 @@ describe("server messages", () => {
     expect(parseServerMessage(new ArrayBuffer(4))).toBeNull();
   });
 
-  test("v12: a `queen` event (#85) names the top dealer and every reward, and is the last event kind", () => {
+  test("v12: a `queen` event (#85) names the top dealer and every reward", () => {
     const ev: ArenaEvent = { t: EVENT, kind: QUEEN, id: 3, paid: [[3, 475], [5, 275]] };
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
-    expect(EVENT_KINDS.at(-1)).toBe("queen");
+  });
+
+  test("v13: a `golden` event (#122) names the killer, and is the last event kind", () => {
+    const ev: ArenaEvent = { t: EVENT, kind: GOLDEN, id: 4 };
+    expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
+    expect(EVENT_KINDS.at(-1)).toBe("golden");
+    expect(PROTOCOL_VERSION).toBe(13);
   });
 });

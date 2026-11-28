@@ -3,7 +3,7 @@
 // stays on contact, and the spawn cap held back while a hive queen is staged. Each test patches a
 // stock kind's definition for its own duration and puts it back, so no test-only kind is listed.
 import { afterEach, describe, expect, test } from "bun:test";
-import { DT, MAX_BUGS_PER_ARENA, QUEEN_RESERVE, WAVE_S } from "../constants";
+import { DT, MAX_BUGS_PER_ARENA, PICKUP_IDS, QUEEN_RESERVE, WAVE_S } from "../constants";
 import { createArena, joinPlayer, stepArena } from "../sim";
 import { arenaWith, placeBug, stepQuiet } from "../testkit";
 import { GLOB_MAX_PER_ARENA, GLOB_RADIUS } from "./glob";
@@ -106,6 +106,27 @@ describe("stays on contact (#85)", () => {
   });
 });
 
+describe("harmless (#122)", () => {
+  test("touching players who can be hit costs no hit, raises no touch or block, and the bug stays", () => {
+    patchCrawler(undefined, { harmless: true });
+    const { a, ps } = arenaWith([1200, 1200], [1210, 1200]);
+    // The second player holds a test shield: a touch would spend it (a block) and make them untouchable.
+    ps[1]!.effect[PICKUP_IDS.indexOf("shield")] = 1e9;
+    const c = placeBug(a, 1205, 1200);
+    let touches = 0;
+    let blocks = 0;
+    for (let i = 0; i < 30; i++) {
+      stepQuiet(a);
+      touches += a.events.touches.length + a.events.hitsTaken.length;
+      blocks += a.events.blocks.length;
+    }
+    expect([touches, blocks]).toEqual([0, 0]);
+    expect(a.bugs).toContain(c);
+    expect([ps[0]!.hits, ps[1]!.hits, ps[0]!.invulnTicks, ps[1]!.invulnTicks]).toEqual([0, 0, 0, 0]);
+    expect(ps[1]!.effect[PICKUP_IDS.indexOf("shield")]).toBeGreaterThan(0);
+  });
+});
+
 describe("the spawn cap (#85)", () => {
   test("it is the arena's cap with no queen staged, QUEEN_RESERVE short of it while one is", () => {
     const a = createArena(3);
@@ -117,8 +138,7 @@ describe("the spawn cap (#85)", () => {
   });
 
   test("the spawn mix stops at the reduced cap while a queen is staged", () => {
-    const a = createArena(5);
-    a.tick = Math.round(WAVE_S / DT);
+    const a = createArena(5, Math.round(WAVE_S / DT));
     const p = joinPlayer(a, "a", "tabs");
     p.lifeStartTick = a.tick - Math.round(600 / DT);
     p.firstLife = false;
