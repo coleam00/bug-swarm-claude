@@ -5,6 +5,7 @@ import {
   EVENT,
   EVENT_KINDS,
   GOLDEN,
+  GRENADE,
   QUEEN,
   SERVER_TYPES,
   type ArenaEvent,
@@ -19,7 +20,7 @@ import {
 
 const PLAYER = "0123456789abcdef0123456789abcdef";
 const hello = { t: "hello", v: 1, name: "Robo", team: "tabs", player: PLAYER, touch: false, build: "" };
-const input = { t: "input", seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true };
+const input = { t: "input", seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true, grenade: false };
 const s = (m: unknown) => JSON.stringify(m);
 /** A player row's down fields while not down. */
 
@@ -34,7 +35,14 @@ describe("parseClientMessage", () => {
     expect(parseClientMessage(s(hello))).toEqual(hello as never);
     expect(parseClientMessage(s(input))).toEqual(input as never);
     expect(parseClientMessage(encodeHello(1, "Robo", "tabs", PLAYER, false))).toEqual(hello as never);
-    expect(parseClientMessage(encodeInput({ seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true }))).toEqual(input as never);
+    expect(parseClientMessage(encodeInput({ seq: 5, mx: 0.5, my: -1, aim: 1.25, fire: false, dash: true, grenade: false }))).toEqual(input as never);
+  });
+
+  test("v13: an input's grenade press (#130) is a boolean it must carry", () => {
+    expect(parseClientMessage(s({ ...input, grenade: true }))).toEqual({ ...input, grenade: true } as never);
+    const { grenade: _, ...noGrenade } = input;
+    expect(parseClientMessage(s(noGrenade))).toBeNull();
+    expect(parseClientMessage(s({ ...input, grenade: 1 }))).toBeNull();
   });
 
   test("a hello's build is optional (a first join, an older page) and capped", () => {
@@ -104,8 +112,8 @@ describe("parseClientMessage", () => {
 
   test("non-finite and out-of-range numbers are dropped", () => {
     expect(parseClientMessage(s({ ...input, mx: "NaN" }))).toBeNull();
-    expect(parseClientMessage('{"t":"input","seq":1,"mx":NaN,"my":0,"aim":0,"fire":false,"dash":false}')).toBeNull();
-    expect(parseClientMessage('{"t":"input","seq":1,"mx":1e999,"my":0,"aim":0,"fire":false,"dash":false}')).toBeNull();
+    expect(parseClientMessage('{"t":"input","seq":1,"mx":NaN,"my":0,"aim":0,"fire":false,"dash":false,"grenade":false}')).toBeNull();
+    expect(parseClientMessage('{"t":"input","seq":1,"mx":1e999,"my":0,"aim":0,"fire":false,"dash":false,"grenade":false}')).toBeNull();
     expect(parseClientMessage(s({ ...input, seq: -1 }))).toBeNull();
     expect(parseClientMessage(s({ ...input, seq: 1.5 }))).toBeNull();
     expect(parseClientMessage(s({ ...input, seq: 2 ** 31 }))).toBeNull();
@@ -156,10 +164,17 @@ describe("server messages", () => {
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
   });
 
-  test("v13: a `golden` event (#122) names the killer, and is the last event kind", () => {
+  test("v13: a `golden` event (#122) names the killer", () => {
     const ev: ArenaEvent = { t: EVENT, kind: GOLDEN, id: 4 };
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
-    expect(EVENT_KINDS.at(-1)).toBe("golden");
-    expect(PROTOCOL_VERSION).toBe(13);
+    expect(EVENT_KINDS.indexOf("golden")).toBe(8);
+  });
+
+  test("v14: a `grenade` event (#130) names the thrower and its flight, and is the last event kind", () => {
+    const ev: ArenaEvent = { t: EVENT, kind: GRENADE, id: 3, gr: [100.5, 200, 420.5, 200, 77] };
+    expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
+    expect(EVENT_KINDS.at(-1)).toBe("grenade");
+    expect(EVENT_KINDS.indexOf("queen")).toBe(7);
+    expect(PROTOCOL_VERSION).toBe(14);
   });
 });

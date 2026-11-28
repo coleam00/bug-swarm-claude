@@ -333,7 +333,7 @@ test(
     let seq = 1;
     while (!deaf.ended() && Date.now() - start < 10_000) {
       for (const c of [deaf, reader]) {
-        c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+        c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
         c.pings(400);
       }
       seq++;

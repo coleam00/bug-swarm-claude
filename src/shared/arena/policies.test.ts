@@ -139,7 +139,7 @@ describe("fill bot", () => {
       for (const b of a.bugs) closest = Math.min(closest, Math.hypot(b.x - bot.x, b.y - bot.y));
       observe(a, bot.id, WORLD_W, WORLD_H, obs);
       fillBot(obs, mem, rng, out);
-      bot.input = clampInput({ seq: t + 1, ...out });
+      bot.input = clampInput({ seq: t + 1, ...out, grenade: false });
       stepQuiet(a);
       by = a.events.revives.find((r) => r.id === hurt.id)?.by ?? 0;
       farthest = Math.max(farthest, Math.hypot(bot.x - hurt.x, bot.y - hurt.y));
@@ -279,7 +279,7 @@ describe("flanking a beetle (#80)", () => {
       observe(a, p.id, WORLD_W, WORLD_H, obs);
       if (blind) for (const o of obs.bugs) o.fx = o.fy = 0;
       aimer(obs, mem, rng, out);
-      p.input = clampInput({ seq: t + 1, ...out });
+      p.input = clampInput({ seq: t + 1, ...out, grenade: false });
       stepQuiet(a);
       blocks += a.events.shellBlocks.length;
       hits += a.events.shotsEnded.filter((e) => e.hit && !e.blocked).length;

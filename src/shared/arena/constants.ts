@@ -110,9 +110,10 @@ export const MAX_CLIENT_MESSAGE_BYTES = 1024;
  * (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's
  * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
  * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event; v13 (#122): the
- * golden bug (kind index 6) and the `golden` event.
+ * golden bug (kind index 6) and the `golden` event; v14 (#130): the input's `grenade`, the `grenade`
+ * event and `me`'s `gc`.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 // ---- Snapshots at stream scale (#89, view.ts). ----
 
@@ -147,6 +148,23 @@ export const DASH_COOLDOWN_TICKS = Math.round(DASH_COOLDOWN_S / DT);
  */
 export const DASH_SPAWN_LOCK_S = 0.5;
 export const DASH_SPAWN_LOCK_TICKS = Math.round(DASH_SPAWN_LOCK_S / DT);
+
+// ---- Grenade (#130). A press throws one along your aim; it lands, blinks, then blasts bugs and players. ----
+
+/** How far a grenade is thrown, units: from the thrower's centre to where it lands (kept inside the walls). */
+export const GRENADE_RANGE = 320;
+/** How long it flies, seconds, and then how long it blinks on the floor before it goes off. */
+export const GRENADE_FLIGHT_S = 0.5;
+export const GRENADE_FLIGHT_TICKS = Math.round(GRENADE_FLIGHT_S / DT);
+export const GRENADE_BLINK_S = 0.5;
+export const GRENADE_BLINK_TICKS = Math.round(GRENADE_BLINK_S / DT);
+/** Its blast reaches this far, centre to centre, units. */
+export const GRENADE_RADIUS = 110;
+/** What the blast does to every bug in reach, hit points (a beetle's shell does not block it). */
+export const GRENADE_DAMAGE = 3;
+/** From one throw until the next press is accepted, seconds. A press before then is dropped. */
+export const GRENADE_COOLDOWN_S = 6;
+export const GRENADE_COOLDOWN_TICKS = Math.round(GRENADE_COOLDOWN_S / DT);
 
 // ---- Shooting (#55). Holding fire shoots travelling shots from the barrel along the aim. ----
 

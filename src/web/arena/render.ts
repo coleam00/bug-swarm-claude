@@ -1,6 +1,7 @@
 // Draws an arena frame: the floor grid, the walls, the bugs, every shot as a glowing streak, the
 // sparks, kill bursts and floating scores, every robot with its trail, dash afterimage, barrel and
-// name tag, your own ring, heat arc and dash cooldown ring, the dash button (touch screens), the
+// name tag, your own ring, heat arc, dash cooldown ring and grenade cooldown cue (#130), the dash and
+// grenade buttons (touch screens), grenades flying, blinking and going off (draw/grenade.ts), the
 // HUD line (score and multiplier, hit pips, wave, people playing: hudline.ts) with a short "streak lost"
 // under it, the sticks, the minimap and the F readout. While your life is over the arena keeps
 // drawing with no HUD and no dash button: App.tsx's life-over screen dims it. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
@@ -26,6 +27,8 @@ import type { SnapshotGolden, SnapshotMe, SnapshotQueen } from "../../shared/are
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
 import { ringAt, type RingAt, type Rings } from "../game/fx/rings";
+import { drawGrenades } from "./draw/grenade";
+import type { ClientGrenades } from "./grenades";
 import type { Shake } from "../game/fx/shake";
 import { TEXT_SECONDS, textLabel, type Texts } from "../game/fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "../game/fx/trail";
@@ -184,6 +187,12 @@ const DASH_BUTTON_FILL = "rgba(5, 7, 13, 0.55)";
 const DASH_BUTTON_TRACK = "rgba(248, 250, 252, 0.2)";
 const DASH_BUTTON_WIDTH = 4;
 const DASH_FONT = "bold 15px system-ui, sans-serif";
+/** The grenade (#130): its button's colours and label, and its cooldown cue on your robot, an arc just outside the dash ring's. */
+const GRENADE_READY = "#ffb020";
+const GRENADE_COOLING = "rgba(255, 176, 32, 0.55)";
+const GRENADE_FONT = "bold 10px system-ui, sans-serif";
+const GRENADE_CUE_RADIUS = HEAT_RADIUS + 6;
+const GRENADE_CUE_WIDTH = 2.5;
 /** A robot that can't be hit blinks this fast, cycles a second. */
 const BLINK_HZ = 8;
 /**
@@ -377,6 +386,12 @@ export type Scene = {
   dashButton: DashButton | null;
   /** How far your dash has cooled, 0 to 1 (1: ready). */
   dashReady: number;
+  /** The grenade button (#130), CSS px, while you are in a life on a touch screen; else null. */
+  grenadeButton: DashButton | null;
+  /** How far your grenade has cooled, 0 to 1 (1: ready). */
+  grenadeReady: number;
+  /** Grenades thrown in the arena (#130). */
+  grenades: ClientGrenades;
   /** The hive queen from the newest snapshot (#85): [] none, her marker, or her alive. */
   queen: SnapshotQueen;
   /** The golden bug from the newest snapshot (#122): [] none, else its id and where it is. */
@@ -1128,8 +1143,31 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineCap = "butt";
   }
 
+  /** Your grenade cooling (#130): a thin arc under your robot, outside the dash ring, filling up; gone once ready. */
+  function drawGrenadeCue(me: Robot, ready: number): void {
+    if (ready >= 1) return;
+    ctx.lineCap = "round";
+    ctx.lineWidth = GRENADE_CUE_WIDTH;
+    ctx.strokeStyle = HEAT_TRACK;
+    ctx.beginPath();
+    ctx.arc(me.x, me.y, GRENADE_CUE_RADIUS, DASH_RING_START, DASH_RING_START + DASH_RING_SWEEP);
+    ctx.stroke();
+    if (ready > 0) {
+      ctx.strokeStyle = GRENADE_COOLING;
+      ctx.beginPath();
+      ctx.arc(me.x, me.y, GRENADE_CUE_RADIUS, DASH_RING_START, DASH_RING_START + DASH_RING_SWEEP * ready);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+  }
+
   /** The dash button, CSS px: a round button with a cooldown sweep around its edge, bright when ready. */
   function drawDashButton(b: DashButton, ready: number): void {
+    drawButton(b, ready, "DASH", DASH_FONT, DASH_READY, DASH_COOLING);
+  }
+
+  /** A round touch button (dash, grenade #130), CSS px: a cooldown sweep around its edge, bright when ready. */
+  function drawButton(b: DashButton, ready: number, label: string, font: string, readyColour: string, cooling: string): void {
     const on = ready >= 1;
     ctx.fillStyle = DASH_BUTTON_FILL;
     ctx.beginPath();
@@ -1141,17 +1179,17 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.arc(b.x, b.y, b.r - DASH_BUTTON_WIDTH / 2, 0, TAU);
     ctx.stroke();
     if (ready > 0) {
-      ctx.strokeStyle = on ? DASH_READY : DASH_COOLING;
+      ctx.strokeStyle = on ? readyColour : cooling;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r - DASH_BUTTON_WIDTH / 2, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, ready));
       ctx.stroke();
     }
     ctx.globalAlpha = on ? 1 : 0.5;
-    ctx.font = DASH_FONT;
+    ctx.font = font;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = on ? DASH_READY : TEXT_FILL;
-    ctx.fillText("DASH", b.x, b.y + 1);
+    ctx.fillStyle = on ? readyColour : TEXT_FILL;
+    ctx.fillText(label, b.x, b.y + 1);
     ctx.globalAlpha = 1;
   }
 
@@ -1360,6 +1398,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     drawParticles(sc.particles);
     drawTingRings(sc.tings);
     drawRings(sc.rings);
+    drawGrenades(ctx, sc.grenades, sc.you, sc.mineAt, sc.othersAt, t, vl, vt, vr, vb);
 
     // Revive rings under the robots, then the robots in view, yours last.
     for (let i = 0; i < count; i++) {
@@ -1385,6 +1424,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);
         if (sc.me) drawHeat(me, sc.me, t);
         drawDashRing(me, sc.dashReady);
+        drawGrenadeCue(me, sc.grenadeReady);
       }
     }
     // Name tags over every robot, as canvas text (never HTML: names are typed by viewers), and
@@ -1472,6 +1512,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     if (sc.watch) return;
     if (sc.dashButton && !sc.out) drawDashButton(sc.dashButton, sc.dashReady);
+    if (sc.grenadeButton && !sc.out) drawButton(sc.grenadeButton, sc.grenadeReady, "GRENADE", GRENADE_FONT, GRENADE_READY, GRENADE_COOLING);
     for (const s of sc.sticks) drawStick(s);
 
     // An arrow at the edge to each downed player out of view within reach of you.

@@ -47,6 +47,7 @@ import {
   DOWN,
   EVENT,
   GOLDEN,
+  GRENADE,
   JOIN,
   LEAVE,
   OVER,
@@ -134,7 +135,10 @@ export type Away = Watcher & { name: string; team: Team; info: MemberInfo };
 type Bot = { player: Player; obs: Observation; mem: FillMemory; rng: Rng; out: PolicyInput; leaving: boolean };
 
 /** A watcher's snapshot numbers: all zero (it has no robot). Shared, never written. */
-const WATCH_ME: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0 };
+const WATCH_ME: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
+
+/** A grenade event's positions, to 0.1 (#130), as snapshots carry players. */
+const q1 = (v: number) => Math.round(v * 10) / 10;
 
 /** Ticks a late timer may run at once to catch up; any further lag is dropped, not caught up. */
 export const MAX_CATCH_UP_TICKS = 2;
@@ -151,6 +155,7 @@ export function meOf(p: Player, out: SnapshotMe): SnapshotMe {
   out.al = p.alive ? 1 : 0;
   out.dk = p.dashTicks;
   out.dc = p.dashCooldown;
+  out.gc = p.grenadeCooldown;
   out.dn = p.down ? 1 : 0;
   out.x = p.x;
   out.y = p.y;
@@ -179,7 +184,7 @@ export class Room {
   private nextTickAt: number;
   /** Running warmUp: the arena plays as a watched demo arena with nobody to send to. */
   private warming = false;
-  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0 };
+  private readonly me: SnapshotMe = { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
 
   constructor(
     readonly id: number,
@@ -405,14 +410,19 @@ export class Room {
 
   /**
    * Queues a member's input for the next free tick. An input whose sequence number is not newer
-   * than the last one accepted is dropped; a full queue drops its oldest, carrying its dash press
-   * onto the next one, so a press is never lost (the browser has already predicted the dash).
+   * than the last one accepted is dropped; a full queue drops its oldest, carrying its dash and
+   * grenade presses onto the next one, so a press is never lost (the browser has already predicted
+   * the dash).
    */
   pushInput(id: number, input: Input): void {
     const m = this.members.get(id);
     if (!m || input.seq <= m.lastSeq) return;
     m.lastSeq = input.seq;
-    if (m.queue.length >= INPUT_BUFFER && m.queue.shift()!.dash) m.queue[0]!.dash = true;
+    if (m.queue.length >= INPUT_BUFFER) {
+      const dropped = m.queue.shift()!;
+      if (dropped.dash) m.queue[0]!.dash = true;
+      if (dropped.grenade) m.queue[0]!.grenade = true;
+    }
     m.queue.push(clampInput(input));
   }
 
@@ -462,6 +472,8 @@ export class Room {
       input.aim = o.aim;
       input.fire = o.fire;
       input.dash = o.dash;
+      // Bots never throw a grenade (#130): their policies have no such press.
+      input.grenade = false;
       clampInput(input);
       p.idleTicks = 0;
     }
@@ -511,8 +523,11 @@ export class Room {
         p.input.my = 0;
         p.input.fire = false;
       }
-      // A dash is one press (and while out, the respawn), never repeated by a held input.
-      if (!next) p.input.dash = false;
+      // A dash is one press (and while out, the respawn), never repeated by a held input; a grenade too (#130).
+      if (!next) {
+        p.input.dash = false;
+        p.input.grenade = false;
+      }
     }
     stepArena(this.state);
     const ev = this.state.events;
@@ -524,6 +539,8 @@ export class Room {
     if (ev.queenDown) this.broadcast({ t: EVENT, kind: QUEEN, id: ev.queenDown.top, paid: ev.queenDown.paid });
     // A golden bug's killer (#122): every page in the arena shows the banner.
     for (const id of ev.golden) this.broadcast({ t: EVENT, kind: GOLDEN, id });
+    // A grenade thrown (#130): every page draws its flight, blink ring and blast from these and the GRENADE_* numbers.
+    for (const g of ev.grenadesThrown) this.broadcast({ t: EVENT, kind: GRENADE, id: g.owner, gr: [q1(g.fromX), q1(g.fromY), q1(g.toX), q1(g.toY), g.tick + 1] });
     for (const life of this.state.events.livesEnded) {
       // A fill bot is not a member, so its lives end here unsaved and unannounced.
       const m = this.members.get(life.id);

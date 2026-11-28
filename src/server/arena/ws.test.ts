@@ -133,7 +133,7 @@ async function walkRight(c: Client, until: Promise<unknown>): Promise<void> {
   let done = false;
   void until.finally(() => (done = true));
   while (!done) {
-    c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     await Bun.sleep(50);
   }
 }
@@ -271,12 +271,12 @@ test(
   async () => {
     const c = await connect();
     // An input before hello is ignored.
-    c.send(encodeInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    c.send(encodeInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     c.send(hello("Robo"));
     await c.waitFor("welcome", () => c.got.some((m) => m.t === "welcome"));
     c.send("{not json");
     c.send(JSON.stringify({ t: "input", seq: 2, mx: "1" }));
-    c.send(JSON.stringify({ t: "input", seq: 3, mx: 1, my: 0, aim: 0, fire: false, dash: false, pad: "x".repeat(2000) }));
+    c.send(JSON.stringify({ t: "input", seq: 3, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false, pad: "x".repeat(2000) }));
     c.send(new Uint8Array([1, 2, 3]));
     // A second hello is ignored: still one player.
     c.send(hello("Other"));
@@ -296,7 +296,7 @@ test(
   async () => {
     const { c } = await enter("Burst");
     // 60 inputs at once: the first 30 pass the limiter; the queue keeps the newest 4 of those.
-    for (let seq = 1; seq <= 60; seq++) c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    for (let seq = 1; seq <= 60; seq++) c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     const seen = c.got.length;
     await c.waitFor("10 snapshots after the burst", () => c.got.slice(seen).filter((m) => m.t === "snapshot").length >= 10);
     const acks = c.got.filter((m): m is Snapshot => m.t === "snapshot").map((m) => m.ack);
@@ -509,7 +509,7 @@ test(
           my = dy / d;
         }
       }
-      a.c.send(encodeInput({ seq: ++seq, mx, my, aim: 0, fire: false, dash: false }));
+      a.c.send(encodeInput({ seq: ++seq, mx, my, aim: 0, fire: false, dash: false, grenade: false }));
       await Bun.sleep(50);
     }
     await revived;
@@ -560,7 +560,7 @@ test(
     void taken.finally(() => (done = true));
     let seq = 0;
     while (!done) {
-      a.c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+      a.c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
       await Bun.sleep(50);
     }
     await taken;
@@ -645,7 +645,7 @@ test(
     const at = { x: ada0.x, y: ada0.y };
     // The watcher sends inputs at full rate for a while: nothing of it reaches the arena.
     for (let seq = 1; seq <= 20; seq++) {
-      c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: true, dash: true }));
+      c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: true, dash: true, grenade: false }));
       await Bun.sleep(20);
     }
     await c.close();
@@ -742,7 +742,7 @@ test(
     // Arena 1 is full of people: the play press lands p00 in a new arena, welcomed on this socket.
     // The page had sent inputs up to 50; the press is 51, and 52 and 53 were already on their way
     // before the welcome reached it (a real network's latency).
-    const idle = (seq: number, dash = false) => encodeInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash });
+    const idle = (seq: number, dash = false) => encodeInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash, grenade: false });
     p0.c.send(idle(50));
     p0.c.send(idle(51, true));
     p0.c.send(idle(52));

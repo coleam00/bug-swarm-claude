@@ -168,7 +168,7 @@ describe("pages and scenarios", () => {
 
 // ---- A small recorded game: two pages, A (id 1, mouse) and B (id 2, touch). ----
 
-const me = (o: Partial<SnapshotMe> = {}): SnapshotMe => ({ sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 3, al: 1, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0, ...o });
+const me = (o: Partial<SnapshotMe> = {}): SnapshotMe => ({ sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 3, al: 1, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0, gc: 0, ...o });
 /** A message as the page decodes it. */
 const msg = (raw: string) => JSON.parse(raw) as ServerMessage;
 const row = (id: number, x: number, vx: number, aim: number, alive: 0 | 1 = 1): SnapshotPlayer => [id, x, 500, vx, 0, aim, alive, 0, 0, 0, 0];

@@ -19,13 +19,15 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
  * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
  * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v12,
  * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points) and
- * a golden bug killed (v13, #122: `id` the killer, for the banner every page in the arena shows).
+ * a golden bug killed (v13, #122: `id` the killer, for the banner every page in the arena shows) and
+ * a grenade thrown (v14, #130: `id` the thrower and `gr` its flight, so every page draws the same
+ * flight, blink ring and blast from the GRENADE_* numbers).
  * Hits, kills and shots travel in snapshots, and so do who is down now (`d`), the pickups on the
  * floor (`f`) and the hive queen's marker or health (`q`), for a late joiner.
  */
-export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen", "golden"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen", "golden", "grenade"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN, GOLDEN] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN, GOLDEN, GRENADE] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
@@ -72,6 +74,8 @@ export type InputMessage = {
   aim: number;
   fire: boolean;
   dash: boolean;
+  /** A grenade press (v13, #130), edge-triggered like the dash; never the respawn. */
+  grenade: boolean;
 };
 
 /**
@@ -195,6 +199,8 @@ export type SnapshotMe = {
   dc: number;
   /** Down (1): waiting for a revive (v4). */
   dn: 0 | 1;
+  /** Ticks until a grenade press is accepted (v13, #130). */
+  gc: number;
   /** Ticks left of each pickup's effect, by its index in PICKUP_IDS (0: not active; v7). */
   fx: number[];
   /**
@@ -308,6 +314,12 @@ export type ArenaEvent = {
   pickup?: number;
   /** With "queen" (v12): each rewarded player's id and points. */
   paid?: [id: number, points: number][];
+  /**
+   * With "grenade" (v13, #130): where it was thrown from and lands (to 0.1), and the tick of the
+   * snapshot after its throw's step; it goes off in the step whose snapshot is that tick plus
+   * GRENADE_FUSE_TICKS.
+   */
+  gr?: [fromX: number, fromY: number, toX: number, toY: number, tick: number];
   /** With "over": the life's score, kills and length. */
   score?: number;
   kills?: number;
@@ -360,11 +372,11 @@ export function parseClientMessage(raw: string | ArrayBuffer | Uint8Array): Clie
   }
   if (!isRecord(m)) return null;
   if (m.t === INPUT) {
-    const { seq, mx, my, aim, fire, dash } = m;
+    const { seq, mx, my, aim, fire, dash, grenade } = m;
     if (!Number.isInteger(seq) || (seq as number) < 0 || (seq as number) > MAX_SEQ) return null;
     if (!finite(mx) || !finite(my) || !finite(aim)) return null;
-    if (typeof fire !== "boolean" || typeof dash !== "boolean") return null;
-    return { t: INPUT, seq: seq as number, mx, my, aim, fire, dash };
+    if (typeof fire !== "boolean" || typeof dash !== "boolean" || typeof grenade !== "boolean") return null;
+    return { t: INPUT, seq: seq as number, mx, my, aim, fire, dash, grenade };
   }
   if (m.t === HELLO) {
     const { v, name, team, player, touch, build = "" } = m;
@@ -419,6 +431,6 @@ export function encodeVisibility(hidden: boolean): string {
 
 /** An input, unrounded: the browser predicts with exactly the numbers the server will step. */
 export function encodeInput(i: Omit<InputMessage, "t">): string {
-  const m: InputMessage = { t: INPUT, seq: i.seq, mx: i.mx, my: i.my, aim: i.aim, fire: i.fire, dash: i.dash };
+  const m: InputMessage = { t: INPUT, seq: i.seq, mx: i.mx, my: i.my, aim: i.aim, fire: i.fire, dash: i.dash, grenade: i.grenade };
   return JSON.stringify(m);
 }

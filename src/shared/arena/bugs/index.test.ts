@@ -146,7 +146,7 @@ describe("fair drop-in: personal pacing", () => {
         for (const b of bots) {
           observe(a, b.id, WORLD_W, WORLD_H, b.obs);
           POLICIES.aimer(b.obs, b.mem, b.rng, b.out);
-          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out });
+          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out, grenade: false });
         }
       };
       for (let t = 0; t < warmTicks; t++) {
@@ -195,7 +195,7 @@ describe("fair drop-in: personal pacing", () => {
         for (const b of bots) {
           observe(a, b.id, WORLD_W, WORLD_H, b.obs);
           POLICIES.aimer(b.obs, b.mem, b.rng, b.out);
-          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out });
+          a.players.find((q) => q.id === b.id)!.input = clampInput({ seq: 0, ...b.out, grenade: false });
         }
       };
       for (let t = 0; t < warmTicks; t++) {
