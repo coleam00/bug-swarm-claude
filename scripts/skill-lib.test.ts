@@ -153,9 +153,10 @@ describe("bun run skill", () => {
     expect(aim.taken.drone).toBeGreaterThan(0);
     expect(aim.droneKills).toBeGreaterThan(0);
     expect(aim.blocks).toBeGreaterThan(1);
-    expect(aim.total).toBe(aim.taken.shield + aim.taken.laser + aim.taken.bomb + aim.taken.drone);
+    expect(aim.taken.cloak).toBeGreaterThan(0);
+    expect(aim.total).toBe(aim.taken.shield + aim.taken.laser + aim.taken.bomb + aim.taken.drone + aim.taken.cloak);
     // The idle takes none; its one block a life is its first life's spawn shield (#90).
-    expect(by("idle").pickups.mean).toEqual({ total: 0, taken: { shield: 0, laser: 0, bomb: 0, drone: 0 }, blocks: 1, laserHits: 0, bombKills: 0, droneKills: 0 });
+    expect(by("idle").pickups.mean).toEqual({ total: 0, taken: { shield: 0, laser: 0, bomb: 0, drone: 0, cloak: 0 }, blocks: 1, laserHits: 0, bombKills: 0, droneKills: 0 });
     // One life's counts replay exactly.
     expect(playLife("aimer", 5, 120).pickups).toEqual(playLife("aimer", 5, 120).pickups);
   });
@@ -174,7 +175,7 @@ describe("bun run skill", () => {
   test("pickupStats: the median and mean of each count", () => {
     const c = (shield: number, laser: number, bomb: number, drone: number, blocks: number, laserHits: number, bombKills: number, droneKills: number) => ({
       total: shield + laser + bomb + drone,
-      taken: { shield, laser, bomb, drone },
+      taken: { shield, laser, bomb, drone, cloak: 0 },
       blocks,
       laserHits,
       bombKills,

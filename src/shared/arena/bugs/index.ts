@@ -22,6 +22,7 @@ import {
   WORLD_W,
   type BugKind,
 } from "../constants";
+import { cloaked } from "../pickups/cloak";
 import { nextRandom } from "../rng";
 import { canAct, canBeHit, strikePlayer, wave, type ArenaState, type Bug, type Player } from "../sim";
 import { STEP_EXPIRE, STEP_LAUNCH, STEP_LAUNCH_ALT, type Launch } from "./kind";
@@ -185,8 +186,9 @@ function launch(state: ArenaState, b: Bug, l: Launch | undefined): void {
  * The player bug `b` chases: the nearest player who is up (not down; ties: the earlier in the
  * list), except that a spawn-protected player is chased only by a bug already chasing them, so
  * bugs chasing someone else are never redirected at a newcomer. When that leaves no one (only
- * protected players are up), the nearest player who is up, who cannot be hurt yet anyway. Null
- * when no one is up.
+ * protected players are up), the nearest player who is up, who cannot be hurt yet anyway. A
+ * cloaked player (#132, pickups/cloak.ts) is never chosen, not even as that fallback: with only
+ * cloaked players up a bug has no target. Null when no one uncloaked is up.
  */
 function chooseTarget(state: ArenaState, b: Bug): Player | null {
   let best: Player | null = null;
@@ -195,6 +197,7 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
   let anyD = Infinity;
   for (const p of state.players) {
     if (!canAct(p)) continue;
+    if (cloaked(p)) continue;
     const dx = p.x - b.x;
     const dy = p.y - b.y;
     const d = dx * dx + dy * dy;
@@ -217,7 +220,7 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
  *    SPAWN_BUDGET_CAP), and each whole bug owed spawns for them, chasing them, while the arena
  *    holds fewer than spawnCap bugs; its kind is picked by the mix (pickKind); a downed player's
  *    budget waits;
- * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one up)
+ * 2. each bug steps by its kind (kind.ts `step`), given its chooseTarget (or null: no one uncloaked up)
  *    and that target's pressureAge (0 with no target);
  *    a step may launch bugs (launch: they are not stepped until the next tick, but they can touch
  *    in this one) or expire (it leaves with no touch, kill or score);
