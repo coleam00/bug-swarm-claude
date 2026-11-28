@@ -6,11 +6,10 @@ A real-time multiplayer arena shooter for a livestream audience. Drop into a sha
 
 ## How it was built
 
-No person wrote this game's code. An AI software factory built it: [Rasmus's pack](https://github.com/Wirasm/archon-software-factory) running on [Archon](https://github.com/coleam00/Archon), with Claude in every seat, working from a PRD. Claude orchestrated it: it filed the work items, answered the factory's questions as owner, checked every pull request in real browsers, and merged them.
+No person wrote this game's code. An AI software factory built it: [the Archon software factory pack](https://github.com/dynamous-community/archon-software-factory) (Rasmus's work) running on [Archon](https://github.com/coleam00/Archon), with Claude in every seat, working from a PRD. Claude orchestrated it: it filed the work items, answered the factory's questions as owner, checked every pull request in real browsers, and merged them.
 
 - **Release 1** (single-player, auto-fire): the `release-1` branch, 24 pull requests.
 - **Release 2** (this multiplayer arena): `main`, tracker issue #50.
-- **The factory's runtime:** the scripts that ordered and watched every item, the item bodies, and the full run log of every order, question, answer and merge. It lives in [coleam00/bug-swarm-claude-factory](https://github.com/coleam00/bug-swarm-claude-factory) (private).
 
 ## Run it
 
