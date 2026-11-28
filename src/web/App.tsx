@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from "react";
 import { ERROR_NAME, type ErrorCode } from "../shared/arena/protocol";
 import { NAME_MAX, TEAMS, type Team } from "../server/rules";
 import { startBackdrop } from "./backdrop";
 import { fetchBest, fetchPlaying, fetchTeams, fetchTop, type Me, type TopRow } from "./api";
 import { startArena, startWatch, type ArenaHandle, type ArenaPlayer, type LifeSummary, type WatchHandle } from "./arena/game";
 import type { WatchConnection } from "./arena/net";
+import { BANNER_S } from "./arena/queenhud";
 import { restartIn } from "./game/guard";
 import { HINT_MS, hintLines, takeHintLife } from "./hint";
 import { fmt, topLine } from "./over";
@@ -233,11 +234,42 @@ function reducedMotion(): boolean {
  * server will not take a watcher, the drawn backdrop runs again. The start screen never waits on
  * it. A hidden tab closes the watch (it holds no watcher slot) and a visible one reopens it.
  */
+/** One golden bug banner shown as a line (#122): its text, and a count that restarts its fade. */
+type GoldenLine = { text: string; n: number };
+
+/**
+ * The golden bug's banner on the pages the canvas HUD does not reach (#122): the life-over screen
+ * and the start screen lie over their canvas. Each `show` replaces the line, which fades out with
+ * the canvas banner's timing (BANNER_S) and is then gone. The name is a text node, never HTML.
+ */
+function useGoldenLine(): [GoldenLine | null, (text: string) => void] {
+  const [line, setLine] = useState<GoldenLine | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const n = useRef(0);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const show = useCallback((text: string) => {
+    clearTimeout(timer.current);
+    setLine({ text, n: ++n.current });
+    timer.current = setTimeout(() => setLine(null), BANNER_S * 1000);
+  }, []);
+  return [line, show];
+}
+
+function GoldenLineView({ line }: { line: GoldenLine }) {
+  // Layout in index.html (.golden-line): pointer-events none, over the life-over and start screens.
+  return (
+    <p className="golden-line" role="status">
+      {line.text}
+    </p>
+  );
+}
+
 function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | null> }) {
   const drawn = useRef<HTMLCanvasElement>(null);
   const liveCanvas = useRef<HTMLCanvasElement>(null);
   const backdrop = useRef<ReturnType<typeof startBackdrop> | null>(null);
   const [live, setLive] = useState(false);
+  const [gold, showGold] = useGoldenLine();
 
   useEffect(() => {
     try {
@@ -259,7 +291,7 @@ function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | 
     const begin = () => {
       if (handle || document.hidden) return;
       try {
-        handle = startWatch(liveCanvas.current!, { live: setLive, unavailable: () => setLive(false) });
+        handle = startWatch(liveCanvas.current!, { live: setLive, unavailable: () => setLive(false), golden: showGold });
         watching.current = handle;
       } catch (err) {
         console.error("start screen live arena failed", err);
@@ -279,7 +311,7 @@ function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | 
       document.removeEventListener("visibilitychange", onVisibility);
       end();
     };
-  }, [watching]);
+  }, [watching, showGold]);
 
   useEffect(() => {
     if (!live) return backdrop.current?.hold(false);
@@ -291,6 +323,7 @@ function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | 
     <>
       <canvas ref={drawn} className="start-backdrop" aria-hidden="true" tabIndex={-1} />
       <canvas ref={liveCanvas} className={live ? "start-live on" : "start-live"} aria-hidden="true" tabIndex={-1} />
+      {gold && live && <GoldenLineView key={gold.n} line={gold} />}
     </>
   );
 }
@@ -324,6 +357,10 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
   // The controls card (hint.ts): taken each time the arena puts you in a life, so a refused join
   // uses none. `n` remounts it, so its fade restarts on each life it shows on.
   const [hint, setHint] = useState<{ lines: string[]; n: number } | null>(null);
+  // The golden bug's banner while the life-over screen covers the canvas (#122); in a life the canvas draws it.
+  const [gold, showGold] = useGoldenLine();
+  const endedNow = useRef(false);
+  endedNow.current = ended !== null;
 
   useEffect(() => {
     let hintTimer: ReturnType<typeof setTimeout> | undefined;
@@ -337,6 +374,9 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
       status: setStatus,
       refused: (code) => latest.current.onRefused(code),
       over: (life, at) => setEnded({ life, at, n: ++lives }),
+      golden: (text) => {
+        if (endedNow.current) showGold(text);
+      },
       alive: () => {
         setEnded(null);
         // A card still up from a life that ended early never carries into the next one.
@@ -353,7 +393,7 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
       running.stop();
       handle.current = null;
     };
-  }, [id, name, team, adopt]);
+  }, [id, name, team, adopt, showGold]);
 
   return (
     <>
@@ -371,6 +411,7 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
           ))}
         </ul>
       )}
+      {gold && ended && <GoldenLineView key={gold.n} line={gold} />}
       {ended && <LifeOver key={ended.n} ended={ended} playerId={id} team={team} onAgain={() => handle.current?.respawn()} />}
     </>
   );

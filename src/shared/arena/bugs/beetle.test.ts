@@ -329,8 +329,7 @@ describe("beetle spawns", () => {
     expect(beetleShare(BEETLE_FROM_S - 0.1)).toBe(0);
     expect(beetleShare(BEETLE_FROM_S)).toBeCloseTo(0.05, 9);
     expect(beetleShare(1000)).toBe(BEETLE_SHARE_MAX);
-    const a = createArena(5);
-    a.tick = Math.round((5 * WAVE_S) / DT);
+    const a = createArena(5, Math.round((5 * WAVE_S) / DT));
     const p = joinPlayer(a, "a", "tabs");
     p.firstLife = false;
     p.lifeStartTick = a.tick;
@@ -366,8 +365,7 @@ describe("beetle spawns", () => {
   });
 
   test(`an arena never holds more than ${CAP} beetles`, () => {
-    const a = createArena(7);
-    a.tick = Math.round((5 * WAVE_S) / DT);
+    const a = createArena(7, Math.round((5 * WAVE_S) / DT));
     for (let i = 0; i < 20; i++) joinPlayer(a, `p${i}`, "tabs").lifeStartTick = a.tick - Math.round(300 / DT);
     let most = 0;
     for (let t = 0; t < 20 / DT; t++) {

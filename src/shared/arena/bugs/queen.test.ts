@@ -151,8 +151,7 @@ describe("tell and ring", () => {
 
 describe("the spawn mix", () => {
   test("never makes a queen", () => {
-    const a = createArena(11);
-    a.tick = Math.round((12 * WAVE_S) / DT);
+    const a = createArena(11, Math.round((12 * WAVE_S) / DT));
     joinPlayer(a, "a", "tabs").lifeStartTick = a.tick - Math.round(300 / DT);
     for (let t = 0; t < 30 / DT; t++) {
       for (const p of a.players) p.invulnTicks = 1e9;

@@ -39,6 +39,7 @@ import { PICKUP_LABELS } from "../../shared/arena/pickups/registry";
 import {
   BLOCK,
   EVENT,
+  GOLDEN,
   JOIN,
   LEAVE,
   OVER,
@@ -53,6 +54,7 @@ import {
   type ServerMessage,
   type SnapshotDown,
   type SnapshotMe,
+  type SnapshotGolden,
   type SnapshotQueen,
 } from "../../shared/arena/protocol";
 import { clampInput, wrapAngle, type Input } from "../../shared/arena/sim";
@@ -67,7 +69,7 @@ import { createTrail, updateTrail } from "../game/fx/trail";
 import { restartIn } from "../game/guard";
 import type { Insets } from "../game/hud";
 import { STATS_KEY, STEERING_KEYS } from "../game/keys";
-import { GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
+import { GLOW_GOLD, GLOW_QUEEN, GLOW_SHIELD, GLOW_SHOT, GLOW_STEEL, GLOW_WHITE } from "../game/look";
 import { createRng } from "../game/rng";
 import { createCamera, followCamera, setViewport, snapCamera } from "./camera";
 import { createDrift, stepDrift } from "./drift";
@@ -104,7 +106,7 @@ import {
 import { markUpdateReload } from "../player";
 import { connectArena, watchArena, type Connection, type PlayHandlers, type WatchConnection } from "./net";
 import { createPredictor, decayCorrection, predictLocal, predictedAt, reconcile, resetPredictor } from "./predict";
-import { createBanner, showBanner, updateBanner } from "./queenhud";
+import { createBanner, goldenBannerText, showBanner, updateBanner } from "./queenhud";
 import { createArenaRenderer, type BugsView, type FloorView, type Robot, type Scene } from "./render";
 import { addShot, clearKills, clearShots, createKillQueue, createShots, drainKills, endShot, pruneShots, queueKill } from "./shots";
 import { countPeople, isBot } from "./tag";
@@ -138,6 +140,11 @@ export type ArenaEvents = {
   alive(): void;
   /** You are in a life for the first time since `startArena`. Once. */
   firstSpawn(): void;
+  /**
+   * A golden bug was killed in your arena (#122): its banner's text. The canvas draws it while you
+   * are in a life; the life-over screen, over the canvas, shows it itself (App.tsx).
+   */
+  golden(text: string): void;
 };
 
 export type ArenaHandle = {
@@ -153,6 +160,8 @@ export type WatchEvents = {
   live(on: boolean): void;
   /** The server will not take a watcher (its cap, or another version): nothing reconnects. */
   unavailable(): void;
+  /** A golden bug was killed in the watched arena (#122): its banner's text, which the start screen shows (App.tsx). */
+  golden(text: string): void;
 };
 
 export type WatchHandle = {
@@ -233,6 +242,12 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
   let queenQ: SnapshotQueen = noQueen;
   const banner = createBanner();
   let bannerName = "";
+  // The golden bug (#122): the newest snapshot's `g` (its minimap dot and edge arrow), and
+  // "<name> got the golden bug!" on every page in the arena.
+  const noGolden: SnapshotGolden = [];
+  let goldenG: SnapshotGolden = noGolden;
+  const goldBanner = createBanner();
+  let goldName = "";
 
   // Who is in the arena: names and teams come once, in the welcome and in join events.
   const roster = new Map<number, Robot>();
@@ -342,7 +357,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       clearKills(kills);
       resetHudFx(hudFx);
       queenQ = noQueen;
+      goldenG = noGolden;
       banner.left = 0;
+      goldBanner.left = 0;
       for (const e of m.roster) if (isTeam(e.team)) robotFor(e.id, e.name, e.team);
       people = countPeople(roster.values());
       // A new socket or arena counts you as shown until told otherwise.
@@ -351,6 +368,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
       pushSnapshot(interp, m.tick, m.p, performance.now(), m.b, m.d, m.f);
       wave = m.w;
       queenQ = m.q ?? noQueen;
+      goldenG = m.g ?? noGolden;
       if (m.m) far = m.m;
       noteAck(net, m.ack, performance.now());
       for (const s of m.s) addShot(shots, s[0], s[1], s[2], s[3], s[4], m.tick, s[5]);
@@ -423,6 +441,14 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
         }
         bannerName = roster.get(m.id)?.name ?? "";
         showBanner(banner, m.id);
+      } else if (m.kind === GOLDEN) {
+        // A golden bug is down: a gold burst on its killer and the banner naming them, for everyone.
+        const r = roster.get(m.id);
+        if (r) spawnBurst(particles, r.x, r.y, BURST_COUNT, GLOW_GOLD, fxRng);
+        goldName = r?.name ?? "";
+        showBanner(goldBanner, m.id);
+        // Pages the canvas HUD does not reach (the life-over screen, the start screen) show it as a line.
+        mode.on.golden(goldenBannerText(goldName));
       }
     }
   };
@@ -619,8 +645,11 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     dashButton: null,
     dashReady: 1,
     queen: noQueen,
+    golden: noGolden,
     banner,
     bannerName: "",
+    goldBanner,
+    goldName: "",
   };
   const meter = createFpsMeter();
   const record: WatchRecord | null = watch && import.meta.env.DEV ? { work: new Float64Array(COST_FRAMES), count: 0 } : null;
@@ -747,6 +776,7 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     updateShake(shake, dt, fxRng);
     updateHudFx(hudFx, dt);
     updateBanner(banner, dt);
+    updateBanner(goldBanner, dt);
 
     // Who to draw: everyone in a life in the newest snapshot, you predicted, the rest interpolated.
     drawn.length = 0;
@@ -831,7 +861,9 @@ function runArena(canvas: HTMLCanvasElement, mode: Mode) {
     scene.dashButton = controls.dashButtonOn && alive && selfIndex >= 0 ? controls.dashButton : null;
     scene.dashReady = 1 - predictor.dashCooldown / DASH_COOLDOWN_TICKS;
     scene.queen = queenQ;
+    scene.golden = goldenG;
     scene.bannerName = bannerName;
+    scene.goldName = goldName;
     renderer.draw(cam, scene);
     if (record) {
       record.work[record.count % COST_FRAMES] = performance.now() - t0;
