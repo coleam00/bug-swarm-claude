@@ -45,7 +45,7 @@ import {
 } from "../src/shared/arena/protocol";
 import { QUEEN_EVERY_WAVES } from "../src/shared/arena/bugs/queen";
 import { createRng, nextRandom, type Rng } from "../src/shared/arena/rng";
-import { NAME_MAX, TEAMS, isTeam, type Team } from "../src/server/rules";
+import { NAME_MAX, isTeam, type Team } from "../src/server/rules";
 import { CAMERA_SECONDS, createCamera, snapCamera, type Camera } from "../src/web/arena/camera";
 import { dashButtonAt } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";

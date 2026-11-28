@@ -1,7 +1,7 @@
 // `bun run playtest -- (--url <base> | --serve) [--players 4] [--seconds 90] [--scenario basic|revive|late-join|restart|queen]` (#94, #95, #96):
 // several real browser players in one arena at once, each a headless Chrome page (desktops with a
 // mouse and keyboard and phones with two-point touch, mixed) that joins through the start screen
-// with its own name and team and plays a scripted human (playtest-lib.ts decide) with real
+// with its own name (the server picks its team, #131) and plays a scripted human (playtest-lib.ts decide) with real
 // Input.* events only. Each page's received frames, /api/top reads and life-over screen are
 // recorded; at the end the checks print a pass/fail table (exit 1 on a fail). Screenshots every
 // 15 s and the pages' logs go to .evidence/playtest/. It plays lives that save, so point it at a

@@ -337,7 +337,8 @@ function Reveal({ ms, landed, onEnd }: { ms: number; landed: Team | null; onEnd:
     <div className={frame.landed ? "reveal landed" : "reveal"} style={{ "--team": look.color } as CSSProperties}>
       {frame.landed && <span className="reveal-burst" aria-hidden="true" />}
       <p className="reveal-word" aria-hidden="true">
-        {look.label.toUpperCase()}
+        {/* The short reveal never flicks: no word until the team is known (a new player with reduced motion). */}
+        {frame.landed || ms > REVEAL_SHORT_MS ? look.label.toUpperCase() : ""}
       </p>
       <p className="reveal-line" role="status">
         {frame.landed ? `You're on ${look.label}!` : ""}

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { INTERP_DELAY_MS, REVIVE_RANGE, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import type { ServerMessage, SnapshotBug, SnapshotDown, SnapshotKill, SnapshotMe, SnapshotPlayer, SnapshotQueen } from "../src/shared/arena/protocol";
-import { checkName, TEAMS } from "../src/server/rules";
+import { checkName } from "../src/server/rules";
 import { dashButtonAt, DASH_BUTTON_RADIUS } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
 import {
