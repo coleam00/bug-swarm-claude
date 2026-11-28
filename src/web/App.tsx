@@ -317,7 +317,8 @@ function Reveal({ ms, landed, onEnd }: { ms: number; landed: Team | null; onEnd:
   latest.current = { landed, onEnd };
   useEffect(() => {
     const start = performance.now();
-    const hold = Math.min(ms, REVEAL_LAND_MS);
+    // The short reveal lands at once and holds all of it; the long one holds the landing.
+    const hold = ms <= REVEAL_SHORT_MS ? ms : REVEAL_LAND_MS;
     let landedAt: number | null = null;
     let raf = 0;
     const step = () => {
