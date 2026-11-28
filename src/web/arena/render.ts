@@ -1,6 +1,7 @@
 // Draws an arena frame: the floor grid, the walls, the bugs, every shot as a glowing streak, the
 // sparks, kill bursts and floating scores, every robot with its trail, dash afterimage, barrel and
-// name tag, your own ring, heat arc and dash cooldown ring, the dash button (touch screens), the
+// name tag, your own ring, heat arc, dash cooldown ring and grenade cooldown cue (#130), the dash and
+// grenade buttons (touch screens), grenades flying, blinking and going off (draw/grenade.ts), the
 // HUD line (score and multiplier, hit pips, wave, people playing: hudline.ts) with a short "streak lost"
 // under it, the sticks, the minimap and the F readout. While your life is over the arena keeps
 // drawing with no HUD and no dash button: App.tsx's life-over screen dims it. A downed robot (#59) slumps and flickers inside a countdown ring with a pulsing
@@ -22,10 +23,12 @@
 import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, MINIMAP_CELL, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
 import { pickupDef } from "../../shared/arena/pickups/registry";
 import { QUEEN_RADIUS } from "../../shared/arena/bugs/queen";
-import type { SnapshotMe, SnapshotQueen } from "../../shared/arena/protocol";
+import type { SnapshotGolden, SnapshotMe, SnapshotQueen } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
 import { ringAt, type RingAt, type Rings } from "../game/fx/rings";
+import { drawGrenades } from "./draw/grenade";
+import type { ClientGrenades } from "./grenades";
 import type { Shake } from "../game/fx/shake";
 import { TEXT_SECONDS, textLabel, type Texts } from "../game/fx/text";
 import { TRAIL_SECONDS, trailSlot, type Trail } from "../game/fx/trail";
@@ -37,6 +40,7 @@ import {
   BOMB_RING_GLOW_WIDTH,
   BOMB_RING_WIDTH,
   GLOW_DRONE,
+  GLOW_GOLD,
   GLOW_LASER,
   GLOW_QUEEN,
   GLOW_SHOT,
@@ -91,6 +95,7 @@ import {
   bannerY,
   barFill,
   fitScale,
+  goldenBannerText,
   markerLook,
   queenBarLayout,
   type Banner,
@@ -183,6 +188,12 @@ const DASH_BUTTON_FILL = "rgba(5, 7, 13, 0.55)";
 const DASH_BUTTON_TRACK = "rgba(248, 250, 252, 0.2)";
 const DASH_BUTTON_WIDTH = 4;
 const DASH_FONT = "bold 15px system-ui, sans-serif";
+/** The grenade (#130): its button's colours and label, and its cooldown cue on your robot, an arc just outside the dash ring's. */
+const GRENADE_READY = "#ffb020";
+const GRENADE_COOLING = "rgba(255, 176, 32, 0.55)";
+const GRENADE_FONT = "bold 10px system-ui, sans-serif";
+const GRENADE_CUE_RADIUS = HEAT_RADIUS + 6;
+const GRENADE_CUE_WIDTH = 2.5;
 /** A robot that can't be hit blinks this fast, cycles a second. */
 const BLINK_HZ = 8;
 /**
@@ -263,6 +274,16 @@ const BANNER_DOWN = "Queen down!";
 /** The banners stay this far inside the safe edges, CSS px, and their second line this far under the first. */
 const BANNER_MARGIN = 16;
 const BANNER_SUB_BELOW = 30;
+/** The golden bug's banner (#122), in its gold. */
+const GOLD_COLOUR = PALETTE[GLOW_GOLD];
+/**
+ * The golden bug's arrow at the screen's edge while it is off screen (#122), CSS px: between a
+ * downed player's (26) and the queen's (34), in gold, so the player can find it and run it down.
+ */
+const GOLDEN_ARROW_LENGTH = 28;
+const GOLDEN_ARROW_WIDTH = 24;
+/** Its minimap mark, CSS px: a gold dot this big (a bug's dot is 2 px square), in a dark ring. */
+const GOLDEN_MAP_DOT = 4.5;
 
 /**
  * One robot to draw, world units. `inv`: untouchable, so it blinks. `prot`: spawn-protected (a
@@ -368,11 +389,22 @@ export type Scene = {
   dashButton: DashButton | null;
   /** How far your dash has cooled, 0 to 1 (1: ready). */
   dashReady: number;
+  /** The grenade button (#130), CSS px, while you are in a life on a touch screen; else null. */
+  grenadeButton: DashButton | null;
+  /** How far your grenade has cooled, 0 to 1 (1: ready). */
+  grenadeReady: number;
+  /** Grenades thrown in the arena (#130). */
+  grenades: ClientGrenades;
   /** The hive queen from the newest snapshot (#85): [] none, her marker, or her alive. */
   queen: SnapshotQueen;
+  /** The golden bug from the newest snapshot (#122): [] none, else its id and where it is. */
+  golden: SnapshotGolden;
   /** "Queen down!" (#85) and the name of who dealt the most ("" for no name). */
   banner: Banner;
   bannerName: string;
+  /** "<name> got the golden bug!" (#122) and the killer's name ("" when they have left). */
+  goldBanner: Banner;
+  goldName: string;
 };
 
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
@@ -380,6 +412,8 @@ type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
 const scoreFormat = new Intl.NumberFormat("en-US");
 /** The glob's index in BUG_KINDS (#72): left off the minimap. */
 const GLOB_KIND = BUG_KINDS.indexOf("glob");
+/** The golden bug's index in BUG_KINDS (#122): its minimap dot is its own, from the snapshot's `g`. */
+const GOLDEN_KIND = BUG_KINDS.indexOf("golden");
 
 export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const canvas = ctx.canvas;
@@ -445,6 +479,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let comingW = 0;
   let downW = 0;
   let subW = 0;
+  let goldFor: string | null = null;
+  let goldText = "";
+  let goldW = 0;
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
   let vt = 0;
@@ -926,7 +963,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   /**
    * The hive queen's HUD (#85): her health bar under the line while she lives, and the banners:
    * "The hive queen is coming" while her marker shows, "Queen down!" naming who dealt the most for
-   * a few seconds after her kill. Banner texts are measured only when they change.
+   * a few seconds after her kill. The golden bug's banner (#122) shares their place, two lines
+   * lower while one of hers shows. Banner texts are measured only when they change.
    */
   function drawQueenHud(sc: Scene, lineY: number, icons: number): void {
     const q = sc.queen;
@@ -952,7 +990,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     const coming = q.length > 0 && q[0] === 0;
     const downAlpha = bannerAlpha(sc.banner.left);
-    if (!coming && downAlpha <= 0) return;
+    const goldAlpha = bannerAlpha(sc.goldBanner.left);
+    const queenShows = coming || downAlpha > 0;
+    if (!queenShows && goldAlpha <= 0) return;
     const maxW = cssW - safe.left - safe.right - 2 * BANNER_MARGIN;
     const cx = safe.left + (cssW - safe.left - safe.right) / 2;
     if (comingW === 0) {
@@ -966,7 +1006,14 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.font = BANNER_SUB_FONT;
       subW = bannerSub ? ctx.measureText(bannerSub).width : 0;
     }
-    const halfW = Math.min(maxW, coming ? comingW : Math.max(downW, subW)) / 2 + BANNER_MARGIN;
+    if (sc.goldName !== goldFor) {
+      goldFor = sc.goldName;
+      goldText = goldenBannerText(goldFor);
+      ctx.font = BANNER_FONT;
+      goldW = ctx.measureText(goldText).width;
+    }
+    const queenW = !queenShows ? 0 : coming ? comingW : Math.max(downW, subW);
+    const halfW = Math.min(maxW, Math.max(queenW, goldAlpha > 0 ? goldW : 0)) / 2 + BANNER_MARGIN;
     const hudBottom = hud.top + LINE_MIDDLE + barShift(sc) + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
     const y = bannerY(cssH, bannerFloor(cx, halfW, minimap.x, minimap.y + minimap.size + BANNER_MARGIN * 2, hudBottom, BANNER_MARGIN));
     ctx.textAlign = "center";
@@ -978,16 +1025,21 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 0.75 + 0.25 * Math.sin(sc.t * TAU * 2);
       ctx.fillStyle = QUEEN_COLOUR;
       drawFitted(BANNER_COMING, comingW, BANNER_FONT, cx, y, maxW);
-      ctx.globalAlpha = 1;
-      return;
+    } else if (downAlpha > 0) {
+      ctx.globalAlpha = downAlpha;
+      ctx.fillStyle = QUEEN_COLOUR;
+      drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
+      if (bannerSub) {
+        ctx.fillStyle = TEXT_FILL;
+        ctx.lineWidth = 4;
+        drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+      }
     }
-    ctx.globalAlpha = downAlpha;
-    ctx.fillStyle = QUEEN_COLOUR;
-    drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
-    if (bannerSub) {
-      ctx.fillStyle = TEXT_FILL;
-      ctx.lineWidth = 4;
-      drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+    if (goldAlpha > 0) {
+      ctx.globalAlpha = goldAlpha;
+      ctx.lineWidth = 5;
+      ctx.fillStyle = GOLD_COLOUR;
+      drawFitted(goldText, goldW, BANNER_FONT, cx, queenShows ? y + 2 * BANNER_SUB_BELOW : y, maxW);
     }
     ctx.globalAlpha = 1;
   }
@@ -1022,6 +1074,41 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineTo(-QUEEN_ARROW_LENGTH / 2, -QUEEN_ARROW_WIDTH / 2);
     ctx.lineTo(-QUEEN_ARROW_LENGTH / 4, 0);
     ctx.lineTo(-QUEEN_ARROW_LENGTH / 2, QUEEN_ARROW_WIDTH / 2);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /**
+   * The arrow at the screen's edge to the golden bug while it is off screen, at any distance
+   * (#122): gold, pulsing, kept below the minimap like the queen's.
+   */
+  function drawGoldenArrow(cam: Camera, g: SnapshotGolden, t: number): void {
+    if (g.length === 0) return;
+    arrowSafe.left = safe.left;
+    arrowSafe.right = safe.right;
+    arrowSafe.bottom = safe.bottom;
+    arrowSafe.top = Math.max(safe.top, minimap.y + minimap.size);
+    if (!edgeArrow(cam, cssW, cssH, arrowSafe, cam.x, cam.y, g[1], g[2], arrow, Infinity)) return;
+    ctx.save();
+    ctx.translate(arrow.x, arrow.y);
+    ctx.rotate(arrow.angle);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(t * 6);
+    const h = GOLDEN_ARROW_LENGTH;
+    ctx.drawImage(glows[GLOW_GOLD]!, -h, -h, h * 2, h * 2);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = GOLD_COLOUR;
+    ctx.strokeStyle = TEXT_STROKE;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(GOLDEN_ARROW_LENGTH / 2, 0);
+    ctx.lineTo(-GOLDEN_ARROW_LENGTH / 2, -GOLDEN_ARROW_WIDTH / 2);
+    ctx.lineTo(-GOLDEN_ARROW_LENGTH / 4, 0);
+    ctx.lineTo(-GOLDEN_ARROW_LENGTH / 2, GOLDEN_ARROW_WIDTH / 2);
     ctx.closePath();
     ctx.stroke();
     ctx.fill();
@@ -1064,8 +1151,31 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineCap = "butt";
   }
 
+  /** Your grenade cooling (#130): a thin arc under your robot, outside the dash ring, filling up; gone once ready. */
+  function drawGrenadeCue(me: Robot, ready: number): void {
+    if (ready >= 1) return;
+    ctx.lineCap = "round";
+    ctx.lineWidth = GRENADE_CUE_WIDTH;
+    ctx.strokeStyle = HEAT_TRACK;
+    ctx.beginPath();
+    ctx.arc(me.x, me.y, GRENADE_CUE_RADIUS, DASH_RING_START, DASH_RING_START + DASH_RING_SWEEP);
+    ctx.stroke();
+    if (ready > 0) {
+      ctx.strokeStyle = GRENADE_COOLING;
+      ctx.beginPath();
+      ctx.arc(me.x, me.y, GRENADE_CUE_RADIUS, DASH_RING_START, DASH_RING_START + DASH_RING_SWEEP * ready);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+  }
+
   /** The dash button, CSS px: a round button with a cooldown sweep around its edge, bright when ready. */
   function drawDashButton(b: DashButton, ready: number): void {
+    drawButton(b, ready, "DASH", DASH_FONT, DASH_READY, DASH_COOLING);
+  }
+
+  /** A round touch button (dash, grenade #130), CSS px: a cooldown sweep around its edge, bright when ready. */
+  function drawButton(b: DashButton, ready: number, label: string, font: string, readyColour: string, cooling: string): void {
     const on = ready >= 1;
     ctx.fillStyle = DASH_BUTTON_FILL;
     ctx.beginPath();
@@ -1077,17 +1187,17 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.arc(b.x, b.y, b.r - DASH_BUTTON_WIDTH / 2, 0, TAU);
     ctx.stroke();
     if (ready > 0) {
-      ctx.strokeStyle = on ? DASH_READY : DASH_COOLING;
+      ctx.strokeStyle = on ? readyColour : cooling;
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r - DASH_BUTTON_WIDTH / 2, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, ready));
       ctx.stroke();
     }
     ctx.globalAlpha = on ? 1 : 0.5;
-    ctx.font = DASH_FONT;
+    ctx.font = font;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillStyle = on ? DASH_READY : TEXT_FILL;
-    ctx.fillText("DASH", b.x, b.y + 1);
+    ctx.fillStyle = on ? readyColour : TEXT_FILL;
+    ctx.fillText(label, b.x, b.y + 1);
     ctx.globalAlpha = 1;
   }
 
@@ -1296,6 +1406,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     drawParticles(sc.particles);
     drawTingRings(sc.tings);
     drawRings(sc.rings);
+    drawGrenades(ctx, sc.grenades, sc.you, sc.mineAt, sc.othersAt, t, vl, vt, vr, vb);
 
     // Revive rings under the robots, then the robots in view, yours last.
     for (let i = 0; i < count; i++) {
@@ -1321,6 +1432,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.drawImage(mark!, me.x - mh, me.y - mh, mh * 2, mh * 2);
         if (sc.me) drawHeat(me, sc.me, t);
         drawDashRing(me, sc.dashReady);
+        drawGrenadeCue(me, sc.grenadeReady);
       }
     }
     // Name tags over every robot, as canvas text (never HTML: names are typed by viewers), and
@@ -1408,6 +1520,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     if (sc.watch) return;
     if (sc.dashButton && !sc.out) drawDashButton(sc.dashButton, sc.dashReady);
+    if (sc.grenadeButton && !sc.out) drawButton(sc.grenadeButton, sc.grenadeReady, "GRENADE", GRENADE_FONT, GRENADE_READY, GRENADE_COOLING);
     for (const s of sc.sticks) drawStick(s);
 
     // An arrow at the edge to each downed player out of view within reach of you.
@@ -1436,6 +1549,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
 
     drawQueenArrow(cam, sc.queen, t);
+    drawGoldenArrow(cam, sc.golden, t);
 
     const m = minimap;
     ctx.fillStyle = MINIMAP_FILL;
@@ -1451,8 +1565,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fillStyle = MINIMAP_BUG;
     const bugs = sc.bugs;
     for (let i = 0; i < bugs.count; i++) {
-      // A glob is a shot in flight, not a bug in the swarm: no dot.
-      if (bugs.kind[i] === GLOB_KIND) continue;
+      // A glob is a shot in flight, not a bug in the swarm: no dot. The golden bug has its own (#122).
+      if (bugs.kind[i] === GLOB_KIND || bugs.kind[i] === GOLDEN_KIND) continue;
       toMinimap(m, bugs.x[i]!, bugs.y[i]!, dot);
       ctx.fillRect(dot.x - 1, dot.y - 1, 2, 2);
     }
@@ -1498,6 +1612,19 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = QUEEN_COLOUR;
       } else ctx.strokeStyle = QUEEN_COLOUR;
+      ctx.stroke();
+    }
+
+    // The golden bug (#122): a gold dot in a dark ring, over the players' dots, wherever it runs.
+    const g = sc.golden;
+    if (g.length === 3) {
+      toMinimap(m, g[1], g[2], dot);
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, GOLDEN_MAP_DOT * (1 + 0.15 * Math.sin(t * TAU * 2)), 0, TAU);
+      ctx.fillStyle = GOLD_COLOUR;
+      ctx.fill();
+      ctx.strokeStyle = TEXT_STROKE;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 

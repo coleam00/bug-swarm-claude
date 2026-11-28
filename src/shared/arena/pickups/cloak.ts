@@ -18,7 +18,7 @@ export const cloak: PickupDef = {
   label: "Cloak!",
   // Each kind's pickup chance, split evenly over the 5 pickups (#132, #78's rule): crawler 3.75%,
   // dasher and spitter 7.5%, beetle 15% in all; 0.75%, 1.5% and 3% each (see shield.ts).
-  drop: { crawler: 0.0075, dasher: 0.015, spitter: 0.015, glob: 0, beetle: 0.03, queen: 0 },
+  drop: { crawler: 0.0075, dasher: 0.015, spitter: 0.015, glob: 0, beetle: 0.03, queen: 0, golden: 0 },
   floorTicks: Math.round(CLOAK_FLOOR_S / DT),
   durationTicks: Math.round(CLOAK_S / DT),
 };

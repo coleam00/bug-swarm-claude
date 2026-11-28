@@ -16,10 +16,10 @@ import {
   TICK_MS,
   WAVE_S,
 } from "../../shared/arena/constants";
-import { parseServerMessage, type ServerMessage, type Snapshot, type WireSnapshot } from "../../shared/arena/protocol";
+import { GRENADE, parseServerMessage, type ServerMessage, type Snapshot, type WireSnapshot } from "../../shared/arena/protocol";
 import { createSnapshotReader } from "../../shared/arena/view";
 import { endLife, type Input } from "../../shared/arena/sim";
-import { DOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
+import { DOWN_TICKS, GRENADE_COOLDOWN_TICKS, HITS_PER_LIFE, REVIVE_POINTS, REVIVE_TICKS } from "../../shared/arena/constants";
 import { QUEEN_EVERY_WAVES } from "../../shared/arena/bugs/queen";
 import { QUEEN_MARKER_TICKS, QUEEN_REWARD_EACH, QUEEN_REWARD_POOL } from "../../shared/arena/queen";
 import { placeBug } from "../../shared/arena/testkit";
@@ -85,7 +85,7 @@ function client() {
   return c;
 }
 
-const input = (seq: number, mx = 1, my = 0): Input => ({ seq, mx, my, aim: 0, fire: false, dash: false });
+const input = (seq: number, mx = 1, my = 0): Input => ({ seq, mx, my, aim: 0, fire: false, dash: false, grenade: false });
 const snapshots = (got: ServerMessage[]) => got.filter((m): m is Snapshot => m.t === "snapshot");
 
 describe("joining", () => {
@@ -132,7 +132,28 @@ describe("joining", () => {
         { id: 1, name: "Ada", team: "tabs" },
         { id: 2, name: "Bob", team: "spaces" },
       ],
+      team: "spaces",
     });
+  });
+
+  test("people playing on each team, across arenas: fill bots, hidden members and watchers never count (#131)", () => {
+    const { rooms, tick } = setup(undefined, 6);
+    expect(rooms.playingByTeam()).toEqual({ tabs: 0, spaces: 0 });
+    const a = rooms.join("Ada", "tabs", INFO, client().send);
+    rooms.join("Bob", "tabs", INFO, client().send);
+    rooms.join("Cy", "spaces", INFO, client().send);
+    rooms.watch(client().send);
+    tick();
+    expect(rooms.stats().bots).toBeGreaterThan(0);
+    expect(rooms.playingByTeam()).toEqual({ tabs: 2, spaces: 1 });
+    rooms.visibility(a.room, a.entity, true);
+    expect(rooms.playingByTeam()).toEqual({ tabs: 1, spaces: 1 });
+  });
+
+  test("a watcher's welcome has no team", () => {
+    const { rooms } = setup();
+    rooms.join("Ada", "tabs", INFO, client().send);
+    expect(rooms.watch(client().send)!.welcome.team).toBe("");
   });
 
   test("the others get join and leave events; the last leave closes the arena and its timer", () => {
@@ -248,6 +269,31 @@ describe("ticking", () => {
     expect([mine.me.dk, mine.me.dc]).toEqual([DASH_TICKS, DASH_COOLDOWN_TICKS]);
     // Everyone sees the dash in Ada's row.
     expect(snapshots(b.got).at(-1)!.p.find((r) => r[0] === j.entity)![8]).toBe(1);
+  });
+
+  test("a grenade press dropped with the oldest input is carried onto the next; everyone is told of the throw (#130)", () => {
+    const { rooms, tick } = setup();
+    const a = client();
+    const b = client();
+    const j = rooms.join("Ada", "tabs", INFO, a.send);
+    rooms.join("Bob", "spaces", INFO, b.send);
+    tick();
+    let seq = 0;
+    rooms.input(j.room, j.entity, { ...input(++seq, 0), grenade: true });
+    for (let i = 0; i < INPUT_BUFFER; i++) rooms.input(j.room, j.entity, input(++seq, 0));
+    tick();
+    const state = rooms.room(j.room)!.state;
+    const p = state.players[0]!;
+    expect(state.grenades).toHaveLength(1);
+    const g = state.grenades[0]!;
+    expect(snapshots(a.got).at(-1)!.me.gc).toBe(GRENADE_COOLDOWN_TICKS);
+    const thrown = (got: ServerMessage[]) => got.filter((m) => m.t === "event" && m.kind === GRENADE);
+    const want: ServerMessage = { t: "event", kind: GRENADE, id: p.id, gr: [Math.round(g.fromX * 10) / 10, Math.round(g.fromY * 10) / 10, Math.round(g.toX * 10) / 10, Math.round(g.toY * 10) / 10, g.tick + 1] };
+    expect(thrown(a.got)).toEqual([want]);
+    expect(thrown(b.got)).toEqual([want]);
+    // The held input is not a second press: it never repeats a grenade.
+    tick(INPUT_BUFFER + 2);
+    expect(thrown(a.got)).toHaveLength(1);
   });
 
   test("a held input repeats, and its move stops after INPUT_STALE_TICKS with nothing new", () => {
@@ -450,6 +496,8 @@ describe("lives", () => {
     st.bugs.length = 0;
     // The tick before wave QUEEN_EVERY_WAVES starts: the next one shows her marker.
     st.tick = Math.round(((QUEEN_EVERY_WAVES - 1) * WAVE_S) / (TICK_MS / 1000));
+    // The clock jumped past the golden bug's first slot (#122): hold its timer off, this is the queen's test.
+    st.golden.nextTick = Infinity;
     quiet();
     tick();
     expect(snapshots(a.got).at(-1)!.q).toEqual([0, st.queen.x, st.queen.y, QUEEN_MARKER_TICKS]);
@@ -467,7 +515,7 @@ describe("lives", () => {
     pa.y = q.y;
     pa.protectTicks = 0;
     for (let i = 0; i < 6 && st.queen.stage === 2; i++) {
-      rooms.input(ja.room, ja.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false });
+      rooms.input(ja.room, ja.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false, grenade: false });
       quiet();
       tick();
     }
@@ -479,6 +527,50 @@ describe("lives", () => {
     }
     rooms.leave(ja.room, ja.entity);
     expect(saved).toMatchObject([{ playerKey: INFO.playerKey, score: reward }]);
+  });
+
+  test("a golden bug (#122): its kill reaches every member and watcher of its arena as a `golden` event naming the killer, and no one in another arena", () => {
+    const { rooms, tick } = setup();
+    const key = (i: number) => i.toString(16).padStart(32, "0");
+    // A full arena A and one more player in arena B.
+    const cs = Array.from({ length: MAX_PLAYERS_PER_ARENA + 1 }, () => client());
+    const js = cs.map((c, i) => rooms.join(`p${i}`, "tabs", { playerKey: key(i), touch: false }, c.send));
+    expect(js.at(-1)!.room).not.toBe(js[0]!.room);
+    const inA = cs.filter((_, i) => js[i]!.room === js[0]!.room);
+    expect(inA).toHaveLength(MAX_PLAYERS_PER_ARENA);
+    // A start-screen watcher is shown the busiest arena: A.
+    const w = client();
+    rooms.watch(w.send);
+    inA.push(w);
+    const st = rooms.room(js[0]!.room)!.state;
+    const quiet = () => {
+      for (const p of st.players) {
+        p.budget = 0;
+        p.invulnTicks = 1000;
+      }
+    };
+    quiet();
+    tick();
+    st.bugs.length = 0;
+    // The killer stands alone at the left wall; everyone else is far away, so it flees right, along her shot.
+    const pa = st.players.find((p) => p.id === js[0]!.entity)!;
+    for (const p of st.players) {
+      p.x = 2000;
+      p.y = 2000;
+    }
+    pa.x = 100;
+    pa.y = 1200;
+    pa.protectTicks = 0;
+    const g = placeBug(st, 220, 1200, "golden");
+    g.hp = 1;
+    for (let i = 0; i < 10 && st.bugs.includes(g); i++) {
+      rooms.input(js[0]!.room, js[0]!.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false, grenade: false });
+      quiet();
+      tick();
+    }
+    expect(st.bugs).not.toContain(g);
+    for (const c of inA) expect(c.got.filter((m) => m.t === "event" && m.kind === "golden")).toEqual([{ t: "event", kind: "golden", id: pa.id }]);
+    expect(cs.at(-1)!.got.some((m) => m.t === "event" && m.kind === "golden")).toBe(false);
   });
 
   test("a stale input stops firing as well as moving", () => {
@@ -504,11 +596,12 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.hits = 1;
   p.dashTicks = 2;
   p.dashCooldown = 27;
+  p.grenadeCooldown = 41;
   p.effect.fill(0);
   p.effect[1] = 37;
-  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[], x: 0, y: 0, vx: 0, vy: 0 };
+  const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[], x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
   const fx = me.fx;
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy });
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy, gc: 41 });
   // The effects are copied into the same array every snapshot.
   expect(me.fx).toBe(fx);
   p.lockTicks = 0;
@@ -848,7 +941,7 @@ describe("active people (#117): out for OUT_IDLE_S or hidden stops counting", ()
   const out = (rooms: Rooms, room: number, id: number) => endLife(rooms.room(room)!.state, rooms.room(room)!.state.players.find((p) => p.id === id)!);
   /** Keeps `id` in their life whatever comes. */
   const keep = (rooms: Rooms, room: number, id: number) => (rooms.room(room)!.state.players.find((p) => p.id === id)!.invulnTicks = 1e9);
-  const press = (seq: number): Input => ({ seq, mx: 0, my: 0, aim: 0, fire: false, dash: true });
+  const press = (seq: number): Input => ({ seq, mx: 0, my: 0, aim: 0, fire: false, dash: true, grenade: false });
 
   test("an arena whose 4 people are out for OUT_IDLE_S is topped up with fill bots again; playing again counts again in place", () => {
     const { rooms, tick } = setup(undefined, FILL_TARGET);

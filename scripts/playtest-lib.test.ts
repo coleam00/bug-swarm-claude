@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { INTERP_DELAY_MS, REVIVE_RANGE, WORLD_H, WORLD_W } from "../src/shared/arena/constants";
 import type { ServerMessage, SnapshotBug, SnapshotDown, SnapshotKill, SnapshotMe, SnapshotPlayer, SnapshotQueen } from "../src/shared/arena/protocol";
-import { checkName, TEAMS } from "../src/server/rules";
+import { checkName } from "../src/server/rules";
 import { dashButtonAt, DASH_BUTTON_RADIUS } from "../src/web/arena/controls";
 import { STICK_DEAD, STICK_RANGE } from "../src/web/game/stick";
 import {
@@ -132,10 +132,9 @@ describe("chromeCandidates", () => {
 });
 
 describe("pages and scenarios", () => {
-  test("4 pages: desktops and touch phones alternate, so do teams, and every name is a valid, distinct name", () => {
+  test("4 pages: desktops and touch phones alternate, and every name is a valid, distinct name", () => {
     const pages = pageSpecs(4, "basic", 123456);
     expect(pages.map((p) => p.device.touch)).toEqual([false, true, false, true]);
-    expect(pages.map((p) => p.team)).toEqual([TEAMS[0], TEAMS[1], TEAMS[0], TEAMS[1]]);
     expect(new Set(pages.map((p) => p.name)).size).toBe(4);
     for (const p of pageSpecs(20, "basic", 2 ** 31 - 1)) expect(checkName(p.name).ok).toBe(true);
     expect(pages.every((p) => p.role === "fighter")).toBe(true);
@@ -168,7 +167,7 @@ describe("pages and scenarios", () => {
 
 // ---- A small recorded game: two pages, A (id 1, mouse) and B (id 2, touch). ----
 
-const me = (o: Partial<SnapshotMe> = {}): SnapshotMe => ({ sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 3, al: 1, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0, ...o });
+const me = (o: Partial<SnapshotMe> = {}): SnapshotMe => ({ sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 3, al: 1, dk: 0, dc: 0, dn: 0, fx: [], x: 0, y: 0, vx: 0, vy: 0, gc: 0, ...o });
 /** A message as the page decodes it. */
 const msg = (raw: string) => JSON.parse(raw) as ServerMessage;
 const row = (id: number, x: number, vx: number, aim: number, alive: 0 | 1 = 1): SnapshotPlayer => [id, x, 500, vx, 0, aim, alive, 0, 0, 0, 0];

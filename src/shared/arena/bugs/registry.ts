@@ -5,11 +5,12 @@ import { beetle } from "./beetle";
 import { crawler } from "./crawler";
 import { dasher } from "./dasher";
 import { glob } from "./glob";
+import { golden } from "./golden";
 import type { BugKindDef } from "./kind";
 import { queen } from "./queen";
 import { spitter } from "./spitter";
 
-export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher, spitter, glob, beetle, queen };
+export const BUG_DEFS: Record<BugKind, BugKindDef> = { crawler, dasher, spitter, glob, beetle, queen, golden };
 
 export function bugDef(kind: BugKind): BugKindDef {
   return BUG_DEFS[kind];

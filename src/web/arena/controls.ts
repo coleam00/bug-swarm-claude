@@ -9,7 +9,10 @@
 // coarse pointer, or once a finger has touched (`dashButtonOn`); then any pointer can tap it, and a
 // finger on it never starts a stick. The button's tap reach stays above the aim zone (the right
 // half's bottom band, where the aim thumb rests: `aimZoneTop`), so the aim thumb never dashes by
-// accident, and a thumb that slides over the button keeps aiming (#124). A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
+// accident, and a thumb that slides over the button keeps aiming (#124). Grenade (#130): Q or E
+// (`pressGrenade`), or the round grenade button just left of the dash button (`grenadeButtonAt`),
+// shown and handled exactly as the dash button is; it goes out as the next input's grenade, only
+// while alive. A respawn is one press (`pressRespawn`); both go out as the next input's dash, the dash
 // while alive and the respawn while out. The click or tap that pressed a respawn does not fire
 // until it is let go, so it does not end the new life's spawn protection (#58). Pure: main.ts
 // feeds it DOM events in CSS px relative to the canvas.
@@ -20,6 +23,8 @@ import { minimapLayout } from "./minimap";
 
 /** Keys that dash (KeyboardEvent.code). */
 export const DASH_KEYS: ReadonlySet<string> = new Set(["Space", "ShiftLeft", "ShiftRight"]);
+/** Keys that throw a grenade (#130). */
+export const GRENADE_KEYS: ReadonlySet<string> = new Set(["KeyQ", "KeyE"]);
 /** The dash button's radius, CSS px (56 px across: over the 44 px touch target). */
 export const DASH_BUTTON_RADIUS = 28;
 /** A press this far outside the button's edge still counts, CSS px. */
@@ -33,7 +38,10 @@ export const AIM_ZONE_SHARE = 0.5;
 /** The gap between the button's tap reach (radius and slop) and the aim zone's top, and between the button and the minimap, CSS px. */
 export const DASH_ZONE_GAP = 8;
 
-/** The dash button: centre and radius in CSS px, and the touch pointer holding it (-1: none). */
+/** The gap between the dash button's tap reach and the grenade button's, CSS px (#130). */
+export const GRENADE_BUTTON_GAP = 8;
+
+/** The dash button (or the grenade button, #130): centre and radius in CSS px, and the touch pointer holding it (-1: none). */
 export type DashButton = { x: number; y: number; r: number; id: number };
 
 export type Controls = {
@@ -53,7 +61,7 @@ export type Controls = {
   firing: boolean;
   /** The mouse buttons last seen held (the DOM's `buttons`: 1 left or a pen's tip, 2 right). */
   mouseButtons: number;
-  /** The held left button went down on the dash button, so it does not fire. */
+  /** The held left button went down on the dash or grenade button, so it does not fire. */
   leftOnDash: boolean;
   /** A respawn press waiting for the next input. */
   respawn: boolean;
@@ -62,7 +70,11 @@ export type Controls = {
   /** A dash press waiting for the next input. */
   dashPress: boolean;
   dashButton: DashButton;
-  /** The dash button is shown and takes presses: a touch screen (game.ts sets it from `(pointer: coarse)`), or a finger has touched. */
+  /** A grenade press waiting for the next input (#130). */
+  grenadePress: boolean;
+  /** The grenade button, left of the dash button (#130). */
+  grenadeButton: DashButton;
+  /** The dash and grenade buttons are shown and take presses: a touch screen (game.ts sets it from `(pointer: coarse)`), or a finger has touched. */
   dashButtonOn: boolean;
 };
 
@@ -82,6 +94,8 @@ export function createControls(width: number): Controls {
     holdFire: false,
     dashPress: false,
     dashButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1 },
+    grenadePress: false,
+    grenadeButton: { x: -1000, y: -1000, r: DASH_BUTTON_RADIUS, id: -1 },
     dashButtonOn: false,
   };
 }
@@ -116,9 +130,21 @@ export function dashButtonAt(width: number, height: number, insets: Insets, out:
   return out;
 }
 
-function onDashButton(c: Controls, x: number, y: number): boolean {
+/**
+ * Lays the grenade button out (#130), into `out`: the dash button's size, on its row, just left of
+ * it, their tap reaches (radius and slop) GRENADE_BUTTON_GAP apart. Call it with the dash button
+ * already laid out (dashButtonAt): it stays out of the aim zone and clear of the minimap as the
+ * dash button does.
+ */
+export function grenadeButtonAt(dash: DashButton, out: DashButton): DashButton {
+  out.r = dash.r;
+  out.x = dash.x - 2 * (dash.r + DASH_BUTTON_SLOP) - GRENADE_BUTTON_GAP;
+  out.y = dash.y;
+  return out;
+}
+
+function onButton(c: Controls, b: DashButton, x: number, y: number): boolean {
   if (!c.dashButtonOn) return false;
-  const b = c.dashButton;
   const reach = b.r + DASH_BUTTON_SLOP;
   return (x - b.x) ** 2 + (y - b.y) ** 2 <= reach * reach;
 }
@@ -143,7 +169,7 @@ function setMouseButtons(c: Controls, buttons: number): void {
 /**
  * A press. `button` is the DOM's: 0 is the left mouse button or a pen's tip, 2 the right button
  * (a dash); `buttons` all those held now, `button`'s alone by default. A press on the dash button
- * dashes and does nothing else.
+ * dashes and does nothing else; one on the grenade button (#130) throws and does nothing else.
  */
 export function pointerDown(c: Controls, kind: PointerKind, id: number, x: number, y: number, button = 0, buttons = BUTTON_BITS[button] ?? 0): void {
   if (kind === "touch") {
@@ -151,9 +177,11 @@ export function pointerDown(c: Controls, kind: PointerKind, id: number, x: numbe
     c.dashButtonOn = true;
     c.mouse.on = false;
   }
-  if (onDashButton(c, x, y)) {
-    c.dashPress = true;
-    if (kind === "touch") c.dashButton.id = id;
+  const onDash = onButton(c, c.dashButton, x, y);
+  if (onDash || onButton(c, c.grenadeButton, x, y)) {
+    if (onDash) c.dashPress = true;
+    else c.grenadePress = true;
+    if (kind === "touch") (onDash ? c.dashButton : c.grenadeButton).id = id;
     else {
       if (button === 0) c.leftOnDash = true;
       c.mouseButtons = buttons;
@@ -180,7 +208,7 @@ export function pointerMove(c: Controls, kind: PointerKind, id: number, x: numbe
     if (buttons !== undefined) setMouseButtons(c, buttons);
     return;
   }
-  if (id === c.dashButton.id) return;
+  if (id === c.dashButton.id || id === c.grenadeButton.id) return;
   if (!stickMove(c.move, id, x, y)) stickMove(c.aimStick, id, x, y);
 }
 
@@ -194,6 +222,10 @@ export function pointerUp(c: Controls, kind: PointerKind, id: number, buttons = 
     c.dashButton.id = -1;
     return;
   }
+  if (id === c.grenadeButton.id) {
+    c.grenadeButton.id = -1;
+    return;
+  }
   if (!stickUp(c.move, id)) stickUp(c.aimStick, id);
 }
 
@@ -204,6 +236,7 @@ export function releaseAll(c: Controls): void {
   c.mouseButtons = 0;
   c.leftOnDash = false;
   c.dashButton.id = -1;
+  c.grenadeButton.id = -1;
   stickUp(c.move, c.move.id);
   stickUp(c.aimStick, c.aimStick.id);
 }
@@ -222,22 +255,27 @@ export function pressDash(c: Controls): void {
   c.dashPress = true;
 }
 
+/** A grenade press (a key, #130): the next input carries it, once. */
+export function pressGrenade(c: Controls): void {
+  c.grenadePress = true;
+}
+
 const drive: StickOut = { kind: "stick", dx: 0, dy: 0 };
 
 /**
  * This step's move, aim and fire into `out`. Held keys win over the move stick. The aim stick,
  * else the mouse (aimed from `selfX, selfY`, your robot on screen in CSS px), sets the aim; else
  * it stays. Fire is the held left button, or the aim stick held past its dead zone, except while
- * a respawn press is still held (holdFire, cleared once both are let go). `dash` and
+ * a respawn press is still held (holdFire, cleared once both are let go). `dash`, `grenade` and
  * `respawn` are the presses waiting since the last read, consumed here: main.ts sends the one
- * that fits (the dash while alive, the respawn while out). The move may be longer than 1 (a diagonal key pair); the
+ * that fits (the dash and grenade while alive, the respawn while out). The move may be longer than 1 (a diagonal key pair); the
  * sim clamps it.
  */
 export function readControls(
   c: Controls,
   selfX: number,
   selfY: number,
-  out: { mx: number; my: number; aim: number; fire: boolean; dash: boolean; respawn: boolean },
+  out: { mx: number; my: number; aim: number; fire: boolean; dash: boolean; grenade: boolean; respawn: boolean },
 ): void {
   const keys = keysToInput(c.keys);
   if (keys.kind === "direction") {
@@ -258,7 +296,9 @@ export function readControls(
   if (c.holdFire && !c.firing && !s.active) c.holdFire = false;
   out.fire = !c.holdFire && (aiming || c.firing);
   out.dash = c.dashPress;
+  out.grenade = c.grenadePress;
   out.respawn = c.respawn;
   c.dashPress = false;
+  c.grenadePress = false;
   c.respawn = false;
 }

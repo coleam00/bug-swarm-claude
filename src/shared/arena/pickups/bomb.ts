@@ -20,10 +20,11 @@ export const BOMB_FLOOR_S = 12;
 /**
  * Which kinds the bomb kills outright (true) or hits for BOMB_DAMAGE (false): the item's crawlers
  * and dashers die, everything else takes the damage (a 3 hp spitter and a 1 hp glob die of it too,
- * today; a hive queen (#85) takes the damage, credited to the taker's share of her reward). A Record
+ * today; a hive queen (#85) takes the damage, credited to the taker's share of her reward; a golden
+ * bug, #122, dies outright like a dasher, paying the taker its 100). A Record
  * over BUG_KINDS, so a new kind does not compile until it says which.
  */
-export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: true, spitter: false, glob: false, beetle: false, queen: false };
+export const BOMB_CLEARS: Record<BugKind, boolean> = { crawler: true, dasher: true, spitter: false, glob: false, beetle: false, queen: false, golden: true };
 
 export const bomb: PickupDef = {
   id: "bomb",
@@ -33,7 +34,7 @@ export const bomb: PickupDef = {
   // of the numbers #73 had halved for the late-joiner gate, set by measurement so an aimer takes 2 to
   // 3 pickups a life (`bun run skill`). The spitter (#72) drops as the dasher does; a beetle (#80)
   // takes 8 shots and drops twice what a dasher does. A glob is a shot in flight and drops nothing.
-  drop: { crawler: 0.0075, dasher: 0.015, spitter: 0.015, glob: 0, beetle: 0.03, queen: 0 },
+  drop: { crawler: 0.0075, dasher: 0.015, spitter: 0.015, glob: 0, beetle: 0.03, queen: 0, golden: 0 },
   floorTicks: Math.round(BOMB_FLOOR_S / DT),
   durationTicks: 0,
 };

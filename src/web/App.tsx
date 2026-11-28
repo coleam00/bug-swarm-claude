@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from "react";
 import { ERROR_NAME, type ErrorCode } from "../shared/arena/protocol";
 import { NAME_MAX, TEAMS, type Team } from "../server/rules";
 import { startBackdrop } from "./backdrop";
 import { fetchBest, fetchPlaying, fetchTeams, fetchTop, type Me, type TopRow } from "./api";
 import { startArena, startWatch, type ArenaHandle, type ArenaPlayer, type LifeSummary, type WatchHandle } from "./arena/game";
 import type { WatchConnection } from "./arena/net";
+import { BANNER_S } from "./arena/queenhud";
 import { restartIn } from "./game/guard";
-import { HINT_MS, hintText, takeFirstLife } from "./hint";
+import { HINT_MS, hintLines, takeHintLife } from "./hint";
 import { fmt, topLine } from "./over";
 import { loadPlayer, setPlayerName, setPlayerTeam, takeRefusedName, takeUpdateReload, type Player } from "./player";
 import {
@@ -15,10 +16,14 @@ import {
   openingNotice,
   playingLine,
   pressEnter,
-  pressTeam,
+  pressPlay,
+  REVEAL_GIVE_UP_MS,
+  REVEAL_LAND_MS,
+  REVEAL_SHORT_MS,
+  revealFrame,
+  revealMs,
   showMessage,
   startView,
-  teamLocked,
   typed,
   type Press,
   type StartView,
@@ -26,11 +31,13 @@ import {
 import { TEAM_LOOK } from "./teams";
 
 // The thin shell around the arena's canvas (architecture.md, "Stack"): the start screen on opening
-// the page, then the arena (arena/game.ts) with the status pill, the first-life hint and the
+// the page, then the arena (arena/game.ts) with the status pill, the controls card and the
 // life-over screen over it. No menus between lives: "Play again" (a tap or click anywhere on the
 // life-over screen, Enter or Space) respawns in the same arena, from RESTART_DELAY_MS (800 ms,
-// game/guard.ts) after the life ended. A reload forced by a redeploy (a new build) skips the start
-// screen and rejoins with the stored name and team. A name the server refuses (hidden by `bun run hide`, at
+// game/guard.ts) after the life ended. Play (#131) joins with the stored team, or none for the
+// server to pick, and shows the team reveal over the arena while it connects: it lands on the team
+// the welcome names, which is stored from then on. A reload forced by a redeploy (a new build) skips
+// the start screen and the reveal and rejoins with the stored name and team; so does a reconnect. A name the server refuses (hidden by `bun run hide`, at
 // join or mid-life) brings the start screen back with "Pick a different name".
 // The start screen (#79) plays the live arena behind it: a watching connection (arena/game.ts
 // startWatch) fades in over the drawn backdrop once it shows an arena, and Play hands that
@@ -58,24 +65,34 @@ export function App() {
   // The start screen's live arena, and its connection once handed to the arena by Play.
   const watching = useRef<WatchHandle | null>(null);
   const adopt = useRef<WatchConnection | null>(null);
+  // The team reveal (#131): per Play press only, so a reconnect or an update reload never shows it.
+  const [reveal, setReveal] = useState<{ ms: number; n: number } | null>(null);
 
-  if (phase === "arena" && player.name !== null && player.team !== null) {
+  if (phase === "arena" && player.name !== null) {
     return (
-      <Arena
-        id={player.id}
-        name={player.name}
-        team={player.team}
-        adopt={adopt}
-        onRefused={(code) => {
-          // A hidden name: forget it, so the start screen asks for another one. Anything else final
-          // (a team the server doesn't know) goes back to the start screen as it is.
-          if (code === ERROR_NAME) {
-            setPlayer(setPlayerName(null));
-            setNotice(nameMessage("blocked"));
-          } else setNotice(null);
-          setPhase("setup");
-        }}
-      />
+      <>
+        <Arena
+          id={player.id}
+          name={player.name}
+          team={player.team}
+          adopt={adopt}
+          onTeam={(team) => {
+            // The server's team, stored once it differs (a new player's pick, or the one it kept).
+            if (loadPlayer().team !== team) setPlayer(setPlayerTeam(team));
+          }}
+          onRefused={(code) => {
+            setReveal(null);
+            // A hidden name: forget it, so the start screen asks for another one. Anything else final
+            // (a team the server doesn't know) goes back to the start screen as it is.
+            if (code === ERROR_NAME) {
+              setPlayer(setPlayerName(null));
+              setNotice(nameMessage("blocked"));
+            } else setNotice(null);
+            setPhase("setup");
+          }}
+        />
+        {reveal && <Reveal key={reveal.n} ms={reveal.ms} landed={player.team} onEnd={() => setReveal(null)} />}
+      </>
     );
   }
   return (
@@ -87,8 +104,8 @@ export function App() {
         // The watching socket becomes the player's (before the start screen unmounts and stops it).
         adopt.current = watching.current?.handoff() ?? null;
         setNotice(null);
-        setPlayerName(name);
-        setPlayer(setPlayerTeam(team));
+        setPlayer(setPlayerName(name));
+        setReveal((r) => ({ ms: reducedMotion() ? REVEAL_SHORT_MS : revealMs(team), n: (r?.n ?? 0) + 1 }));
         setPhase("arena");
       }}
     />
@@ -97,23 +114,21 @@ export function App() {
 
 /**
  * The start screen: the backdrop, the title and either one "Play as <name>" button (a returning
- * player) or the name field and a button per team. start.ts decides what each press does.
+ * player) or the name field and one Play button. start.ts decides what each press does.
  */
 function StartScreen(props: {
   player: Player;
   notice: string | null;
   watching: MutableRefObject<WatchHandle | null>;
-  onDone: (name: string, team: Team) => void;
+  onDone: (name: string, team: Team | null) => void;
 }) {
   const { onDone } = props;
   const [view, setView] = useState<StartView>(() => startView(props.player, props.notice));
   const [value, setValue] = useState(view.name);
-  const teamButtons = useRef<Partial<Record<Team, HTMLButtonElement | null>>>({});
 
   const act = (press: Press) => {
     if (press.kind === "start") onDone(press.name, press.team);
-    else if (press.kind === "message") setView((v) => showMessage(v, press.text));
-    else teamButtons.current[press.team]?.focus();
+    else setView((v) => showMessage(v, press.text));
   };
 
   // On "Play as", Enter plays even when nothing has focus (the button handles it when it has).
@@ -159,7 +174,7 @@ function StartScreen(props: {
             autoFocus
             style={{ background: TEAM_LOOK[view.team].color }}
             onKeyDown={holdEnter}
-            onClick={() => act(pressEnter(view, value))}
+            onClick={() => act(pressPlay(view, value))}
           >
             Play as {view.name}
           </button>
@@ -191,21 +206,16 @@ function StartScreen(props: {
               {view.message}
             </p>
           )}
-          <div className="start-teams" role="group" aria-label="Your team">
-            {TEAMS.map((t) => (
-              <button
-                key={t}
-                ref={(el) => (teamButtons.current[t] = el)}
-                type="button"
-                disabled={teamLocked(view, t)}
-                style={{ background: TEAM_LOOK[t].color }}
-                onKeyDown={holdEnter}
-                onClick={() => act(pressTeam(view, value, t))}
-              >
-                Join {TEAM_LOOK[t].label}
-              </button>
-            ))}
-          </div>
+          {/* The team's colour once it has one; else both, for the server to pick between (#131). */}
+          <button
+            type="button"
+            className="start-play"
+            style={{ background: view.team ? TEAM_LOOK[view.team].color : `linear-gradient(90deg, ${TEAMS.map((t) => TEAM_LOOK[t].color).join(", ")})` }}
+            onKeyDown={holdEnter}
+            onClick={() => act(pressPlay(view, value))}
+          >
+            Play
+          </button>
         </div>
       )}
     </main>
@@ -233,11 +243,42 @@ function reducedMotion(): boolean {
  * server will not take a watcher, the drawn backdrop runs again. The start screen never waits on
  * it. A hidden tab closes the watch (it holds no watcher slot) and a visible one reopens it.
  */
+/** One golden bug banner shown as a line (#122): its text, and a count that restarts its fade. */
+type GoldenLine = { text: string; n: number };
+
+/**
+ * The golden bug's banner on the pages the canvas HUD does not reach (#122): the life-over screen
+ * and the start screen lie over their canvas. Each `show` replaces the line, which fades out with
+ * the canvas banner's timing (BANNER_S) and is then gone. The name is a text node, never HTML.
+ */
+function useGoldenLine(): [GoldenLine | null, (text: string) => void] {
+  const [line, setLine] = useState<GoldenLine | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const n = useRef(0);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const show = useCallback((text: string) => {
+    clearTimeout(timer.current);
+    setLine({ text, n: ++n.current });
+    timer.current = setTimeout(() => setLine(null), BANNER_S * 1000);
+  }, []);
+  return [line, show];
+}
+
+function GoldenLineView({ line }: { line: GoldenLine }) {
+  // Layout in index.html (.golden-line): pointer-events none, over the life-over and start screens.
+  return (
+    <p className="golden-line" role="status">
+      {line.text}
+    </p>
+  );
+}
+
 function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | null> }) {
   const drawn = useRef<HTMLCanvasElement>(null);
   const liveCanvas = useRef<HTMLCanvasElement>(null);
   const backdrop = useRef<ReturnType<typeof startBackdrop> | null>(null);
   const [live, setLive] = useState(false);
+  const [gold, showGold] = useGoldenLine();
 
   useEffect(() => {
     try {
@@ -259,7 +300,7 @@ function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | 
     const begin = () => {
       if (handle || document.hidden) return;
       try {
-        handle = startWatch(liveCanvas.current!, { live: setLive, unavailable: () => setLive(false) });
+        handle = startWatch(liveCanvas.current!, { live: setLive, unavailable: () => setLive(false), golden: showGold });
         watching.current = handle;
       } catch (err) {
         console.error("start screen live arena failed", err);
@@ -279,7 +320,7 @@ function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | 
       document.removeEventListener("visibilitychange", onVisibility);
       end();
     };
-  }, [watching]);
+  }, [watching, showGold]);
 
   useEffect(() => {
     if (!live) return backdrop.current?.hold(false);
@@ -291,7 +332,51 @@ function StartBackdrop({ watching }: { watching: MutableRefObject<WatchHandle | 
     <>
       <canvas ref={drawn} className="start-backdrop" aria-hidden="true" tabIndex={-1} />
       <canvas ref={liveCanvas} className={live ? "start-live on" : "start-live"} aria-hidden="true" tabIndex={-1} />
+      {gold && live && <GoldenLineView key={gold.n} line={gold} />}
     </>
+  );
+}
+
+/**
+ * The team reveal (#131), over the arena while it connects: "TABS" and "SPACES" flick back and
+ * forth, slowing (start.ts revealFrame), then land on `landed` (the welcome's team; a returning
+ * player's stored one until then) with a burst and "You're on Spaces!", which holds, and it leaves.
+ * Drawn in CSS (index.html .reveal), pointer-events none throughout. With no team by
+ * REVEAL_GIVE_UP_MS it leaves anyway, so a status ("Arenas are full...") is never hidden for long.
+ */
+function Reveal({ ms, landed, onEnd }: { ms: number; landed: Team | null; onEnd: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
+  const latest = useRef({ landed, onEnd });
+  latest.current = { landed, onEnd };
+  useEffect(() => {
+    const start = performance.now();
+    // The short reveal lands at once and holds all of it; the long one holds the landing.
+    const hold = ms <= REVEAL_SHORT_MS ? ms : REVEAL_LAND_MS;
+    let landedAt: number | null = null;
+    let raf = 0;
+    const step = () => {
+      const t = performance.now() - start;
+      if (landedAt === null && revealFrame(t, ms, latest.current.landed).landed) landedAt = t;
+      if ((landedAt !== null && t - landedAt >= hold) || t >= REVEAL_GIVE_UP_MS) return latest.current.onEnd();
+      setElapsed(t);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [ms]);
+  const frame = revealFrame(elapsed, ms, landed);
+  const look = TEAM_LOOK[frame.team];
+  return (
+    <div className={frame.landed ? "reveal landed" : "reveal"} style={{ "--team": look.color } as CSSProperties}>
+      {frame.landed && <span className="reveal-burst" aria-hidden="true" />}
+      <p className="reveal-word" aria-hidden="true">
+        {/* The short reveal never flicks: no word until the team is known (a new player with reduced motion). */}
+        {frame.landed || ms > REVEAL_SHORT_MS ? look.label.toUpperCase() : ""}
+      </p>
+      <p className="reveal-line" role="status">
+        {frame.landed ? `You're on ${look.label}!` : ""}
+      </p>
+    </div>
   );
 }
 
@@ -308,12 +393,14 @@ function coarsePointer(): boolean {
 type Ended = { life: LifeSummary; at: number; n: number };
 
 /**
- * The arena: its canvas, the "Connecting..." / "Reconnecting..." pill, the first-life hint and the
+ * The arena: its canvas, the "Connecting..." / "Reconnecting..." pill, the controls card and the
  * life-over screen. startArena runs once per mount; its stop() closes the socket and every
  * listener, so StrictMode's second effect run (and a refusal that unmounts it) leaves no socket
  * behind. A socket closed before it opens never says hello, so it never joins or saves a life.
  */
-function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | null>; onRefused: (code: ErrorCode) => void }) {
+function Arena(
+  props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | null>; onRefused: (code: ErrorCode) => void; onTeam: (team: Team) => void },
+) {
   const { id, name, team, adopt } = props;
   const canvas = useRef<HTMLCanvasElement>(null);
   const handle = useRef<ArenaHandle | null>(null);
@@ -321,30 +408,40 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
   latest.current = props;
   const [status, setStatus] = useState<string | null>("Connecting...");
   const [ended, setEnded] = useState<Ended | null>(null);
-  const [hint, setHint] = useState<string | null>(null);
-  // The hint is taken (hint.ts) once per mounted arena, when it first puts you in a life: a refused
-  // join never uses it up. A ref, so StrictMode's second effect run can't take it twice.
-  const hintTaken = useRef(false);
+  // The controls card (hint.ts): taken each time the arena puts you in a life, so a refused join
+  // uses none. `n` remounts it, so its fade restarts on each life it shows on.
+  const [hint, setHint] = useState<{ lines: string[]; n: number } | null>(null);
+  // The golden bug's banner while the life-over screen covers the canvas (#122); in a life the canvas draws it.
+  const [gold, showGold] = useGoldenLine();
+  const endedNow = useRef(false);
+  endedNow.current = ended !== null;
 
   useEffect(() => {
     let hintTimer: ReturnType<typeof setTimeout> | undefined;
     let lives = 0;
+    let hints = 0;
     // The start screen's connection, taken once: StrictMode's second run (after the first closed
     // it) connects afresh.
     const adopted = adopt.current;
     adopt.current = null;
-    const running = startArena(canvas.current!, { id, name, team }, {
+    // The team the page joins with, read once: storing the welcome's team (onTeam) must not rejoin.
+    const running = startArena(canvas.current!, { id, name, team: latest.current.team }, {
       status: setStatus,
+      team: (t) => latest.current.onTeam(t),
       refused: (code) => latest.current.onRefused(code),
       over: (life, at) => setEnded({ life, at, n: ++lives }),
-      alive: () => setEnded(null),
-      firstSpawn: () => {
-        if (hintTaken.current) return;
-        hintTaken.current = true;
-        if (!takeFirstLife()) return;
-        setHint(hintText(coarsePointer()));
+      golden: (text) => {
+        if (endedNow.current) showGold(text);
+      },
+      alive: () => {
+        setEnded(null);
+        // A card still up from a life that ended early never carries into the next one.
+        clearTimeout(hintTimer);
+        if (!takeHintLife()) return setHint(null);
+        setHint({ lines: hintLines(coarsePointer()), n: ++hints });
         hintTimer = setTimeout(() => setHint(null), HINT_MS);
       },
+      firstSpawn: () => {},
     }, adopted);
     handle.current = running;
     return () => {
@@ -352,7 +449,7 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
       running.stop();
       handle.current = null;
     };
-  }, [id, name, team, adopt]);
+  }, [id, name, adopt, showGold]);
 
   return (
     <>
@@ -364,10 +461,13 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
       )}
       {/* Layout in index.html (.hint): pointer-events none, so the sticks under it still work. */}
       {hint && !ended && (
-        <p className="hint" role="status">
-          {hint}
-        </p>
+        <ul className="hint" role="status" key={hint.n}>
+          {hint.lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       )}
+      {gold && ended && <GoldenLineView key={gold.n} line={gold} />}
       {ended && <LifeOver key={ended.n} ended={ended} playerId={id} team={team} onAgain={() => handle.current?.respawn()} />}
     </>
   );
@@ -380,7 +480,7 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
  * rows and totals), polled while it shows. A tap or click anywhere on it, Enter or Space play
  * again once RESTART_DELAY_MS has passed; until then "Play again" is hidden (its space kept).
  */
-function LifeOver({ ended, playerId, team, onAgain }: { ended: Ended; playerId: string; team: Team; onAgain: () => void }) {
+function LifeOver({ ended, playerId, team, onAgain }: { ended: Ended; playerId: string; team: Team | null; onAgain: () => void }) {
   const [best, setBest] = useState<number | null | "loading" | "failed">("loading");
   const [top, setTop] = useState<{ top: TopRow[]; me: Me | null } | "loading" | "failed">("loading");
   const [teams, setTeams] = useState<Record<Team, number> | "loading" | "failed">("loading");

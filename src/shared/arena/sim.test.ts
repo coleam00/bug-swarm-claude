@@ -34,7 +34,7 @@ import {
   type Input,
 } from "./sim";
 
-const input = (mx: number, my: number, aim = 0): Input => ({ seq: 1, mx, my, aim, fire: false, dash: false });
+const input = (mx: number, my: number, aim = 0): Input => ({ seq: 1, mx, my, aim, fire: false, dash: false, grenade: false });
 
 function body(x = 1200, y = 1200, vx = 0, vy = 0) {
   return { x, y, vx, vy };
@@ -283,8 +283,8 @@ describe("lives", () => {
       const p1 = joinPlayer(a, "one", "tabs");
       const p2 = joinPlayer(a, "two", "spaces");
       for (let t = 0; t < 2000; t++) {
-        p1.input = clampInput({ seq: t, mx: Math.cos(t / 40), my: Math.sin(t / 40), aim: t / 30, fire: t % 30 < 15, dash: t % 50 === 0 });
-        p2.input = clampInput({ seq: t, mx: -1, my: 0.3, aim: -t / 25, fire: true, dash: t % 70 === 0 });
+        p1.input = clampInput({ seq: t, mx: Math.cos(t / 40), my: Math.sin(t / 40), aim: t / 30, fire: t % 30 < 15, dash: t % 50 === 0, grenade: false });
+        p2.input = clampInput({ seq: t, mx: -1, my: 0.3, aim: -t / 25, fire: true, dash: t % 70 === 0, grenade: false });
         stepArena(a);
       }
       return JSON.stringify(a);

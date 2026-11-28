@@ -10,7 +10,7 @@ import { endLife } from "../../shared/arena/sim";
 import { placeBug, placePickup } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, encodeVisibility, encodeWatch, parseServerMessage, type ServerMessage, type Snapshot, type Welcome, type WireSnapshot } from "../../shared/arena/protocol";
 import { createSnapshotReader } from "../../shared/arena/view";
-import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals, topTen } from "../db";
+import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals, topTen, upsertPlayer } from "../db";
 import { TOP_CACHE_MS } from "../app";
 import { startServer, type RunningServer, type ServerOptions } from "../serve";
 import { HIDE_SWEEP_MS as REAL_HIDE_SWEEP_MS } from "./sockets";
@@ -133,7 +133,7 @@ async function walkRight(c: Client, until: Promise<unknown>): Promise<void> {
   let done = false;
   void until.finally(() => (done = true));
   while (!done) {
-    c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     await Bun.sleep(50);
   }
 }
@@ -229,6 +229,55 @@ test(
   TIMEOUT,
 );
 
+/** Says hello as player `key` (32 hex) with `team` ("" for none) and waits for the welcome. */
+async function enterAs(name: string, team: string, key = playerId()): Promise<Welcome> {
+  const c = await connect();
+  c.send(encodeHello(PROTOCOL_VERSION, name, team, key, false));
+  return c.waitFor("welcome", () => c.got.find((m): m is Welcome => m.t === "welcome"));
+}
+
+test(
+  "a hello with no team gets the team with fewer people playing, a tie goes to Tabs, and the welcome says it (#131)",
+  async () => {
+    expect((await enterAs("First", "")).team).toBe("tabs");
+    expect((await enterAs("Second", "")).team).toBe("spaces");
+    // 1 and 1, and no scores yet: Tabs.
+    const third = await enterAs("Third", "");
+    expect(third.team).toBe("tabs");
+    expect(third.roster.find((r) => r.id === third.you)?.team).toBe("tabs");
+    expect((await enterAs("Fourth", "")).team).toBe("spaces");
+    // A page with a team and none on the server keeps its own.
+    expect((await enterAs("Fifth", "spaces")).team).toBe("spaces");
+    expect((await enterAs("Sixth", "")).team).toBe("tabs");
+  },
+  TIMEOUT,
+);
+
+test(
+  "a hidden tab does not count for the team pick (#131)",
+  async () => {
+    const { c } = await enter("Away", "tabs");
+    c.send(encodeVisibility(true));
+    await c.waitFor("the hidden tab to stop counting", () => srv.rooms.playingByTeam().tabs === 0);
+    expect((await enterAs("Fresh", "")).team).toBe("tabs");
+  },
+  TIMEOUT,
+);
+
+test(
+  "a team stored for the player is kept, whatever the hello says (#131)",
+  async () => {
+    const keeper = "ab".repeat(16);
+    upsertPlayer(db, keeper, "Keeper", "spaces", new Date());
+    // Nobody plays, so a pick would say Tabs; the hello says Tabs too. The stored team wins.
+    expect((await enterAs("Keeper", "tabs", keeper)).team).toBe("spaces");
+    const other = "cd".repeat(16);
+    upsertPlayer(db, other, "Other", "spaces", new Date());
+    expect((await enterAs("Other", "", other)).team).toBe("spaces");
+  },
+  TIMEOUT,
+);
+
 test(
   "a hidden name is refused at hello",
   async () => {
@@ -271,12 +320,12 @@ test(
   async () => {
     const c = await connect();
     // An input before hello is ignored.
-    c.send(encodeInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    c.send(encodeInput({ seq: 1, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     c.send(hello("Robo"));
     await c.waitFor("welcome", () => c.got.some((m) => m.t === "welcome"));
     c.send("{not json");
     c.send(JSON.stringify({ t: "input", seq: 2, mx: "1" }));
-    c.send(JSON.stringify({ t: "input", seq: 3, mx: 1, my: 0, aim: 0, fire: false, dash: false, pad: "x".repeat(2000) }));
+    c.send(JSON.stringify({ t: "input", seq: 3, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false, pad: "x".repeat(2000) }));
     c.send(new Uint8Array([1, 2, 3]));
     // A second hello is ignored: still one player.
     c.send(hello("Other"));
@@ -296,7 +345,7 @@ test(
   async () => {
     const { c } = await enter("Burst");
     // 60 inputs at once: the first 30 pass the limiter; the queue keeps the newest 4 of those.
-    for (let seq = 1; seq <= 60; seq++) c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+    for (let seq = 1; seq <= 60; seq++) c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
     const seen = c.got.length;
     await c.waitFor("10 snapshots after the burst", () => c.got.slice(seen).filter((m) => m.t === "snapshot").length >= 10);
     const acks = c.got.filter((m): m is Snapshot => m.t === "snapshot").map((m) => m.ack);
@@ -509,7 +558,7 @@ test(
           my = dy / d;
         }
       }
-      a.c.send(encodeInput({ seq: ++seq, mx, my, aim: 0, fire: false, dash: false }));
+      a.c.send(encodeInput({ seq: ++seq, mx, my, aim: 0, fire: false, dash: false, grenade: false }));
       await Bun.sleep(50);
     }
     await revived;
@@ -560,7 +609,7 @@ test(
     void taken.finally(() => (done = true));
     let seq = 0;
     while (!done) {
-      a.c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false }));
+      a.c.send(encodeInput({ seq: ++seq, mx: 1, my: 0, aim: 0, fire: false, dash: false, grenade: false }));
       await Bun.sleep(50);
     }
     await taken;
@@ -645,7 +694,7 @@ test(
     const at = { x: ada0.x, y: ada0.y };
     // The watcher sends inputs at full rate for a while: nothing of it reaches the arena.
     for (let seq = 1; seq <= 20; seq++) {
-      c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: true, dash: true }));
+      c.send(encodeInput({ seq, mx: 1, my: 0, aim: 0, fire: true, dash: true, grenade: false }));
       await Bun.sleep(20);
     }
     await c.close();
@@ -742,7 +791,7 @@ test(
     // Arena 1 is full of people: the play press lands p00 in a new arena, welcomed on this socket.
     // The page had sent inputs up to 50; the press is 51, and 52 and 53 were already on their way
     // before the welcome reached it (a real network's latency).
-    const idle = (seq: number, dash = false) => encodeInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash });
+    const idle = (seq: number, dash = false) => encodeInput({ seq, mx: 0, my: 0, aim: 0, fire: false, dash, grenade: false });
     p0.c.send(idle(50));
     p0.c.send(idle(51, true));
     p0.c.send(idle(52));

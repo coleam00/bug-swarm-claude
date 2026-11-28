@@ -38,7 +38,7 @@ import {
 } from "../../shared/arena/constants";
 import { WELCOME, type Welcome } from "../../shared/arena/protocol";
 import type { Input } from "../../shared/arena/sim";
-import type { Team } from "../rules";
+import { TEAMS, type Team } from "../rules";
 import { Room, type Away, type LifeRecord, type MemberInfo, type Send } from "./room";
 import { createTickLog, type TickLog } from "./ticks";
 
@@ -150,6 +150,7 @@ export class Rooms {
   }
 
   private welcome(room: Room, you: number): Welcome {
+    const me = you === 0 ? undefined : room.state.players.find((p) => p.id === you);
     return {
       t: WELCOME,
       v: PROTOCOL_VERSION,
@@ -160,6 +161,7 @@ export class Rooms {
       tickMs: TICK_MS,
       tick: room.state.tick,
       roster: room.roster(),
+      team: me?.team ?? "",
     };
   }
 
@@ -171,6 +173,16 @@ export class Rooms {
     let people = 0;
     for (const { room } of this.rooms.values()) people += room.size;
     return people >= this.maxPeople;
+  }
+
+  /**
+   * The people playing now on each team, across every arena (as `live` counts them: active
+   * members, never bots). Read per hello (the server's team pick), never in the tick.
+   */
+  playingByTeam(): Record<Team, number> {
+    const playing = Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>;
+    for (const { room } of this.rooms.values()) for (const t of TEAMS) playing[t] += room.peopleOn(t);
+    return playing;
   }
 
   /** Puts a player in an arena; everyone already there gets a join event. Check `full` first. */

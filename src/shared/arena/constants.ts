@@ -109,9 +109,12 @@ export const MAX_CLIENT_MESSAGE_BYTES = 1024;
  * The protocol version. A hello with another one is refused with error "version". v8: watching
  * (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's
  * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
- * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event.
+ * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event; v13 (#122): the
+ * golden bug (kind index 6) and the `golden` event; v14 (#130): the input's `grenade`, the `grenade`
+ * event and `me`'s `gc`; v15 (#131): the server picks the team (a hello's team may be "")
+ * and the welcome carries it.
  */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 15;
 
 // ---- Snapshots at stream scale (#89, view.ts). ----
 
@@ -146,6 +149,23 @@ export const DASH_COOLDOWN_TICKS = Math.round(DASH_COOLDOWN_S / DT);
  */
 export const DASH_SPAWN_LOCK_S = 0.5;
 export const DASH_SPAWN_LOCK_TICKS = Math.round(DASH_SPAWN_LOCK_S / DT);
+
+// ---- Grenade (#130). A press throws one along your aim; it lands, blinks, then blasts bugs and players. ----
+
+/** How far a grenade is thrown, units: from the thrower's centre to where it lands (kept inside the walls). */
+export const GRENADE_RANGE = 320;
+/** How long it flies, seconds, and then how long it blinks on the floor before it goes off. */
+export const GRENADE_FLIGHT_S = 0.5;
+export const GRENADE_FLIGHT_TICKS = Math.round(GRENADE_FLIGHT_S / DT);
+export const GRENADE_BLINK_S = 0.5;
+export const GRENADE_BLINK_TICKS = Math.round(GRENADE_BLINK_S / DT);
+/** Its blast reaches this far, centre to centre, units. */
+export const GRENADE_RADIUS = 110;
+/** What the blast does to every bug in reach, hit points (a beetle's shell does not block it). */
+export const GRENADE_DAMAGE = 3;
+/** From one throw until the next press is accepted, seconds. A press before then is dropped. */
+export const GRENADE_COOLDOWN_S = 6;
+export const GRENADE_COOLDOWN_TICKS = Math.round(GRENADE_COOLDOWN_S / DT);
 
 // ---- Shooting (#55). Holding fire shoots travelling shots from the barrel along the aim. ----
 
@@ -183,7 +203,7 @@ export const HEAT_WARN = 0.85;
  * Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). The first
  * is the base kind: a spawn is the base kind unless the mix picks another (bugs/index.ts).
  */
-export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle", "queen"] as const;
+export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle", "queen", "golden"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
 
 // ---- Pickups (#73). Every pickup id in PICKUP_IDS; each pickup's numbers in its own file in pickups/. ----
@@ -263,9 +283,9 @@ export const STREAK_STEPS: readonly (readonly [number, number])[] = [
 /** How long you stay down before the life ends (bleeds out), seconds. */
 export const DOWN_S = 10;
 /** How long a player must stay in range to revive you, seconds. */
-export const REVIVE_S = 2;
+export const REVIVE_S = 1;
 /** How close a reviver must be, centre to centre, units (inclusive). */
-export const REVIVE_RANGE = 60;
+export const REVIVE_RANGE = 110;
 /** Untouchable time after a revive, seconds. */
 export const REVIVE_PROTECT_S = 1.5;
 /** Points a revive scores for the reviver (and so for their team). */
