@@ -46,6 +46,7 @@ import {
   BLOCK,
   DOWN,
   EVENT,
+  GOLDEN,
   JOIN,
   LEAVE,
   OVER,
@@ -521,6 +522,8 @@ export class Room {
     for (const id of ev.blocks) this.broadcast({ t: EVENT, kind: BLOCK, id });
     // A hive queen killed (#85): who dealt her the most, and every reward (already on their scores).
     if (ev.queenDown) this.broadcast({ t: EVENT, kind: QUEEN, id: ev.queenDown.top, paid: ev.queenDown.paid });
+    // A golden bug's killer (#122): every page in the arena shows the banner.
+    for (const id of ev.golden) this.broadcast({ t: EVENT, kind: GOLDEN, id });
     for (const life of this.state.events.livesEnded) {
       // A fill bot is not a member, so its lives end here unsaved and unannounced.
       const m = this.members.get(life.id);

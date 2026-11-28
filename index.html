@@ -85,6 +85,14 @@
         font: 600 clamp(16px, 4.4vw, 20px)/1.3 system-ui, sans-serif; text-align: center; width: max-content;
         max-width: calc(100% - 32px); box-sizing: border-box; opacity: 0; animation: hint 5000ms ease-in-out both; }
       @keyframes hint { 0% { opacity: 0; } 8% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+      /* The golden bug's banner (#122) on the pages whose canvas HUD is covered: over the life-over screen
+         (z-index 2) and the start screen, at the top, in the golden bug's gold (look.ts GLOW_GOLD), fading
+         in and out over the canvas banner's 3 s (queenhud.ts BANNER_S). Touches pass through it. */
+      .golden-line { position: fixed; left: 50%; top: max(12px, var(--safe-top)); transform: translateX(-50%); z-index: 3;
+        pointer-events: none; margin: 0; padding: 6px 16px; border-radius: 10px; background: rgba(5, 7, 13, 0.75); color: #ffd54a;
+        font: 800 clamp(18px, 5vw, 28px)/1.25 system-ui, sans-serif; text-align: center; width: max-content;
+        max-width: calc(100% - 32px); box-sizing: border-box; overflow-wrap: anywhere; animation: golden-line 3000ms linear both; }
+      @keyframes golden-line { 0% { opacity: 0; } 6.7% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
       /* The life-over screen, over the arena that keeps playing behind it, dimmed. A tap or click
          anywhere plays again (App.tsx), so it is one big target. Portrait: one column, the summary
          and Play again, then the top 10. A short landscape screen (a phone held sideways): two

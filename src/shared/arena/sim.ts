@@ -9,6 +9,7 @@ import { stepBugs } from "./bugs";
 import { stepFire, stepShots } from "./combat";
 import { stepDrone } from "./pickups/drone";
 import { stepDowns } from "./downs";
+import { goldenInterval, goldenKills, stepGolden } from "./golden";
 import { stepPickups } from "./pickups";
 import { FIRST_LIFE_SHIELD_TICKS, SHIELD, shieldBlocks } from "./pickups/shield";
 import { payQueen, stepQueen } from "./queen";
@@ -253,6 +254,8 @@ export type ArenaEvents = {
   droneKills: number[];
   /** A hive queen killed this step and who was paid (#85), else null. */
   queenDown: QueenDown | null;
+  /** The killer of each golden bug killed this step that scored (#122, golden.ts): the arena-wide banner. */
+  golden: number[];
 };
 
 export type ArenaState = {
@@ -273,6 +276,10 @@ export type ArenaState = {
   queen: QueenState;
   /** Her arrival spot draws from here, never from `rng`, so spawns and spread replay as with no queen. */
   queenRng: Rng;
+  /** The golden bug's next slot, a tick (#122, golden.ts). */
+  golden: { nextTick: number };
+  /** Its timer and spot draw from here, never from `rng`, so spawns and spread replay as with no golden bug. */
+  goldenRng: Rng;
   events: ArenaEvents;
 };
 
@@ -285,6 +292,7 @@ export function noInput(seq = 0): Input {
  * aid for evidence, #85) is where its clock starts, so its waves come sooner.
  */
 export function createArena(seed: number, startTick = 0): ArenaState {
+  const goldenRng = createRng(seed ^ 0x7f4a7c15);
   return {
     tick: startTick,
     rng: createRng(seed),
@@ -300,7 +308,9 @@ export function createArena(seed: number, startTick = 0): ArenaState {
     dropRng: createRng(seed ^ 0x68e31da4),
     queen: { stage: 0, x: 0, y: 0, ticksLeft: 0, bugId: 0, maxHp: 0 },
     queenRng: createRng(seed ^ 0x2c1b3c6d),
-    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [], queenDown: null },
+    golden: { nextTick: startTick + goldenInterval(goldenRng) },
+    goldenRng,
+    events: { shotsFired: [], shotsEnded: [], kills: [], hitsTaken: [], touches: [], livesEnded: [], downs: [], revives: [], pickups: [], blocks: [], laserHits: [], shellBlocks: [], bombKills: [], droneKills: [], queenDown: null, golden: [] },
   };
 }
 
@@ -707,13 +717,16 @@ const RESPAWN_DELAY_TICKS = Math.round(RESPAWN_DELAY_S / DT);
  * 2. fire and heat, then a CI drone's shots, players who are up only (combat.ts, pickups/drone.ts);
  * 3a. the hive queen (#85, queen.ts): her marker on the first tick of a QUEEN_EVERY_WAVES-th wave,
  *    her arrival when it runs out, and her goal (the largest group) while she lives;
+ * 3b. the golden bug (#122, golden.ts): on its own timer, about once a minute, one appears near a
+ *    player who is up (none while one is alive or the arena is full);
  * 3. bugs: personal spawn budgets, spawning out of view, each kind's step, contact hits (a test
  *    shield blocks one: strikePlayer); the last hit puts a player down (bugs/);
  * 4. shots: travel, hits (a review laser shot pierces), kills, misses (combat.ts);
  * 5. pickups: effects count down, floor pickups age, this step's kills drop, players who are up
  *    take what they touch (a refactor bomb goes off at the take, its kills drop too and its dead
  *    bugs leave in the same step) (pickups/);
- * 5b. a hive queen killed in this step (by a shot or a bomb) pays her reward (queen.ts payQueen);
+ * 5b. a hive queen killed in this step (by a shot or a bomb) pays her reward (queen.ts payQueen),
+ *    and a golden bug killed in it names its killer in events.golden (golden.ts goldenKills);
  * 6. downs: revive progress, revives and bleed-outs (downs.ts);
  * 7. spawn protection counts down (after contact, so a join and a respawn are both protected for
  *    SPAWN_PROTECT_S of contact steps), and the tick counts.
@@ -736,6 +749,7 @@ export function stepArena(state: ArenaState): void {
   ev.bombKills.length = 0;
   ev.droneKills.length = 0;
   ev.queenDown = null;
+  ev.golden.length = 0;
   for (const p of state.players) {
     if (!p.alive) {
       p.aim = p.input.aim;
@@ -762,10 +776,12 @@ export function stepArena(state: ArenaState): void {
     stepDrone(state, p);
   }
   stepQueen(state);
+  stepGolden(state);
   stepBugs(state);
   stepShots(state);
   stepPickups(state);
   payQueen(state);
+  goldenKills(state);
   stepDowns(state);
   for (const p of state.players) if (p.alive && p.protectTicks > 0) p.protectTicks--;
   state.tick++;
