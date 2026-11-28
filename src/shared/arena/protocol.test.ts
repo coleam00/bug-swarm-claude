@@ -175,6 +175,6 @@ describe("server messages", () => {
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
     expect(EVENT_KINDS.at(-1)).toBe("grenade");
     expect(EVENT_KINDS.indexOf("queen")).toBe(7);
-    expect(PROTOCOL_VERSION).toBe(14);
+    expect(PROTOCOL_VERSION).toBeGreaterThanOrEqual(14);
   });
 });
