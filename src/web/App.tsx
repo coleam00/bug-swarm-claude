@@ -7,7 +7,7 @@ import { startArena, startWatch, type ArenaHandle, type ArenaPlayer, type LifeSu
 import type { WatchConnection } from "./arena/net";
 import { BANNER_S } from "./arena/queenhud";
 import { restartIn } from "./game/guard";
-import { HINT_MS, hintText, takeFirstLife } from "./hint";
+import { HINT_MS, hintLines, takeHintLife } from "./hint";
 import { fmt, topLine } from "./over";
 import { loadPlayer, setPlayerName, setPlayerTeam, takeRefusedName, takeUpdateReload, type Player } from "./player";
 import {
@@ -27,7 +27,7 @@ import {
 import { TEAM_LOOK } from "./teams";
 
 // The thin shell around the arena's canvas (architecture.md, "Stack"): the start screen on opening
-// the page, then the arena (arena/game.ts) with the status pill, the first-life hint and the
+// the page, then the arena (arena/game.ts) with the status pill, the controls card and the
 // life-over screen over it. No menus between lives: "Play again" (a tap or click anywhere on the
 // life-over screen, Enter or Space) respawns in the same arena, from RESTART_DELAY_MS (800 ms,
 // game/guard.ts) after the life ended. A reload forced by a redeploy (a new build) skips the start
@@ -341,7 +341,7 @@ function coarsePointer(): boolean {
 type Ended = { life: LifeSummary; at: number; n: number };
 
 /**
- * The arena: its canvas, the "Connecting..." / "Reconnecting..." pill, the first-life hint and the
+ * The arena: its canvas, the "Connecting..." / "Reconnecting..." pill, the controls card and the
  * life-over screen. startArena runs once per mount; its stop() closes the socket and every
  * listener, so StrictMode's second effect run (and a refusal that unmounts it) leaves no socket
  * behind. A socket closed before it opens never says hello, so it never joins or saves a life.
@@ -354,18 +354,18 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
   latest.current = props;
   const [status, setStatus] = useState<string | null>("Connecting...");
   const [ended, setEnded] = useState<Ended | null>(null);
-  const [hint, setHint] = useState<string | null>(null);
+  // The controls card (hint.ts): taken each time the arena puts you in a life, so a refused join
+  // uses none. `n` remounts it, so its fade restarts on each life it shows on.
+  const [hint, setHint] = useState<{ lines: string[]; n: number } | null>(null);
   // The golden bug's banner while the life-over screen covers the canvas (#122); in a life the canvas draws it.
   const [gold, showGold] = useGoldenLine();
   const endedNow = useRef(false);
   endedNow.current = ended !== null;
-  // The hint is taken (hint.ts) once per mounted arena, when it first puts you in a life: a refused
-  // join never uses it up. A ref, so StrictMode's second effect run can't take it twice.
-  const hintTaken = useRef(false);
 
   useEffect(() => {
     let hintTimer: ReturnType<typeof setTimeout> | undefined;
     let lives = 0;
+    let hints = 0;
     // The start screen's connection, taken once: StrictMode's second run (after the first closed
     // it) connects afresh.
     const adopted = adopt.current;
@@ -374,17 +374,18 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
       status: setStatus,
       refused: (code) => latest.current.onRefused(code),
       over: (life, at) => setEnded({ life, at, n: ++lives }),
-      alive: () => setEnded(null),
       golden: (text) => {
         if (endedNow.current) showGold(text);
       },
-      firstSpawn: () => {
-        if (hintTaken.current) return;
-        hintTaken.current = true;
-        if (!takeFirstLife()) return;
-        setHint(hintText(coarsePointer()));
+      alive: () => {
+        setEnded(null);
+        // A card still up from a life that ended early never carries into the next one.
+        clearTimeout(hintTimer);
+        if (!takeHintLife()) return setHint(null);
+        setHint({ lines: hintLines(coarsePointer()), n: ++hints });
         hintTimer = setTimeout(() => setHint(null), HINT_MS);
       },
+      firstSpawn: () => {},
     }, adopted);
     handle.current = running;
     return () => {
@@ -404,9 +405,11 @@ function Arena(props: ArenaPlayer & { adopt: MutableRefObject<WatchConnection | 
       )}
       {/* Layout in index.html (.hint): pointer-events none, so the sticks under it still work. */}
       {hint && !ended && (
-        <p className="hint" role="status">
-          {hint}
-        </p>
+        <ul className="hint" role="status" key={hint.n}>
+          {hint.lines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       )}
       {gold && ended && <GoldenLineView key={gold.n} line={gold} />}
       {ended && <LifeOver key={ended.n} ended={ended} playerId={id} team={team} onAgain={() => handle.current?.respawn()} />}
