@@ -355,7 +355,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
         if (m.seq > ws.data.staleAbove) return;
         ws.data.staleAbove = null;
       }
-      const back = rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash });
+      const back = rooms.input(room, entity, { seq: m.seq, mx: m.mx, my: m.my, aim: m.aim, fire: m.fire, dash: m.dash, grenade: m.grenade });
       if (back) {
         ws.data.room = back.room;
         ws.data.entity = back.entity;

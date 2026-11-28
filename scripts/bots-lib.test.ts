@@ -134,13 +134,14 @@ test("a policy bot sees itself from its row and its numbers, and each bug's velo
     ],
     b,
     q: [],
+    g: [],
     s: [],
     e: [],
     k: [],
     d: [],
     f: tick === 10 ? [[1, 0, 700, 710, 200]] : [],
     w: 1,
-    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0 },
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0.42, lk: 1, hl: 2, al, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0, gc: 0 },
   });
   t.update(snap(10, [[7, 0, 300, 300]]), 2);
   expect(t.obs.self).toEqual({ x: 500, y: 600, vx: 30, vy: -40, aim: 1.5, alive: true, heat: 0.42, locked: true, dashReady: true });
@@ -177,8 +178,9 @@ test("a policy bot sees a beetle's shell facing from its row's tail, and no faci
     d: [],
     f: [],
     q: [],
+    g: [],
     w: 4,
-    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0 },
+    me: { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 1, dk: 0, dc: 0, dn: 0, fx: [0, 0], x: 0, y: 0, vx: 0, vy: 0, gc: 0 },
   });
   t.update(snap([[1, beetle, 300, 300, 1, Math.PI / 2, 0], [2, dasher, 100, 100, 1, 0.5, 3]]), 2);
   expect(t.obs.bugs[0]!.fx).toBeCloseTo(0, 9);

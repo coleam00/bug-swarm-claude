@@ -10,14 +10,14 @@ This is release 2. Release 1 (a single-player survival game where the robot fire
 - **A skill game:** you aim every shot, and shots travel, so you lead moving targets. Holding the trigger overheats the gun, so bursts beat spraying. A short dash with a cooldown gets you out of trouble if you time it. Every bug kind shows a readable tell before it does something dangerous, and each needs a different answer: dodge, sidestep, flank, or focus fire with others. A good player scores many times what a player who only runs around scores.
 - **Co-op inside, competition outside:** everyone in an arena fights the same swarm. A downed player is revived by anyone standing next to them, from either team. Every point counts for your team, Tabs or Spaces.
 - **Power-ups worth fighting for:** bugs drop the four developer tools from release 1, now as short pickups you have to go and grab: review laser, test shield, refactor bomb, CI drone.
-- Controls: on a computer, WASD or arrows move, the mouse aims, holding the left button fires, Space or Shift dashes. On a phone, twin sticks: the left thumb moves, the right thumb aims and fires while held, and a dash button sits above the right stick. Landscape is the best phone layout; portrait still works.
+- Controls: on a computer, WASD or arrows move, the mouse aims, holding the left button fires, Space or Shift dashes, Q or E throws a grenade. On a phone, twin sticks: the left thumb moves, the right thumb aims and fires while held, a dash button sits above the right stick and a GRENADE button sits left of the dash button. Landscape is the best phone layout; portrait still works.
 - Short lives, instant respawn: a life usually lasts 1 to 4 minutes, and one tap or key drops you back in.
 - A big-type board page for the stream: the top 10, the team race and how many people are playing right now.
 
 ## It is not
 - Single-player. No mode where you play alone against a local simulation.
 - Auto-aim or auto-fire. Nothing shoots for you (a CI drone pickup is a short, visible exception you earned).
-- Player-versus-player damage.
+- Player-versus-player damage, except the grenade's blast.
 - An account system or saved progress between lives.
 - Monetized: no purchases, no ads.
 - Audio, this release.

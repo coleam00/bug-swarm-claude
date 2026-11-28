@@ -47,8 +47,8 @@ const q2 = (v: number) => Math.round(v * 100) / 100 || 0;
 const q3 = (v: number) => Math.round(v * 1000) / 1000 || 0;
 
 function meOf(p: Player | undefined): SnapshotMe {
-  if (!p) return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0 };
-  return { sc: p.score, ki: p.kills, st: p.streak, mu: 1, he: p.heat, lk: p.lockTicks > 0 ? 1 : 0, hl: 0, al: p.alive ? 1 : 0, dk: p.dashTicks, dc: p.dashCooldown, dn: p.down ? 1 : 0, fx: p.effect.slice(), x: p.x, y: p.y, vx: p.vx, vy: p.vy };
+  if (!p) return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
+  return { sc: p.score, ki: p.kills, st: p.streak, mu: 1, he: p.heat, lk: p.lockTicks > 0 ? 1 : 0, hl: 0, al: p.alive ? 1 : 0, dk: p.dashTicks, dc: p.dashCooldown, dn: p.down ? 1 : 0, fx: p.effect.slice(), x: p.x, y: p.y, vx: p.vx, vy: p.vy, gc: p.grenadeCooldown };
 }
 
 const inBox = (box: ViewBox | null, x: number, y: number, pad = 0) => !box || (Math.abs(x - box.cx) <= box.half + pad && Math.abs(y - box.cy) <= box.half + pad);
@@ -91,8 +91,15 @@ function expected(a: ArenaState, box: ViewBox | null, you: number, ack: number, 
     ) as Snapshot["f"],
     w: wave(a.tick),
     q: queenExpected(a),
+    g: goldenExpected(a),
     me: { ...me, he: q2(me.he), x: q2(me.x), y: q2(me.y), vx: q2(me.vx), vy: q2(me.vy) },
   };
+}
+
+/** The golden bug as every recipient should decode it (#122): never culled, whole units. */
+function goldenExpected(a: ArenaState): Snapshot["g"] {
+  const g = a.bugs.find((b) => b.kind === "golden");
+  return g ? [g.id, Math.round(g.x), Math.round(g.y)] : [];
 }
 
 /** The hive queen as every recipient should decode her (#85): never culled, whole units. */
@@ -301,6 +308,47 @@ describe("the hive queen (#85)", () => {
     a.queen.stage = 0;
     stepArena(a);
     expect(applySnapshot(mirror, parseServerMessage(encodeView(quantizeArena(a, wave(a.tick), frame), vs, viewBoxOf(p.x, p.y, box), p.id, 0, meOf(p))) as WireSnapshot)!.q).toEqual([]);
+  });
+});
+
+describe("the golden bug (#122)", () => {
+  test("where it is reaches a player while its bug row is culled from their view, through keyframes and deltas, and is [] once it is gone; it is no far minimap cell", () => {
+    const { a, ps } = arenaWith([200, 200]);
+    const p = ps[0]!;
+    p.invulnTicks = 1e9;
+    const g = placeBug(a, 1500, 1500, "golden");
+    const frame = createArenaFrame();
+    const vs = createViewState();
+    const mirror = createViewMirror();
+    const box: ViewBox = { cx: 0, cy: 0, half: 0 };
+    let deltas = 0;
+    let gOnDeltas = 0;
+    for (let t = 0; t < 30; t++) {
+      p.budget = 0;
+      stepArena(a);
+      viewBoxOf(p.x, p.y, box);
+      const wire = parseServerMessage(encodeView(quantizeArena(a, wave(a.tick), frame), vs, box, p.id, 0, meOf(p))) as WireSnapshot;
+      if (wire.key !== 1) {
+        deltas++;
+        if (wire.g) gOnDeltas++;
+      }
+      const got = applySnapshot(mirror, wire)!;
+      expect(got.g).toEqual(goldenExpected(a));
+      expect(got.g).toEqual([g.id, Math.round(g.x), Math.round(g.y)]);
+      // Far outside this player's view square: its row is culled, `g` is not.
+      expect(got.b.some((r) => r[0] === g.id)).toBe(false);
+    }
+    // It flees every tick, so every delta carries its new spot.
+    expect(gOnDeltas).toBe(deltas);
+    // A keyframe's far cells leave it out: its gold mark comes from `g`.
+    const key = parseServerMessage(keyframeOf(frame, vs, viewBoxOf(p.x, p.y, box), p.id, 0, meOf(p))) as WireSnapshot;
+    expect(key.m).toEqual([]);
+    // Gone: [] for everyone, once.
+    g.hp = 0;
+    a.bugs.length = 0;
+    stepArena(a);
+    const after = parseServerMessage(encodeView(quantizeArena(a, wave(a.tick), frame), vs, viewBoxOf(p.x, p.y, box), p.id, 0, meOf(p))) as WireSnapshot;
+    expect(applySnapshot(mirror, after)!.g).toEqual([]);
   });
 });
 

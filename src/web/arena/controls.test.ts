@@ -6,20 +6,24 @@ import {
   DASH_BUTTON_RADIUS,
   DASH_BUTTON_SLOP,
   DASH_KEYS,
+  GRENADE_BUTTON_GAP,
+  GRENADE_KEYS,
   aimZoneTop,
   createControls,
   dashButtonAt,
+  grenadeButtonAt,
   pointerDown,
   pointerMove,
   pointerUp,
   pressDash,
+  pressGrenade,
   pressRespawn,
   readControls,
   releaseAll,
 } from "./controls";
 import { minimapLayout } from "./minimap";
 
-const out = () => ({ mx: 0, my: 0, aim: 0, fire: false, dash: false, respawn: false });
+const out = () => ({ mx: 0, my: 0, aim: 0, fire: false, dash: false, grenade: false, respawn: false });
 
 describe("fire and respawn", () => {
   test("holding the left mouse button fires; other buttons and letting go do not", () => {
@@ -349,6 +353,94 @@ describe("dash", () => {
         expect([w, h, o.dash, c.aimStick.active, c.dashButton.id]).toEqual([w, h, true, false, 3]);
       }
     }
+  });
+});
+
+describe("grenade (#130)", () => {
+  const PHONES = [
+    [390, 844, NO_INSETS],
+    [390, 844, { top: 47, right: 0, bottom: 34, left: 0 }],
+    [844, 390, NO_INSETS],
+    [844, 390, { top: 0, right: 47, bottom: 21, left: 47 }],
+    [1280, 720, NO_INSETS],
+    [667, 320, NO_INSETS],
+    [562, 260, NO_INSETS],
+  ] as const;
+  const phone = (w: number, h: number, ins: Insets) => {
+    const c = createControls(w);
+    dashButtonAt(w, h, ins, c.dashButton);
+    grenadeButtonAt(c.dashButton, c.grenadeButton);
+    c.dashButtonOn = true;
+    return c;
+  };
+
+  test("Q and E are the grenade keys, and no move or dash key is", () => {
+    expect([...GRENADE_KEYS].sort()).toEqual(["KeyE", "KeyQ"]);
+    for (const k of [...STEERING_KEYS, ...DASH_KEYS]) expect(GRENADE_KEYS.has(k)).toBe(false);
+  });
+
+  test("a grenade press (pressGrenade) is read once, apart from the dash", () => {
+    const c = createControls(1440);
+    const o = out();
+    pressGrenade(c);
+    readControls(c, 0, 0, o);
+    expect([o.grenade, o.dash]).toEqual([true, false]);
+    readControls(c, 0, 0, o);
+    expect(o.grenade).toBe(false);
+  });
+
+  test("the button is the dash button's size, on its row just left of it, both tap reaches apart, above the aim zone and clear of the minimap", () => {
+    for (const [w, h, ins] of PHONES) {
+      const c = phone(w, h, ins);
+      const g = c.grenadeButton;
+      const d = c.dashButton;
+      expect(g.r).toBe(DASH_BUTTON_RADIUS);
+      expect(g.y).toBe(d.y);
+      expect(d.x - g.x).toBe(2 * (DASH_BUTTON_RADIUS + DASH_BUTTON_SLOP) + GRENADE_BUTTON_GAP);
+      expect([w, h, g.y + g.r + DASH_BUTTON_SLOP < aimZoneTop(h, ins)]).toEqual([w, h, true]);
+      expect(g.x - g.r).toBeGreaterThan(w / 2);
+      expect(g.y - g.r).toBeGreaterThanOrEqual(ins.top);
+      const m = minimapLayout(w, h, ins);
+      expect([w, h, g.y - g.r > m.y + m.size || g.x + g.r < m.x]).toEqual([w, h, true]);
+    }
+  });
+
+  test("a tap on the grenade button throws, does not dash and starts no stick; letting go frees it", () => {
+    for (const [w, h, ins] of PHONES) {
+      const c = phone(w, h, ins);
+      const o = out();
+      const g = c.grenadeButton;
+      pointerDown(c, "touch", 4, g.x, g.y + g.r + DASH_BUTTON_SLOP - 1);
+      pointerMove(c, "touch", 4, g.x - 40, g.y);
+      readControls(c, 0, 0, o);
+      expect([w, h, o.grenade, o.dash, c.aimStick.active, c.move.active, g.id]).toEqual([w, h, true, false, false, false, 4]);
+      pointerUp(c, "touch", 4);
+      expect(g.id).toBe(-1);
+      // The dash button still dashes, not throws.
+      pointerDown(c, "touch", 5, c.dashButton.x, c.dashButton.y);
+      readControls(c, 0, 0, o);
+      expect([o.grenade, o.dash]).toEqual([false, true]);
+    }
+  });
+
+  test("a click on the grenade button (touch screen) throws and does not fire; on a desktop there is no button", () => {
+    const c = phone(390, 844, NO_INSETS);
+    const o = out();
+    pointerDown(c, "mouse", 1, c.grenadeButton.x, c.grenadeButton.y, 0);
+    readControls(c, 0, 0, o);
+    expect([o.grenade, o.fire]).toEqual([true, false]);
+    const d = phone(390, 844, NO_INSETS);
+    d.dashButtonOn = false;
+    pointerDown(d, "mouse", 1, d.grenadeButton.x, d.grenadeButton.y, 0);
+    readControls(d, 0, 0, o);
+    expect([o.grenade, o.fire]).toEqual([false, true]);
+  });
+
+  test("releaseAll lets go of the grenade button", () => {
+    const c = phone(390, 844, NO_INSETS);
+    pointerDown(c, "touch", 6, c.grenadeButton.x, c.grenadeButton.y);
+    releaseAll(c);
+    expect(c.grenadeButton.id).toBe(-1);
   });
 });
 

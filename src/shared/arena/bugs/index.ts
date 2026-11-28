@@ -224,7 +224,8 @@ function chooseTarget(state: ArenaState, b: Bug): Player | null {
  * 3. a bug touching a player who is up and can be hit (within PLAYER_RADIUS plus its kind's
  *    radius) strikes them (sim.ts strikePlayer: a hit, or a test shield spent) and is gone, with
  *    no score, whatever its phase; a kind that stays on contact (#85, the hive queen) strikes
- *    every such player and is kept; bugs pass over downed players.
+ *    every such player and is kept; a harmless kind (#122, the golden bug) touches no one and is
+ *    kept; bugs pass over downed players.
  */
 export function stepBugs(state: ArenaState): void {
   const bugs = state.bugs;
@@ -254,8 +255,13 @@ export function stepBugs(state: ArenaState): void {
     const b = bugs[i]!;
     // Expired this tick: it leaves untouched (a bug is never at 0 hit points otherwise here).
     if (b.hp <= 0) continue;
-    let gone = false;
     const def = bugDef(b.kind);
+    // A harmless kind (#122) touches no one: it stays, whoever it overlaps.
+    if (def.harmless) {
+      bugs[keep++] = b;
+      continue;
+    }
+    let gone = false;
     const touch = PLAYER_RADIUS + def.radius;
     for (const p of state.players) {
       if (!canBeHit(p)) continue;

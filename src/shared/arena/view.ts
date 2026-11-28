@@ -47,11 +47,13 @@ import {
   type WireMessage,
   type WireSnapshot,
 } from "./protocol";
+import { GOLDEN_KIND } from "./golden";
 import type { ArenaState } from "./sim";
 
 /** Half the side of a player's view square, units. */
 export const VIEW_HALF = VIEW_MAX / 2 + CULL_MARGIN;
 const GLOB_KIND = BUG_KINDS.indexOf("glob");
+const GOLDEN_INDEX = BUG_KINDS.indexOf(GOLDEN_KIND);
 
 /** Player flag bits on the wire. */
 export const FLAG_ALIVE = 1;
@@ -107,6 +109,8 @@ export type ArenaFrame = {
   downs: string;
   /** The hive queen as the wire's `q` (#85): never culled. */
   queen: string;
+  /** The golden bug as the wire's `g` (#122): never culled. */
+  golden: string;
   /** This tick's events as JSON rows, with where each happened for culling. */
   shots: string[];
   sx: number[];
@@ -154,6 +158,7 @@ export function createArenaFrame(): ArenaFrame {
     fmark: [],
     downs: "[]",
     queen: "[]",
+    golden: "[]",
     shots: [],
     sx: [],
     sy: [],
@@ -199,6 +204,12 @@ function queenRow(state: ArenaState): string {
   return "[]";
 }
 
+/** The golden bug's wire `g` (#122): `[]` with none alive, else `[id, x, y]` in whole units. */
+function goldenRow(state: ArenaState): string {
+  for (const g of state.bugs) if (g.kind === GOLDEN_KIND) return `[${g.id},${Math.round(g.x)},${Math.round(g.y)}]`;
+  return "[]";
+}
+
 /**
  * Quantizes the arena after a step into `f`, once per room tick. `state.tick` is the snapshot's
  * tick. Remembers where each shot fired so its end is culled by the same spot.
@@ -238,6 +249,7 @@ export function quantizeArena(state: ArenaState, wave: number, f: ArenaFrame): A
   }
   f.downs = d + "]";
   f.queen = queenRow(state);
+  f.golden = goldenRow(state);
   const floor = state.floor;
   f.floor = floor.length;
   for (let i = 0; i < floor.length; i++) {
@@ -315,6 +327,8 @@ export type ViewState = {
   downs: string;
   /** The hive queen's `q` as last sent (#85). */
   queen: string;
+  /** The golden bug's `g` as last sent (#122). */
+  golden: string;
   wave: number;
   /** `me` as last sent, in ME_KEYS order, and its fx joined. */
   me: number[];
@@ -351,6 +365,7 @@ export function createViewState(): ViewState {
     fgone: [],
     downs: "",
     queen: "",
+    golden: "",
     wave: -1,
     me: [],
     meFx: "",
@@ -358,7 +373,7 @@ export function createViewState(): ViewState {
 }
 
 /** The numbers of `me` on the wire, in order; he, x, y, vx and vy go to 0.01. */
-const ME_KEYS = ["sc", "ki", "st", "mu", "he", "lk", "hl", "al", "dk", "dc", "dn", "x", "y", "vx", "vy"] as const;
+const ME_KEYS = ["sc", "ki", "st", "mu", "he", "lk", "hl", "al", "dk", "dc", "dn", "x", "y", "vx", "vy", "gc"] as const;
 const ME_Q2 = new Set<string>(["he", "x", "y", "vx", "vy"]);
 
 let stampSeq = 0;
@@ -525,6 +540,8 @@ export function encodeView(f: ArenaFrame, vs: ViewState, box: ViewBox | null, yo
   vs.wave = f.wave;
   if (f.queen !== vs.queen) out += `,"q":${f.queen}`;
   vs.queen = f.queen;
+  if (f.golden !== vs.golden) out += `,"g":${f.golden}`;
+  vs.golden = f.golden;
   let m = "";
   for (let i = 0; i < ME_KEYS.length; i++) {
     const v = meValue(me, ME_KEYS[i]!);
@@ -559,11 +576,13 @@ export function keyframeOf(f: ArenaFrame, vs: ViewState, box: ViewBox | null, yo
   vs.downs = f.downs;
   vs.wave = f.wave;
   vs.queen = f.queen;
-  let out = `{"t":"${SNAPSHOT}","tick":${f.tick},"key":1,"you":${you},"ack":${ack},"p":[${p}],"b":[${b}],"f":[${fl}],"d":${f.downs},"w":${f.wave},"q":${f.queen},"me":{${m}"fx":[${vs.meFx}]}`;
+  vs.golden = f.golden;
+  let out = `{"t":"${SNAPSHOT}","tick":${f.tick},"key":1,"you":${you},"ack":${ack},"p":[${p}],"b":[${b}],"f":[${fl}],"d":${f.downs},"w":${f.wave},"q":${f.queen},"g":${f.golden},"me":{${m}"fx":[${vs.meFx}]}`;
   if (box) {
     let far = "";
     for (let j = 0; j < f.bugs; j++) {
-      if (f.bkind[j] === GLOB_KIND || inBox(box, f.bx[j]!, f.by[j]!)) continue;
+      // Globs are shots in flight; the golden bug has its own mark from `g` (#122).
+      if (f.bkind[j] === GLOB_KIND || f.bkind[j] === GOLDEN_INDEX || inBox(box, f.bx[j]!, f.by[j]!)) continue;
       far += `${far ? "," : ""}${Math.round(f.bx[j]! / MINIMAP_CELL)},${Math.round(f.by[j]! / MINIMAP_CELL)}`;
     }
     out += `,"m":[${far}]`;
@@ -583,15 +602,17 @@ export type ViewMirror = {
   wave: number;
   /** The hive queen's wire `q` (#85). */
   queen: number[];
+  /** The golden bug's wire `g` (#122). */
+  golden: number[];
   me: SnapshotMe;
 };
 
 export function createViewMirror(): ViewMirror {
-  return { tick: -1, you: 0, bugs: [], players: [], floor: [], downs: [], wave: 0, queen: [], me: zeroMe() };
+  return { tick: -1, you: 0, bugs: [], players: [], floor: [], downs: [], wave: 0, queen: [], golden: [], me: zeroMe() };
 }
 
 function zeroMe(): SnapshotMe {
-  return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0 };
+  return { sc: 0, ki: 0, st: 0, mu: 1, he: 0, lk: 0, hl: 0, al: 0, dk: 0, dc: 0, dn: 0, fx: PICKUP_IDS.map(() => 0), x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
 }
 
 /** Forgets everything: the next snapshot must be a keyframe (a new welcome). */
@@ -616,6 +637,7 @@ export function applySnapshot(m: ViewMirror, s: WireSnapshot): Snapshot | null {
     m.downs = s.d ?? [];
     m.wave = s.w ?? 0;
     m.queen = s.q ?? [];
+    m.golden = s.g ?? [];
     m.me = { ...zeroMe(), ...s.me };
   } else {
     if (m.tick < 0 || s.base !== m.tick) {
@@ -661,6 +683,7 @@ export function applySnapshot(m: ViewMirror, s: WireSnapshot): Snapshot | null {
     if (s.d) m.downs = s.d;
     if (s.w !== undefined) m.wave = s.w;
     if (s.q) m.queen = s.q;
+    if (s.g) m.golden = s.g;
     if (s.me) Object.assign(m.me, s.me);
   }
   m.tick = s.tick;
@@ -707,6 +730,7 @@ function decoded(m: ViewMirror, s: WireSnapshot): Snapshot {
     f: m.floor.map((r) => [r[0]!, r[1]!, r[2]! / 10, r[3]! / 10, r[4]! - s.tick]),
     w: m.wave,
     q: queenOf(m.queen, s.tick),
+    g: m.golden.length === 3 ? [m.golden[0]!, m.golden[1]!, m.golden[2]!] : [],
     me: { ...me, fx: me.fx.slice() },
   };
   if (s.m) out.m = s.m;

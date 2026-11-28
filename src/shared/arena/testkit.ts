@@ -1,7 +1,8 @@
 // Helpers for the arena's simulation tests (combat, bugs, lives, pickups): arenas with players placed by
 // hand, bugs and pickups placed by hand, and stepping with the personal spawn budget held at zero so only
 // the bugs a test places are in play. Players placed by hand start without spawn protection or the
-// first-life shield (#90).
+// first-life shield (#90). Their arenas hold the golden bug's timer off (#122), so a test that
+// sets the clock by hand meets no golden bug; golden.test.ts turns it back on.
 // Test-only; nothing in the game imports it.
 import { newBug } from "./bugs/index";
 import { BUG_KINDS, DOWN_TICKS, HITS_PER_LIFE, PICKUP_IDS, type BugKind, type PickupId } from "./constants";
@@ -11,6 +12,7 @@ import { clampInput, createArena, joinPlayer, stepArena, type ArenaState, type B
 
 export function arenaWith(...spots: [number, number][]): { a: ArenaState; ps: Player[] } {
   const a = createArena(1);
+  a.golden.nextTick = Infinity;
   const ps = spots.map(([x, y], i) => {
     const p = joinPlayer(a, `p${i}`, i % 2 ? "spaces" : "tabs");
     p.x = x;
@@ -29,8 +31,8 @@ export function placeBug(a: ArenaState, x: number, y: number, kind: BugKind = BU
   return newBug(a, kind, x, y, 0);
 }
 
-export function hold(p: Player, o: { mx?: number; my?: number; aim?: number; fire?: boolean; dash?: boolean }): void {
-  p.input = clampInput({ seq: p.input.seq + 1, mx: o.mx ?? 0, my: o.my ?? 0, aim: o.aim ?? 0, fire: o.fire ?? false, dash: o.dash ?? false });
+export function hold(p: Player, o: { mx?: number; my?: number; aim?: number; fire?: boolean; dash?: boolean; grenade?: boolean }): void {
+  p.input = clampInput({ seq: p.input.seq + 1, mx: o.mx ?? 0, my: o.my ?? 0, aim: o.aim ?? 0, fire: o.fire ?? false, dash: o.dash ?? false, grenade: o.grenade ?? false });
 }
 
 /** Puts `p` down now: its last hit, from a bug placed on it, in one quiet step. */

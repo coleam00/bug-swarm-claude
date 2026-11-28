@@ -90,13 +90,34 @@
       .status { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); margin: 0; padding: 8px 16px; border-radius: 8px;
         background: rgba(5, 7, 13, 0.85); border: 1px solid rgba(34, 211, 238, 0.4); font: bold 16px system-ui, sans-serif;
         pointer-events: none; width: max-content; max-width: calc(100% - 32px); box-sizing: border-box; text-align: center; }
-      /* The first-life hint (hint.ts): fades in, holds, fades out over HINT_MS (5 s), at the bottom.
-         Touches pass through it, so the sticks under it still work. */
-      .hint { position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 16px); transform: translateX(-50%); pointer-events: none;
-        margin: 0; padding: 10px 18px; border-radius: 12px; background: rgba(15, 23, 42, 0.8); color: #f8fafc;
-        font: 600 clamp(16px, 4.4vw, 20px)/1.3 system-ui, sans-serif; text-align: center; width: max-content;
-        max-width: calc(100% - 32px); box-sizing: border-box; opacity: 0; animation: hint 5000ms ease-in-out both; }
-      @keyframes hint { 0% { opacity: 0; } 8% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+      /* The controls card (hint.ts, #134): four short lines, fading in, holding and fading out over HINT_MS (10 s),
+         on each of a browser's first 3 lives. Touches pass through it, so the sticks under it still work.
+         A computer: bottom centre. */
+      .hint { position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 24px); transform: translateX(-50%); pointer-events: none;
+        list-style: none; margin: 0; padding: 12px 20px; display: grid; gap: 4px; border-radius: 12px;
+        background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(34, 211, 238, 0.4); color: #f8fafc;
+        font: 700 22px/1.25 system-ui, sans-serif; text-align: left; width: max-content;
+        max-width: calc(100% - 32px); box-sizing: border-box; opacity: 0; animation: hint 10000ms ease-in-out both; }
+      @keyframes hint { 0% { opacity: 0; } 5% { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; } }
+      /* A portrait phone: bottom left, just above the aim zone (controls.ts AIM_ZONE_HEIGHT, 240 px) where the
+         thumbs rest, and left of the DASH button's reach (its centre DASH_BUTTON_RIGHT 56 px in, reach 34 px),
+         below your robot at the centre. */
+      @media (pointer: coarse) and (orientation: portrait) {
+        .hint { left: calc(var(--safe-left) + 8px); transform: none; bottom: calc(var(--safe-bottom) + 252px);
+          max-width: calc(100% - var(--safe-left) - var(--safe-right) - 106px); padding: 10px 12px; font-size: 15px; }
+      }
+      /* A landscape phone: bottom centre, small, between the two thumbs in the corners, under your robot. */
+      @media (pointer: coarse) and (orientation: landscape) {
+        .hint { bottom: calc(var(--safe-bottom) + 8px); padding: 8px 14px; gap: 2px; font-size: 15px; }
+      }
+      /* The golden bug's banner (#122) on the pages whose canvas HUD is covered: over the life-over screen
+         (z-index 2) and the start screen, at the top, in the golden bug's gold (look.ts GLOW_GOLD), fading
+         in and out over the canvas banner's 3 s (queenhud.ts BANNER_S). Touches pass through it. */
+      .golden-line { position: fixed; left: 50%; top: max(12px, var(--safe-top)); transform: translateX(-50%); z-index: 3;
+        pointer-events: none; margin: 0; padding: 6px 16px; border-radius: 10px; background: rgba(5, 7, 13, 0.75); color: #ffd54a;
+        font: 800 clamp(18px, 5vw, 28px)/1.25 system-ui, sans-serif; text-align: center; width: max-content;
+        max-width: calc(100% - 32px); box-sizing: border-box; overflow-wrap: anywhere; animation: golden-line 3000ms linear both; }
+      @keyframes golden-line { 0% { opacity: 0; } 6.7% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
       /* The life-over screen, over the arena that keeps playing behind it, dimmed. A tap or click
          anywhere plays again (App.tsx), so it is one big target. Portrait: one column, the summary
          and Play again, then the top 10. A short landscape screen (a phone held sideways): two
