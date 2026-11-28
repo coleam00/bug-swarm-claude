@@ -5,6 +5,7 @@ import { MAX_PICKUPS_PER_ARENA, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_W } from "..
 import { endLife, stepArena } from "../sim";
 import { arenaWith, downNow, effectOf, hold, nextDrop, placeBug, placePickup, stepQuiet } from "../testkit";
 import { bomb } from "./bomb";
+import { cloak } from "./cloak";
 import { drone } from "./drone";
 import { dropFor, stepPickups } from "./index";
 import { laser } from "./laser";
@@ -36,9 +37,12 @@ describe("drops", () => {
     const three = shield.drop.crawler + laser.drop.crawler + bomb.drop.crawler;
     expect(dropFor("crawler", three)).toBe("drone");
     expect(dropFor("crawler", three + drone.drop.crawler - 1e-9)).toBe("drone");
-    expect(dropFor("crawler", three + drone.drop.crawler)).toBeNull();
+    const four = three + drone.drop.crawler;
+    expect(dropFor("crawler", four)).toBe("cloak");
+    expect(dropFor("crawler", four + cloak.drop.crawler - 1e-9)).toBe("cloak");
+    expect(dropFor("crawler", four + cloak.drop.crawler)).toBeNull();
     expect(dropFor("dasher", shield.drop.dasher + laser.drop.dasher / 2)).toBe("laser");
-    expect(dropFor("dasher", shield.drop.dasher + laser.drop.dasher + bomb.drop.dasher + drone.drop.dasher)).toBeNull();
+    expect(dropFor("dasher", shield.drop.dasher + laser.drop.dasher + bomb.drop.dasher + drone.drop.dasher + cloak.drop.dasher)).toBeNull();
   });
 
   test("a kill whose draw lands drops a pickup at the kill, lying for its floor time", () => {

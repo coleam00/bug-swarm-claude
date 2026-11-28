@@ -2,7 +2,7 @@
 import { BUG_KINDS, ROBOT_RADIUS } from "./config";
 
 /** Glow colours. sprites.ts bakes one glow sprite per entry; things refer to them by index. */
-export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95", "#7dd3fc", "#f43f5e", "#7cff3a", "#e8ff5a", "#93c5fd", "#e879f9", "#ffb020", "#ffd54a"] as const;
+export const PALETTE = ["#fb923c", "#a3e635", "#22d3ee", "#fde047", "#ffffff", "#c084fc", "#ff2d95", "#7dd3fc", "#f43f5e", "#7cff3a", "#e8ff5a", "#93c5fd", "#e879f9", "#ffb020", "#ffd54a", "#ddd6fe"] as const;
 export const GLOW_AMBER = 0;
 export const GLOW_LIME = 1;
 export const GLOW_CYAN = 2;
@@ -34,6 +34,8 @@ export const DRONE_SHOT_CORE = PALETTE[GLOW_DRONE];
 export const GLOW_QUEEN = 13;
 /** The golden bug (#122): warm gold, apart from the shot's lemon and the queen's amber. */
 export const GLOW_GOLD = 14;
+/** Pale violet: the arena's invisibility cloak (#132), paler than the CI drone's violet. */
+export const GLOW_CLOAK = 15;
 /** The refactor bomb's ring (release 1's look): a bright stroke, drawn again wide and faint for its glow. */
 export const BOMB_RING = PALETTE[GLOW_BOMB];
 export const BOMB_RING_WIDTH = 8;

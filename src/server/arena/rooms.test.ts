@@ -601,7 +601,7 @@ test("your own numbers in each snapshot: score, kills, streak and its multiplier
   p.effect[1] = 37;
   const me = { sc: 0, ki: 0, st: 0, mu: 0, he: 0, lk: 0 as 0 | 1, hl: 0, al: 0 as 0 | 1, dk: 0, dc: 0, dn: 0 as 0 | 1, fx: [] as number[], x: 0, y: 0, vx: 0, vy: 0, gc: 0 };
   const fx = me.fx;
-  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy, gc: 41 });
+  expect(meOf(p, me)).toEqual({ sc: 125, ki: 11, st: 6, mu: 1.5, he: 0.42, lk: 1, hl: 2, al: 1, dk: 2, dc: 27, dn: 0, fx: [0, 37, 0, 0, 0], x: p.x, y: p.y, vx: p.vx, vy: p.vy, gc: 41 });
   // The effects are copied into the same array every snapshot.
   expect(me.fx).toBe(fx);
   p.lockTicks = 0;
