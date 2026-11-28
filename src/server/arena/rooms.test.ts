@@ -543,7 +543,7 @@ describe("lives", () => {
     const g = placeBug(st, 220, 1200, "golden");
     g.hp = 1;
     for (let i = 0; i < 10 && st.bugs.includes(g); i++) {
-      rooms.input(js[0]!.room, js[0]!.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false });
+      rooms.input(js[0]!.room, js[0]!.entity, { seq: 100 + i, mx: 0, my: 0, aim: 0, fire: i === 0, dash: false, grenade: false });
       quiet();
       tick();
     }
