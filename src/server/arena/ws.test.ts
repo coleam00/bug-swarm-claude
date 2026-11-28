@@ -10,7 +10,7 @@ import { endLife } from "../../shared/arena/sim";
 import { placeBug, placePickup } from "../../shared/arena/testkit";
 import { encodeHello, encodeInput, encodeVisibility, encodeWatch, parseServerMessage, type ServerMessage, type Snapshot, type Welcome, type WireSnapshot } from "../../shared/arena/protocol";
 import { createSnapshotReader } from "../../shared/arena/view";
-import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals, topTen } from "../db";
+import { computeStats, findPlayer, hideName, openDb, playerBest, teamTotals, topTen, upsertPlayer } from "../db";
 import { TOP_CACHE_MS } from "../app";
 import { startServer, type RunningServer, type ServerOptions } from "../serve";
 import { HIDE_SWEEP_MS as REAL_HIDE_SWEEP_MS } from "./sockets";
@@ -225,6 +225,55 @@ test(
       expect(c.got).toEqual([{ t: "error", code }]);
     }
     expect(srv.rooms.stats().players).toBe(0);
+  },
+  TIMEOUT,
+);
+
+/** Says hello as player `key` (32 hex) with `team` ("" for none) and waits for the welcome. */
+async function enterAs(name: string, team: string, key = playerId()): Promise<Welcome> {
+  const c = await connect();
+  c.send(encodeHello(PROTOCOL_VERSION, name, team, key, false));
+  return c.waitFor("welcome", () => c.got.find((m): m is Welcome => m.t === "welcome"));
+}
+
+test(
+  "a hello with no team gets the team with fewer people playing, a tie goes to Tabs, and the welcome says it (#131)",
+  async () => {
+    expect((await enterAs("First", "")).team).toBe("tabs");
+    expect((await enterAs("Second", "")).team).toBe("spaces");
+    // 1 and 1, and no scores yet: Tabs.
+    const third = await enterAs("Third", "");
+    expect(third.team).toBe("tabs");
+    expect(third.roster.find((r) => r.id === third.you)?.team).toBe("tabs");
+    expect((await enterAs("Fourth", "")).team).toBe("spaces");
+    // A page with a team and none on the server keeps its own.
+    expect((await enterAs("Fifth", "spaces")).team).toBe("spaces");
+    expect((await enterAs("Sixth", "")).team).toBe("tabs");
+  },
+  TIMEOUT,
+);
+
+test(
+  "a hidden tab does not count for the team pick (#131)",
+  async () => {
+    const { c } = await enter("Away", "tabs");
+    c.send(encodeVisibility(true));
+    await c.waitFor("the hidden tab to stop counting", () => srv.rooms.playingByTeam().tabs === 0);
+    expect((await enterAs("Fresh", "")).team).toBe("tabs");
+  },
+  TIMEOUT,
+);
+
+test(
+  "a team stored for the player is kept, whatever the hello says (#131)",
+  async () => {
+    const keeper = "ab".repeat(16);
+    upsertPlayer(db, keeper, "Keeper", "spaces", new Date());
+    // Nobody plays, so a pick would say Tabs; the hello says Tabs too. The stored team wins.
+    expect((await enterAs("Keeper", "tabs", keeper)).team).toBe("spaces");
+    const other = "cd".repeat(16);
+    upsertPlayer(db, other, "Other", "spaces", new Date());
+    expect((await enterAs("Other", "", other)).team).toBe("spaces");
   },
   TIMEOUT,
 );

@@ -5,7 +5,7 @@ import type { Database } from "bun:sqlite";
 import { DT, JOINS_PER_ADDRESS_PER_MINUTE, MAX_SOCKETS_PER_ADDRESS, MAX_WATCHERS_PER_ADDRESS, WAVE_S } from "../shared/arena/constants";
 import { adminTokenFrom, clientKey } from "./admin";
 import { TOP_CACHE_MS, createApp, type AppOptions } from "./app";
-import { hiddenKeys } from "./db";
+import { findPlayer, hiddenKeys, teamTotals, type Team } from "./db";
 import { dataDirFrom, listenConfig } from "./listen";
 import { mountArenaRoutes } from "./arena/http";
 import { createAddressGate, createOpenGate } from "./arena/gate";
@@ -215,6 +215,38 @@ export function hiddenNames(db: Database, now: () => number = Date.now): (name: 
   };
 }
 
+/**
+ * The team stored for a player key (#131: the server's team pick keeps it), or null. A failed
+ * read is logged and counts as none: the hello's team, or a pick, and play goes on.
+ */
+export function storedTeam(db: Database): (playerKey: string) => Team | null {
+  return (key) => {
+    try {
+      return findPlayer(db, key)?.team ?? null;
+    } catch (err) {
+      console.error("arena: reading a player's team failed", err);
+      return null;
+    }
+  };
+}
+
+/** The team totals for a tie in the team pick, read at most once per TOP_CACHE_MS; a failed read keeps the last (even at first). */
+export function cachedTeamTotals(db: Database, now: () => number = Date.now): () => Record<Team, number> {
+  let cache: { at: number; teams: Record<Team, number> } | null = null;
+  return () => {
+    const t = now();
+    if (!cache || t - cache.at >= TOP_CACHE_MS) {
+      try {
+        cache = { at: t, teams: teamTotals(db) };
+      } catch (err) {
+        console.error("arena: reading team totals failed", err);
+        cache = { at: t, teams: cache?.teams ?? { tabs: 0, spaces: 0 } };
+      }
+    }
+    return cache.teams;
+  };
+}
+
 export function startServer(opts: ServerOptions): RunningServer {
   // Finished lives are saved as runs, off the tick (lives.ts).
   const lives = createLifeSaver(opts.db);
@@ -234,7 +266,7 @@ export function startServer(opts: ServerOptions): RunningServer {
 
   // The per-address limits (#104), off only with the load-test allowance.
   const gate = opts.allowLoad ? createOpenGate() : createAddressGate({ maxSockets: MAX_SOCKETS_PER_ADDRESS, maxWatchers: MAX_WATCHERS_PER_ADDRESS, joinsPerMinute: JOINS_PER_ADDRESS_PER_MINUTE });
-  const sockets = createArenaSockets(rooms, { liveness: opts.liveness, isHidden: hiddenNames(opts.db), sweepMs: opts.hideSweepMs, gate, log: opts.log });
+  const sockets = createArenaSockets(rooms, { liveness: opts.liveness, isHidden: hiddenNames(opts.db), teamOf: storedTeam(opts.db), teamTotals: cachedTeamTotals(opts.db), sweepMs: opts.hideSweepMs, gate, log: opts.log });
   const hops = opts.proxyHops ?? 0;
   const server = Bun.serve<SocketData>({
     port: opts.port,

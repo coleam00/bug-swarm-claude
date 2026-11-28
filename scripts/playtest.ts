@@ -427,16 +427,13 @@ async function openPage(spec: PageSpec): Promise<Page> {
   await cdp!.send("Emulation.setDeviceMetricsOverride", { width: d.width, height: d.height, deviceScaleFactor: d.scale, mobile: d.touch }, s);
   if (d.touch) await cdp!.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 }, s);
   await cdp!.send("Page.navigate", { url: `${args.url}/` }, s);
-  // The start screen, as a person uses it: tap the name field, type, tap the team.
+  // The start screen, as a person uses it: tap the name field, type, tap Play. The server picks the team (#131).
   const field = await until(`${spec.name}'s name field`, 15_000, () => centreOf(pg, "input[aria-label='Your name']"));
   await press(pg, field);
   await cdp!.send("Input.insertText", { text: spec.name }, s);
-  const teams: string[] = await evaluate(pg, `[...document.querySelectorAll(".start-teams button")].map((b) => b.textContent ?? "")`);
-  const i = teams.findIndex((t) => t.toLowerCase().includes(spec.team));
-  if (i < 0) throw new Error(`${spec.name}: no button for team ${spec.team} (${teams.join(", ")})`);
-  await press(pg, (await centreOf(pg, ".start-teams button", i))!);
+  await press(pg, (await centreOf(pg, ".start-play"))!);
   await until(`${spec.name}'s welcome`, 15_000, async () => pg.log.you !== 0);
-  say(`${spec.name} joined as id ${pg.log.you} (${spec.team}, ${d.touch ? `touch ${d.width}x${d.height}` : `mouse ${d.width}x${d.height}`}, ${spec.role}) in arena ${pg.log.welcomes[0]!.arena}`);
+  say(`${spec.name} joined as id ${pg.log.you} (${pg.log.team ?? "no team"}, ${d.touch ? `touch ${d.width}x${d.height}` : `mouse ${d.width}x${d.height}`}, ${spec.role}) in arena ${pg.log.welcomes[0]!.arena}`);
   return pg;
 }
 

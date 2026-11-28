@@ -1,6 +1,9 @@
 // The /ws endpoint's WebSocket handlers (Bun's built-in WebSocket). A socket must say hello
-// within HELLO_TIMEOUT_MS: its name passes rules.ts and is not a bot name, its team is a team and
-// its protocol version matches, else it gets an `error` and is closed. A rejoin carries the build
+// within HELLO_TIMEOUT_MS: its name passes rules.ts and is not a bot name, its team is a team or
+// "" and its protocol version matches, else it gets an `error` and is closed. The server decides
+// the team (#131): the one stored for the player (`teamOf`) wins, else the hello's, else the team
+// with fewer people playing now (rules.ts pickTeam), picked in the same turn as the join so two
+// joins in a row see each other. The welcome carries it. A rejoin carries the build
 // id its page started with; one from another build gets `error build` (with this server's build)
 // before it joins, so a page that is about to reload never starts, and saves, an empty life. After the welcome it sends
 // inputs, at most INPUTS_PER_SECOND; the rest are dropped. Anything the validator refuses is
@@ -59,7 +62,7 @@ import {
   type ErrorCode,
   type Hello,
 } from "../../shared/arena/protocol";
-import { checkName, isBotName, isTeam } from "../rules";
+import { checkName, isBotName, isTeam, pickTeam, TEAMS, type Team } from "../rules";
 import { createOpenGate, type AddressGate } from "./gate";
 import { createInputLimiter, type InputLimiter } from "./limiter";
 import type { Rooms } from "./rooms";
@@ -150,6 +153,10 @@ export type ArenaSocketOptions = {
   sweepMs?: number;
   /** The per-address limits (gate.ts); defaults to none (createOpenGate). serve.ts passes the real one. */
   gate?: AddressGate;
+  /** The team stored for a player key, or null (none yet, or a new player). Defaults to none. */
+  teamOf?: (playerKey: string) => Team | null;
+  /** Each team's total, for a tie in the team pick (rules.ts pickTeam). Defaults to even. */
+  teamTotals?: () => Record<Team, number>;
   /** Where the first admitted sockets' addresses, the refusals and the slow drops are written. Defaults to nowhere. */
   log?: (line: string) => void;
 };
@@ -175,6 +182,8 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
   let logged = 0;
   let busyLoggedAt = -Infinity;
   const isHidden = opts.isHidden ?? (() => false);
+  const teamOf = opts.teamOf ?? (() => null);
+  const totals = opts.teamTotals ?? (() => Object.fromEntries(TEAMS.map((t) => [t, 0])) as Record<Team, number>);
   const sweepMs = opts.sweepMs ?? HIDE_SWEEP_MS;
   /** The welcomed sockets, which the sweep checks. */
   const joined = new Set<ServerWebSocket<SocketData>>();
@@ -227,7 +236,7 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     }
     const name = checkName(m.name);
     if (!name.ok || isBotName(name.name) || isHidden(name.name)) return refuse(ws, ERROR_NAME);
-    if (!isTeam(m.team)) return refuse(ws, ERROR_TEAM);
+    if (m.team !== "" && !isTeam(m.team)) return refuse(ws, ERROR_TEAM);
     // The people cap before the join limit: a page retrying `busy` spends none of its joins.
     if (rooms.full) {
       const t = now();
@@ -247,7 +256,8 @@ export function createArenaSockets(rooms: Rooms, opts: ArenaSocketOptions = {}):
     if (ws.data.watcher !== null) rooms.unwatch(ws.data.watcher);
     ws.data.watcher = null;
     releaseWatch(ws);
-    const entered = rooms.join(name.name, m.team, { playerKey: m.player, touch: m.touch }, (msg) => ws.send(msg) !== 0);
+    const team = teamOf(m.player) ?? (isTeam(m.team) ? m.team : pickTeam(rooms.playingByTeam(), totals));
+    const entered = rooms.join(name.name, team, { playerKey: m.player, touch: m.touch }, (msg) => ws.send(msg) !== 0);
     ws.data.room = entered.room;
     ws.data.entity = entered.entity;
     ws.data.name = name.name;

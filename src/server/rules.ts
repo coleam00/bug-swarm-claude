@@ -14,6 +14,18 @@ export function isTeam(v: unknown): v is Team {
   return (TEAMS as readonly unknown[]).includes(v);
 }
 
+/**
+ * The team the server gives a player who has none (#131): the one with fewer people playing now
+ * (`playing`, never bots), so the race stays even however the chat leans. A tie goes to the team
+ * with the lower total (`totals`, read only on a tie), and a tie there to Tabs.
+ */
+export function pickTeam(playing: Record<Team, number>, totals: () => Record<Team, number>): Team {
+  const [a, b] = TEAMS;
+  if (playing[a] !== playing[b]) return playing[a] < playing[b] ? a : b;
+  const t = totals();
+  return t[b] < t[a] ? b : a;
+}
+
 // Names.
 export const NAME_MIN = 2;
 export const NAME_MAX = 16;

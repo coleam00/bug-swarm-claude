@@ -30,7 +30,7 @@ Release 1's look carries over and grows: everything is drawn in code on the canv
 - **Bugs:** release 1's beetle bodies with animated legs, one colour and size per kind, each with a tell you can read from across the screen (a dasher crouches and glows before it lunges; a spitter swells before it spits).
 - **Shots:** bright streaks with a glow; hits spark, kills burst into particles with a floating score. Heat is a small arc around your robot that fills as you fire and flashes before it locks.
 - **Text:** big, bold, readable on a phone and on a stream shown small. Screens are clean: no rule lists, no fine print.
-- **The start screen sells the game:** the live arena plays behind it (real bots fighting the swarm), with the title, a name field and two team buttons on top.
+- **The start screen sells the game:** the live arena plays behind it (real bots fighting the swarm), with the title, a name field and a Play button on top; the server assigns the team.
 The look never costs frames: 60 fps with a full arena (20 players, 150 bugs and their shots) on a mid-range laptop and phone. If an effect costs frames, it gets simpler.
 
 ## Principles
@@ -40,7 +40,7 @@ The look never costs frames: 60 fps with a full arena (20 players, 150 bugs and 
 - **Fair drop-in:** a viewer who joins an hour into the stream gets the same gentle opening as one who joined at the start.
 - **Merges happen live.** The game redeploys on every merge during the stream: clients reconnect on their own, reload to the new version, and a life in progress is saved, never lost silently (a 0-point life under 5 s is not a life: #114).
 - **Time to the next life beats everything:** no menus or confirmations between a life ending and dropping back in.
-- **Clean screens:** the start screen is the title, a name field and two team buttons. Rules appear only as a short message when something is wrong.
+- **Clean screens:** the start screen is the title, a name field and a Play button; the server assigns the team. Rules appear only as a short message when something is wrong.
 - Anything a viewer types that appears on screen passes the name rules first. The stream is public.
 - Every new bug, pickup or effect is small enough to ship in one pull request, because chat will ask for them live.
 

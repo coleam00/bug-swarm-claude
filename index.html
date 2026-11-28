@@ -40,7 +40,7 @@
       .setup input { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
       /* The start screen: the drawn backdrop (backdrop/), the live arena over it once it shows (#79:
          dimmed and blurred, fading in), a dark middle so the title reads, then the title, the tagline,
-         "N playing now" and either "Play as <name>" or the name field and the team buttons.
+         "N playing now" and either "Play as <name>" or the name field and Play (the server picks the team, #131).
          No rules or instructions: a name problem shows one short line under the field. */
       .setup { position: relative; z-index: 1; min-height: 100dvh; box-sizing: border-box; overflow: hidden; display: flex;
         flex-direction: column; align-items: center; justify-content: center; gap: 20px; font-family: system-ui, sans-serif; text-align: center;
@@ -64,13 +64,25 @@
       .setup input::placeholder { color: #64748b; }
       .setup button { font: inherit; font-weight: 800; border-radius: 10px; cursor: pointer; color: #05070d; border: 0; }
       .setup button:focus-visible, .setup input:focus-visible { outline: 3px solid #f8fafc; outline-offset: 2px; }
-      .start-teams { display: flex; gap: 12px; width: 100%; }
-      .start-teams button { flex: 1 1 0; min-height: 60px; font-size: 24px; }
-      .start-teams button:disabled { opacity: 0.3; cursor: default; }
       .setup .start-play { width: 100%; min-height: 68px; padding: 8px 16px; font-size: 26px; line-height: 1.15; overflow-wrap: anywhere; }
       .setup .start-change { min-height: 44px; padding: 4px 16px; background: none; color: #cbd5e1; font-size: 18px; font-weight: 500;
         text-decoration: underline; text-underline-offset: 3px; }
       .start-alert { margin: 0; color: #fda4af; font-size: 20px; font-weight: 600; }
+      /* The team reveal (#131), over the arena after Play: a dim veil, the team word flicking in its
+         colour (--team), then landing with a burst (a radial gradient that grows and fades) and
+         "You're on Spaces!". Never takes input. Reduced motion: no burst, and it lands at once (App). */
+      .reveal { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 8px; pointer-events: none; overflow: hidden; background: rgba(5, 7, 13, 0.72); font-family: system-ui, sans-serif; text-align: center;
+        padding: max(16px, var(--safe-top)) max(16px, var(--safe-right)) max(16px, var(--safe-bottom)) max(16px, var(--safe-left)); }
+      .reveal-word { position: relative; margin: 0; font: 900 clamp(48px, 17vw, 140px)/1 system-ui, sans-serif; letter-spacing: 0.04em;
+        color: var(--team); text-shadow: 0 0 24px var(--team); }
+      .reveal-line { position: relative; margin: 0; min-height: 1.3em; font-size: clamp(22px, 6vw, 36px); line-height: 1.3; font-weight: 800; color: #f8fafc; }
+      .reveal.landed .reveal-word { animation: reveal-pop 300ms ease-out; }
+      .reveal-burst { position: absolute; left: 50%; top: 50%; width: 150vmax; height: 150vmax; margin: -75vmax 0 0 -75vmax; border-radius: 50%;
+        background: radial-gradient(circle, var(--team) 0, transparent 40%); animation: reveal-burst 500ms ease-out forwards; }
+      @keyframes reveal-pop { from { transform: scale(1.35); } to { transform: scale(1); } }
+      @keyframes reveal-burst { from { transform: scale(0.05); opacity: 0.9; } to { transform: scale(1); opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .reveal-burst { display: none; } .reveal.landed .reveal-word { animation: none; } }
       /* The arena's canvas, full screen. It takes every touch itself (the twin sticks). */
       .arena { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
       /* "Connecting..." / "Reconnecting...", or the server's limits (#104): shown only while the socket is down; the
@@ -138,7 +150,6 @@
         .start-playing { margin: -4px 0 0; font-size: 15px; }
         .start-actions { gap: 8px; margin-top: 4px; width: min(100%, 440px); }
         .setup input { min-height: 48px; font-size: 20px; padding: 4px 12px; }
-        .start-teams button { min-height: 48px; font-size: 20px; }
         .setup .start-play { min-height: 56px; font-size: 22px; }
         .start-alert { font-size: 17px; }
       }

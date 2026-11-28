@@ -109,9 +109,10 @@ export const MAX_CLIENT_MESSAGE_BYTES = 1024;
  * The protocol version. A hello with another one is refused with error "version". v8: watching
  * (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's
  * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
- * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event.
+ * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event; v13 (#131): the
+ * server picks the team (a hello's team may be "") and the welcome carries it.
  */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 // ---- Snapshots at stream scale (#89, view.ts). ----
 

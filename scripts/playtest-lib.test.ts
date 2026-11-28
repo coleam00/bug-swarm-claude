@@ -132,10 +132,9 @@ describe("chromeCandidates", () => {
 });
 
 describe("pages and scenarios", () => {
-  test("4 pages: desktops and touch phones alternate, so do teams, and every name is a valid, distinct name", () => {
+  test("4 pages: desktops and touch phones alternate, and every name is a valid, distinct name", () => {
     const pages = pageSpecs(4, "basic", 123456);
     expect(pages.map((p) => p.device.touch)).toEqual([false, true, false, true]);
-    expect(pages.map((p) => p.team)).toEqual([TEAMS[0], TEAMS[1], TEAMS[0], TEAMS[1]]);
     expect(new Set(pages.map((p) => p.name)).size).toBe(4);
     for (const p of pageSpecs(20, "basic", 2 ** 31 - 1)) expect(checkName(p.name).ok).toBe(true);
     expect(pages.every((p) => p.role === "fighter")).toBe(true);

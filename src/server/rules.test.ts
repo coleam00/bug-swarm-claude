@@ -12,7 +12,23 @@ import {
   isTeam,
   nameKey,
   normalizeName,
+  pickTeam,
 } from "./rules";
+
+describe("the team pick (#131)", () => {
+  const none = () => {
+    throw new Error("totals read without a tie");
+  };
+  test("the team with fewer people playing wins, without reading the totals", () => {
+    expect(pickTeam({ tabs: 3, spaces: 2 }, none)).toBe("spaces");
+    expect(pickTeam({ tabs: 0, spaces: 1 }, none)).toBe("tabs");
+  });
+  test("a tie goes to the team with the lower total, and a tie there to Tabs", () => {
+    expect(pickTeam({ tabs: 2, spaces: 2 }, () => ({ tabs: 900, spaces: 100 }))).toBe("spaces");
+    expect(pickTeam({ tabs: 2, spaces: 2 }, () => ({ tabs: 100, spaces: 900 }))).toBe("tabs");
+    expect(pickTeam({ tabs: 0, spaces: 0 }, () => ({ tabs: 0, spaces: 0 }))).toBe("tabs");
+  });
+});
 
 describe("name rules", () => {
   test("a valid name passes and comes back normalized", () => {

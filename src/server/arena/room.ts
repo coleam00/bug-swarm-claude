@@ -214,6 +214,13 @@ export class Room {
     return n;
   }
 
+  /** The members on `team` who count as people now (as `people` counts them; never bots). */
+  peopleOn(team: Team): number {
+    let n = 0;
+    for (const m of this.members.values()) if (m.player.team === team && this.isActive(m)) n++;
+    return n;
+  }
+
   get awayCount(): number {
     return this.away.size;
   }
