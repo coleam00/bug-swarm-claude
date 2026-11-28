@@ -64,6 +64,7 @@ import type { DashButton } from "./controls";
 import { BUG_DRAW } from "./draw/bugs";
 import type { BugFrame } from "./draw/bugs/kind";
 import { PICKUP_DRAW } from "./draw/pickups";
+import { CLOAK_ALPHA } from "./draw/pickups/cloak";
 import { floorAlpha } from "./draw/pickups/kind";
 import { edgeArrow, minimapDotOn, type EdgeArrow } from "./help";
 import { HIT_FLASH_S, STREAK_LOST_S, flashOn, heatWarning, pulseScale, type HudFx } from "./hudfx";
@@ -240,6 +241,8 @@ const DOWN_BELOW = 70;
 const DOWN_HINT = "A player next to you revives you";
 // The hive queen (#85).
 const QUEEN_COLOUR = PALETTE[GLOW_QUEEN];
+/** A robot's effects bit for the invisibility cloak (#132). */
+const CLOAK_BIT = 1 << PICKUP_IDS.indexOf("cloak");
 /** Her marker on the floor: a ring this many queen radii across, pulsing, with a countdown arc. */
 const MARKER_RADIUS = QUEEN_RADIUS * 1.6;
 const MARKER_WIDTH = 5;
@@ -583,6 +586,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       return;
     }
     const ts = teams![r.team];
+    // Cloaked (#132): the trail, body and glow at CLOAK_ALPHA on every page; its outline is the
+    // cloak's own `on`, and your marker and halo are drawn apart, so you never lose yourself.
+    const fade = r.fx & CLOAK_BIT ? CLOAK_ALPHA : 1;
     // Trail, newest first, skipping the point under the robot.
     ctx.globalCompositeOperation = "lighter";
     const trail = r.trail;
@@ -591,7 +597,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       const life = 1 - trail.age[i]! / TRAIL_SECONDS;
       if (life <= 0) continue;
       const size = PLAYER_RADIUS * (0.6 + 0.9 * life);
-      ctx.globalAlpha = 0.45 * life;
+      ctx.globalAlpha = 0.45 * life * fade;
       ctx.drawImage(ts.glow, trail.x[i]! - size, trail.y[i]! - size, size * 2, size * 2);
     }
     // Spawn protection: a soft white shimmer rippling around the body, drawn under it. It never
@@ -609,7 +615,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     // A dash's afterimage: ghosts of the body along the dash, fainter the farther back, fading out.
     const since = t - r.dashAt;
     if (r.dashAt >= 0 && since < AFTERIMAGE_S) {
-      const fade = 1 - since / AFTERIMAGE_S;
+      const ghost = (1 - since / AFTERIMAGE_S) * fade;
       const rh = PLAYER_RADIUS * ROBOT_SPRITE_HALF;
       const gs = PLAYER_RADIUS * 1.3;
       for (let g = 0; g < AFTERIMAGE_GHOSTS; g++) {
@@ -617,7 +623,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         const f = g / AFTERIMAGE_GHOSTS;
         const gx = r.dashFromX + (r.x - r.dashFromX) * f;
         const gy = r.dashFromY + (r.y - r.dashFromY) * f;
-        const alpha = fade * (GHOST_FAR + (GHOST_NEAR - GHOST_FAR) * f);
+        const alpha = ghost * (GHOST_FAR + (GHOST_NEAR - GHOST_FAR) * f);
         ctx.globalAlpha = alpha;
         ctx.drawImage(ts.body, gx - rh, gy - rh, rh * 2, rh * 2);
         ctx.globalCompositeOperation = "lighter";
@@ -628,6 +634,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     // Untouchable: the body blinks (the trail, halo and ring stay, so you never lose it).
     if (r.inv && !flashOn(t, BLINK_HZ)) return;
+    ctx.globalAlpha = fade;
     // The barrel under the body, so it reads as coming out of it.
     ctx.save();
     ctx.translate(r.x, r.y);
@@ -645,6 +652,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     const hot = PLAYER_RADIUS * 0.45;
     ctx.drawImage(white!, r.x - hot, r.y - hot, hot * 2, hot * 2);
     ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
   }
 
   /** A robot's name (NAME_FONT set, centred) with its baseline at `y`; a bot's dimmer, with its BOT pill to the left. */
