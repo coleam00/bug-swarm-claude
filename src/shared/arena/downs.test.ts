@@ -1,6 +1,6 @@
 // Down, revive and bleed-out (#59), stepped on the pure arena with fixed inputs.
 import { describe, expect, test } from "bun:test";
-import { DOWN_TICKS, DT, HITS_PER_LIFE, RESPAWN_DELAY_S, REVIVE_POINTS, REVIVE_PROTECT_TICKS, REVIVE_TICKS } from "./constants";
+import { DOWN_TICKS, DT, HITS_PER_LIFE, RESPAWN_DELAY_S, REVIVE_POINTS, REVIVE_PROTECT_TICKS, REVIVE_RANGE, REVIVE_TICKS } from "./constants";
 import { leavePlayer, stepArena, type ArenaState, type Player } from "./sim";
 import { arenaWith, bleedNow, downNow, hold, placeBug, stepQuiet } from "./testkit";
 
@@ -116,8 +116,8 @@ describe("reviving", () => {
     expect(a.events.revives).toEqual([{ id: p.id, by: h.id, points: REVIVE_POINTS }]);
     expect([p.down, p.alive, p.hits, p.invulnTicks, p.reviver, p.reviveTicks]).toEqual([false, true, HITS_PER_LIFE - 1, REVIVE_PROTECT_TICKS, 0, 0]);
     expect(h.score).toBe(REVIVE_POINTS);
-    // The item's numbers: 2 s (40 steps) in range, 50 points, 1.5 s (30 steps) of protection.
-    expect(REVIVE_TICKS).toBe(40);
+    // The item's numbers (#133): 1 s (20 steps) in range, 50 points, 1.5 s (30 steps) of protection.
+    expect(REVIVE_TICKS).toBe(20);
     expect(h.score).toBe(50);
     expect(p.invulnTicks).toBe(30);
     // Back up: it moves again.
@@ -143,10 +143,11 @@ describe("reviving", () => {
     expect(p.dashTicks).toBeGreaterThan(0);
   });
 
-  test("the range is inclusive: 60 units counts, 60.5 does not", () => {
+  test("the range is inclusive: 110 units counts, 110.5 does not", () => {
+    expect(REVIVE_RANGE).toBe(110);
     for (const [d, revived] of [
-      [60, true],
-      [60.5, false],
+      [110, true],
+      [110.5, false],
     ] as const) {
       const { a, ps } = arenaWith([1200, 1200], [1400, 1400]);
       const [p, h] = [ps[0]!, ps[1]!];
@@ -156,13 +157,37 @@ describe("reviving", () => {
     }
   });
 
+  test("moving and shooting near the edge of 110 units: 19 steps do not revive, the 20th does", () => {
+    const { a, ps } = arenaWith([1200, 1200], [1400, 1400]);
+    const [p, h] = [ps[0]!, ps[1]!];
+    downNow(a, p);
+    beside(p, h, 100);
+    let fired = 0;
+    let moved = 0;
+    for (let i = 0; i < 19; i++) {
+      // Strafe up and down and fire, staying inside the range.
+      const y = h.y;
+      hold(h, { my: h.y > p.y ? -1 : 1, fire: true });
+      stepQuiet(a);
+      fired += a.events.shotsFired.length;
+      moved += Math.abs(h.y - y);
+      expect(Math.hypot(h.x - p.x, h.y - p.y)).toBeLessThanOrEqual(REVIVE_RANGE);
+    }
+    expect(fired).toBeGreaterThan(0);
+    expect(moved).toBeGreaterThan(0);
+    expect(a.events.revives).toEqual([]);
+    expect([p.down, p.reviver, p.reviveTicks]).toEqual([true, h.id, 19]);
+    stepQuiet(a);
+    expect(a.events.revives).toEqual([{ id: p.id, by: h.id, points: REVIVE_POINTS }]);
+  });
+
   test("walking out of range cancels: progress resets and coming back needs the full REVIVE_S", () => {
     const { a, ps } = arenaWith([1200, 1200], [1400, 1400]);
     const [p, h] = [ps[0]!, ps[1]!];
     downNow(a, p);
     beside(p, h, 40);
-    revivesOver(a, 20);
-    expect([p.reviver, p.reviveTicks]).toEqual([h.id, 20]);
+    revivesOver(a, 10);
+    expect([p.reviver, p.reviveTicks]).toEqual([h.id, 10]);
     beside(p, h, 200);
     stepQuiet(a);
     expect([p.reviver, p.reviveTicks]).toEqual([0, 0]);
@@ -207,8 +232,8 @@ describe("reviving", () => {
     downNow(a, p);
     beside(p, holder, 20);
     beside(p, other, -50);
-    revivesOver(a, 30);
-    expect([p.reviver, p.reviveTicks]).toEqual([holder.id, 30]);
+    revivesOver(a, 10);
+    expect([p.reviver, p.reviveTicks]).toEqual([holder.id, 10]);
     beside(p, holder, 300);
     stepQuiet(a); // the holder's loss resets, and the other takes hold in the same step
     expect([p.reviver, p.reviveTicks]).toEqual([other.id, 1]);
@@ -239,7 +264,7 @@ describe("reviving", () => {
     const { a, ps } = arenaWith([1200, 1200], [1400, 1400]);
     const [p, h] = [ps[0]!, ps[1]!];
     downNow(a, p);
-    // Walk in so the 40th step in range is the bleed-out step.
+    // Walk in so the REVIVE_TICKS-th step in range is the bleed-out step.
     stepQuiet(a, DOWN_TICKS - REVIVE_TICKS);
     beside(p, h, 30);
     stepQuiet(a, REVIVE_TICKS - 1);

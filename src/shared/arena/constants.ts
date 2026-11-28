@@ -109,10 +109,11 @@ export const MAX_CLIENT_MESSAGE_BYTES = 1024;
  * The protocol version. A hello with another one is refused with error "version". v8: watching
  * (#79) and the bomb (#78); v9 (#80): a shot end's hit 2, blocked by a shell; v10 (#84): a shot's
  * style 2, a CI drone's; v11 (#89): snapshots culled to each player's view, quantized, as keyframes
- * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event; v13 (#130): the
- * input's `grenade`, the `grenade` event and `me`'s `gc`.
+ * with deltas between (view.ts); v12 (#85): the hive queen's `q` and `queen` event; v13 (#122): the
+ * golden bug (kind index 6) and the `golden` event; v14 (#130): the input's `grenade`, the `grenade`
+ * event and `me`'s `gc`.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 14;
 
 // ---- Snapshots at stream scale (#89, view.ts). ----
 
@@ -201,7 +202,7 @@ export const HEAT_WARN = 0.85;
  * Every bug kind id, in protocol order (a snapshot carries a bug's index in this list). The first
  * is the base kind: a spawn is the base kind unless the mix picks another (bugs/index.ts).
  */
-export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle", "queen"] as const;
+export const BUG_KINDS = ["crawler", "dasher", "spitter", "glob", "beetle", "queen", "golden"] as const;
 export type BugKind = (typeof BUG_KINDS)[number];
 
 // ---- Pickups (#73). Every pickup id in PICKUP_IDS; each pickup's numbers in its own file in pickups/. ----
@@ -281,9 +282,9 @@ export const STREAK_STEPS: readonly (readonly [number, number])[] = [
 /** How long you stay down before the life ends (bleeds out), seconds. */
 export const DOWN_S = 10;
 /** How long a player must stay in range to revive you, seconds. */
-export const REVIVE_S = 2;
+export const REVIVE_S = 1;
 /** How close a reviver must be, centre to centre, units (inclusive). */
-export const REVIVE_RANGE = 60;
+export const REVIVE_RANGE = 110;
 /** Untouchable time after a revive, seconds. */
 export const REVIVE_PROTECT_S = 1.5;
 /** Points a revive scores for the reviver (and so for their team). */

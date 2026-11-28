@@ -152,8 +152,7 @@ describe("glob launches and caps", () => {
   });
 
   test("the spawn mix never makes a glob", () => {
-    const a = createArena(11);
-    a.tick = Math.round((6 * WAVE_S) / DT);
+    const a = createArena(11, Math.round((6 * WAVE_S) / DT));
     joinPlayer(a, "a", "tabs").lifeStartTick = a.tick - Math.round(300 / DT);
     let all = 0;
     let globs = 0;

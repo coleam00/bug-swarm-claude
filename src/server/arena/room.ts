@@ -46,6 +46,7 @@ import {
   BLOCK,
   DOWN,
   EVENT,
+  GOLDEN,
   GRENADE,
   JOIN,
   LEAVE,
@@ -536,6 +537,8 @@ export class Room {
     for (const id of ev.blocks) this.broadcast({ t: EVENT, kind: BLOCK, id });
     // A hive queen killed (#85): who dealt her the most, and every reward (already on their scores).
     if (ev.queenDown) this.broadcast({ t: EVENT, kind: QUEEN, id: ev.queenDown.top, paid: ev.queenDown.paid });
+    // A golden bug's killer (#122): every page in the arena shows the banner.
+    for (const id of ev.golden) this.broadcast({ t: EVENT, kind: GOLDEN, id });
     // A grenade thrown (#130): every page draws its flight, blink ring and blast from these and the GRENADE_* numbers.
     for (const g of ev.grenadesThrown) this.broadcast({ t: EVENT, kind: GRENADE, id: g.owner, gr: [q1(g.fromX), q1(g.fromY), q1(g.toX), q1(g.toY), g.tick + 1] });
     for (const life of this.state.events.livesEnded) {

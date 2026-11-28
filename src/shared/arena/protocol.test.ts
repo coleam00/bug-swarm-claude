@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_CLIENT_MESSAGE_BYTES } from "./constants";
+import { MAX_CLIENT_MESSAGE_BYTES, PROTOCOL_VERSION } from "./constants";
 import {
   CLIENT_TYPES,
   EVENT,
   EVENT_KINDS,
+  GOLDEN,
   GRENADE,
   QUEEN,
   SERVER_TYPES,
@@ -163,10 +164,17 @@ describe("server messages", () => {
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
   });
 
-  test("v13: a `grenade` event (#130) names the thrower and its flight, and is the last event kind", () => {
+  test("v13: a `golden` event (#122) names the killer", () => {
+    const ev: ArenaEvent = { t: EVENT, kind: GOLDEN, id: 4 };
+    expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
+    expect(EVENT_KINDS.indexOf("golden")).toBe(8);
+  });
+
+  test("v14: a `grenade` event (#130) names the thrower and its flight, and is the last event kind", () => {
     const ev: ArenaEvent = { t: EVENT, kind: GRENADE, id: 3, gr: [100.5, 200, 420.5, 200, 77] };
     expect(parseServerMessage(JSON.stringify(ev))).toEqual(ev);
     expect(EVENT_KINDS.at(-1)).toBe("grenade");
     expect(EVENT_KINDS.indexOf("queen")).toBe(7);
+    expect(PROTOCOL_VERSION).toBe(14);
   });
 });

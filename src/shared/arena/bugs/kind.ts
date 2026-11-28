@@ -45,6 +45,11 @@ export type BugKindDef = {
    */
   staysOnContact?: true;
   /**
+   * Optional (#122): touching a player does nothing (no hit, no touch, no shield spent) and the
+   * bug stays. It still dies to shots and scores like any kind (the golden bug).
+   */
+  harmless?: true;
+  /**
    * Optional (#85): a boss, placed by its own arena-level code, never by a spawn. MAX_BUG_RADIUS
    * leaves it out, so its size never moves the spawn clamps and view checks every other kind uses.
    */

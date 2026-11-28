@@ -23,7 +23,7 @@
 import { BUG_KINDS, DOWN_S, HITS_PER_LIFE, MINIMAP_CELL, PICKUP_IDS, PICKUP_RADIUS, PLAYER_RADIUS, WORLD_H, WORLD_W, type BugKind } from "../../shared/arena/constants";
 import { pickupDef } from "../../shared/arena/pickups/registry";
 import { QUEEN_RADIUS } from "../../shared/arena/bugs/queen";
-import type { SnapshotMe, SnapshotQueen } from "../../shared/arena/protocol";
+import type { SnapshotGolden, SnapshotMe, SnapshotQueen } from "../../shared/arena/protocol";
 import type { Team } from "../../server/rules";
 import type { Particles } from "../game/fx/particles";
 import { ringAt, type RingAt, type Rings } from "../game/fx/rings";
@@ -40,6 +40,7 @@ import {
   BOMB_RING_GLOW_WIDTH,
   BOMB_RING_WIDTH,
   GLOW_DRONE,
+  GLOW_GOLD,
   GLOW_LASER,
   GLOW_QUEEN,
   GLOW_SHOT,
@@ -93,6 +94,7 @@ import {
   bannerY,
   barFill,
   fitScale,
+  goldenBannerText,
   markerLook,
   queenBarLayout,
   type Banner,
@@ -269,6 +271,16 @@ const BANNER_DOWN = "Queen down!";
 /** The banners stay this far inside the safe edges, CSS px, and their second line this far under the first. */
 const BANNER_MARGIN = 16;
 const BANNER_SUB_BELOW = 30;
+/** The golden bug's banner (#122), in its gold. */
+const GOLD_COLOUR = PALETTE[GLOW_GOLD];
+/**
+ * The golden bug's arrow at the screen's edge while it is off screen (#122), CSS px: between a
+ * downed player's (26) and the queen's (34), in gold, so the player can find it and run it down.
+ */
+const GOLDEN_ARROW_LENGTH = 28;
+const GOLDEN_ARROW_WIDTH = 24;
+/** Its minimap mark, CSS px: a gold dot this big (a bug's dot is 2 px square), in a dark ring. */
+const GOLDEN_MAP_DOT = 4.5;
 
 /**
  * One robot to draw, world units. `inv`: untouchable, so it blinks. `prot`: spawn-protected (a
@@ -382,9 +394,14 @@ export type Scene = {
   grenades: ClientGrenades;
   /** The hive queen from the newest snapshot (#85): [] none, her marker, or her alive. */
   queen: SnapshotQueen;
+  /** The golden bug from the newest snapshot (#122): [] none, else its id and where it is. */
+  golden: SnapshotGolden;
   /** "Queen down!" (#85) and the name of who dealt the most ("" for no name). */
   banner: Banner;
   bannerName: string;
+  /** "<name> got the golden bug!" (#122) and the killer's name ("" when they have left). */
+  goldBanner: Banner;
+  goldName: string;
 };
 
 type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
@@ -392,6 +409,8 @@ type TeamSprites = { body: HTMLCanvasElement; glow: HTMLCanvasElement };
 const scoreFormat = new Intl.NumberFormat("en-US");
 /** The glob's index in BUG_KINDS (#72): left off the minimap. */
 const GLOB_KIND = BUG_KINDS.indexOf("glob");
+/** The golden bug's index in BUG_KINDS (#122): its minimap dot is its own, from the snapshot's `g`. */
+const GOLDEN_KIND = BUG_KINDS.indexOf("golden");
 
 export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   const canvas = ctx.canvas;
@@ -457,6 +476,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   let comingW = 0;
   let downW = 0;
   let subW = 0;
+  let goldFor: string | null = null;
+  let goldText = "";
+  let goldW = 0;
   // The view plus a margin for halos and names, world units: set at the start of each frame.
   let vl = 0;
   let vt = 0;
@@ -933,7 +955,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
   /**
    * The hive queen's HUD (#85): her health bar under the line while she lives, and the banners:
    * "The hive queen is coming" while her marker shows, "Queen down!" naming who dealt the most for
-   * a few seconds after her kill. Banner texts are measured only when they change.
+   * a few seconds after her kill. The golden bug's banner (#122) shares their place, two lines
+   * lower while one of hers shows. Banner texts are measured only when they change.
    */
   function drawQueenHud(sc: Scene, lineY: number, icons: number): void {
     const q = sc.queen;
@@ -959,7 +982,9 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
     const coming = q.length > 0 && q[0] === 0;
     const downAlpha = bannerAlpha(sc.banner.left);
-    if (!coming && downAlpha <= 0) return;
+    const goldAlpha = bannerAlpha(sc.goldBanner.left);
+    const queenShows = coming || downAlpha > 0;
+    if (!queenShows && goldAlpha <= 0) return;
     const maxW = cssW - safe.left - safe.right - 2 * BANNER_MARGIN;
     const cx = safe.left + (cssW - safe.left - safe.right) / 2;
     if (comingW === 0) {
@@ -973,7 +998,14 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.font = BANNER_SUB_FONT;
       subW = bannerSub ? ctx.measureText(bannerSub).width : 0;
     }
-    const halfW = Math.min(maxW, coming ? comingW : Math.max(downW, subW)) / 2 + BANNER_MARGIN;
+    if (sc.goldName !== goldFor) {
+      goldFor = sc.goldName;
+      goldText = goldenBannerText(goldFor);
+      ctx.font = BANNER_FONT;
+      goldW = ctx.measureText(goldText).width;
+    }
+    const queenW = !queenShows ? 0 : coming ? comingW : Math.max(downW, subW);
+    const halfW = Math.min(maxW, Math.max(queenW, goldAlpha > 0 ? goldW : 0)) / 2 + BANNER_MARGIN;
     const hudBottom = hud.top + LINE_MIDDLE + barShift(sc) + LOST_BELOW + hudIconsShift(iconCount(sc.me)) + BANNER_MARGIN * 2;
     const y = bannerY(cssH, bannerFloor(cx, halfW, minimap.x, minimap.y + minimap.size + BANNER_MARGIN * 2, hudBottom, BANNER_MARGIN));
     ctx.textAlign = "center";
@@ -985,16 +1017,21 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
       ctx.globalAlpha = 0.75 + 0.25 * Math.sin(sc.t * TAU * 2);
       ctx.fillStyle = QUEEN_COLOUR;
       drawFitted(BANNER_COMING, comingW, BANNER_FONT, cx, y, maxW);
-      ctx.globalAlpha = 1;
-      return;
+    } else if (downAlpha > 0) {
+      ctx.globalAlpha = downAlpha;
+      ctx.fillStyle = QUEEN_COLOUR;
+      drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
+      if (bannerSub) {
+        ctx.fillStyle = TEXT_FILL;
+        ctx.lineWidth = 4;
+        drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+      }
     }
-    ctx.globalAlpha = downAlpha;
-    ctx.fillStyle = QUEEN_COLOUR;
-    drawFitted(BANNER_DOWN, downW, BANNER_FONT, cx, y, maxW);
-    if (bannerSub) {
-      ctx.fillStyle = TEXT_FILL;
-      ctx.lineWidth = 4;
-      drawFitted(bannerSub, subW, BANNER_SUB_FONT, cx, y + BANNER_SUB_BELOW, maxW);
+    if (goldAlpha > 0) {
+      ctx.globalAlpha = goldAlpha;
+      ctx.lineWidth = 5;
+      ctx.fillStyle = GOLD_COLOUR;
+      drawFitted(goldText, goldW, BANNER_FONT, cx, queenShows ? y + 2 * BANNER_SUB_BELOW : y, maxW);
     }
     ctx.globalAlpha = 1;
   }
@@ -1029,6 +1066,41 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.lineTo(-QUEEN_ARROW_LENGTH / 2, -QUEEN_ARROW_WIDTH / 2);
     ctx.lineTo(-QUEEN_ARROW_LENGTH / 4, 0);
     ctx.lineTo(-QUEEN_ARROW_LENGTH / 2, QUEEN_ARROW_WIDTH / 2);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /**
+   * The arrow at the screen's edge to the golden bug while it is off screen, at any distance
+   * (#122): gold, pulsing, kept below the minimap like the queen's.
+   */
+  function drawGoldenArrow(cam: Camera, g: SnapshotGolden, t: number): void {
+    if (g.length === 0) return;
+    arrowSafe.left = safe.left;
+    arrowSafe.right = safe.right;
+    arrowSafe.bottom = safe.bottom;
+    arrowSafe.top = Math.max(safe.top, minimap.y + minimap.size);
+    if (!edgeArrow(cam, cssW, cssH, arrowSafe, cam.x, cam.y, g[1], g[2], arrow, Infinity)) return;
+    ctx.save();
+    ctx.translate(arrow.x, arrow.y);
+    ctx.rotate(arrow.angle);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.5 + 0.2 * Math.sin(t * 6);
+    const h = GOLDEN_ARROW_LENGTH;
+    ctx.drawImage(glows[GLOW_GOLD]!, -h, -h, h * 2, h * 2);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = GOLD_COLOUR;
+    ctx.strokeStyle = TEXT_STROKE;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(GOLDEN_ARROW_LENGTH / 2, 0);
+    ctx.lineTo(-GOLDEN_ARROW_LENGTH / 2, -GOLDEN_ARROW_WIDTH / 2);
+    ctx.lineTo(-GOLDEN_ARROW_LENGTH / 4, 0);
+    ctx.lineTo(-GOLDEN_ARROW_LENGTH / 2, GOLDEN_ARROW_WIDTH / 2);
     ctx.closePath();
     ctx.stroke();
     ctx.fill();
@@ -1469,6 +1541,7 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     }
 
     drawQueenArrow(cam, sc.queen, t);
+    drawGoldenArrow(cam, sc.golden, t);
 
     const m = minimap;
     ctx.fillStyle = MINIMAP_FILL;
@@ -1484,8 +1557,8 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
     ctx.fillStyle = MINIMAP_BUG;
     const bugs = sc.bugs;
     for (let i = 0; i < bugs.count; i++) {
-      // A glob is a shot in flight, not a bug in the swarm: no dot.
-      if (bugs.kind[i] === GLOB_KIND) continue;
+      // A glob is a shot in flight, not a bug in the swarm: no dot. The golden bug has its own (#122).
+      if (bugs.kind[i] === GLOB_KIND || bugs.kind[i] === GOLDEN_KIND) continue;
       toMinimap(m, bugs.x[i]!, bugs.y[i]!, dot);
       ctx.fillRect(dot.x - 1, dot.y - 1, 2, 2);
     }
@@ -1531,6 +1604,19 @@ export function createArenaRenderer(ctx: CanvasRenderingContext2D) {
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = QUEEN_COLOUR;
       } else ctx.strokeStyle = QUEEN_COLOUR;
+      ctx.stroke();
+    }
+
+    // The golden bug (#122): a gold dot in a dark ring, over the players' dots, wherever it runs.
+    const g = sc.golden;
+    if (g.length === 3) {
+      toMinimap(m, g[1], g[2], dot);
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, GOLDEN_MAP_DOT * (1 + 0.15 * Math.sin(t * TAU * 2)), 0, TAU);
+      ctx.fillStyle = GOLD_COLOUR;
+      ctx.fill();
+      ctx.strokeStyle = TEXT_STROKE;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 

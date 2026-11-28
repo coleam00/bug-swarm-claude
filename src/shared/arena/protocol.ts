@@ -19,14 +19,15 @@ export const [WELCOME, SNAPSHOT, EVENT, ERROR] = SERVER_TYPES;
  * going down, a revive (who, by whom, the points; both v4), a pickup taken (who, and the pickup's
  * index in PICKUP_IDS), a test shield blocking a hit (whose; both v7) and a hive queen killed (v12,
  * #85: `id` the top damage dealer, 0 for none, and `paid` each rewarded player's id and points) and
- * a grenade thrown (v13, #130: `id` the thrower and `gr` its flight, so every page draws the same
+ * a golden bug killed (v13, #122: `id` the killer, for the banner every page in the arena shows) and
+ * a grenade thrown (v14, #130: `id` the thrower and `gr` its flight, so every page draws the same
  * flight, blink ring and blast from the GRENADE_* numbers).
  * Hits, kills and shots travel in snapshots, and so do who is down now (`d`), the pickups on the
  * floor (`f`) and the hive queen's marker or health (`q`), for a late joiner.
  */
-export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen", "grenade"] as const;
+export const EVENT_KINDS = ["join", "leave", "over", "down", "revive", "pickup", "block", "queen", "golden", "grenade"] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
-export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN, GRENADE] = EVENT_KINDS;
+export const [JOIN, LEAVE, OVER, DOWN, REVIVE, PICKUP, BLOCK, QUEEN, GOLDEN, GRENADE] = EVENT_KINDS;
 
 /**
  * Why the server closed the socket: a refused hello (version, name, team, no hello in time, or a
@@ -172,6 +173,12 @@ export type SnapshotPickup = [id: number, pickup: number, x: number, y: number, 
  * appears instead of the ticks left, and positions are whole units.
  */
 export type SnapshotQueen = [] | [stage: 0, x: number, y: number, ticksLeft: number] | [stage: 1, id: number, x: number, y: number, hp: number, maxHp: number];
+/**
+ * The golden bug (v13, #122): empty with none alive, else its bug id and where it is (whole units).
+ * Every recipient gets it, never culled to the view, so its gold minimap dot and edge arrow show
+ * wherever it runs.
+ */
+export type SnapshotGolden = [] | [id: number, x: number, y: number];
 
 /** Your own numbers, in your snapshots only. */
 export type SnapshotMe = {
@@ -232,6 +239,8 @@ export type Snapshot = {
   w: number;
   /** The hive queen's marker or health (v12, #85), never culled. */
   q: SnapshotQueen;
+  /** The golden bug (v13, #122), never culled. */
+  g: SnapshotGolden;
   me: SnapshotMe;
   /**
    * On keyframes only (v11): every bug outside your view square, globs left out, as minimap cells
@@ -275,6 +284,7 @@ export type WireSnapshot = {
   d?: number[][];
   w?: number;
   q?: number[];
+  g?: number[];
   me?: Partial<SnapshotMe>;
   m?: number[];
   gb?: number[];
